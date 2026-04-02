@@ -1,4 +1,7 @@
+import sys
+sys.path.insert(0, "/Users/corey/vs-code/cloudvision-mcp")
 from cloudvision.Connector.grpc_client import GRPCClient, create_query
+from cloudvision_mcp import _normalize_api_token
 import logging
 import json
 
@@ -65,9 +68,7 @@ def conn_get_info_bugs(datadict, bug_ids):
     if cvp and ":" not in cvp:
         cvp = f"{cvp}:443"
     cv_addr = cvp
-    token = (datadict.get("cvtoken") or "").strip()
-    if token.lower().startswith("bearer "):
-        token = token[7:].strip()
+    token = _normalize_api_token(datadict.get("cvtoken"))
     with GRPCClient(grpcAddr=cv_addr, tokenValue=token) as client:
         for bugId in bug_ids:
             pathElts = [

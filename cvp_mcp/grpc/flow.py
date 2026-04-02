@@ -8,8 +8,11 @@ Path shape: /Clover/flows/v1/path and per-flow children .../path/{index}
 from __future__ import annotations
 
 import logging
+import sys
 
+sys.path.insert(0, "/Users/corey/vs-code/cloudvision-mcp")
 from cloudvision.Connector.grpc_client import GRPCClient
+from cloudvision_mcp import _normalize_api_token
 
 from cvp_mcp.grpc.connector import get, serialize_cloudvision_data
 from cvp_mcp.grpc.models import FlowRecord
@@ -41,9 +44,7 @@ def conn_get_flow_data(datadict, device_id=None, flow_index=None):
     cvp = (datadict.get("cvp") or "").strip()
     if cvp and ":" not in cvp:
         cvp = f"{cvp}:443"
-    token = (datadict.get("cvtoken") or "").strip()
-    if token.lower().startswith("bearer "):
-        token = token[7:].strip()
+    token = _normalize_api_token(datadict.get("cvtoken"))
 
     path = list(FLOW_BASE_PATH)
     if flow_index is not None and str(flow_index) != "":

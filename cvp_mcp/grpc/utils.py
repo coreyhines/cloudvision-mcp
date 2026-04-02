@@ -1,4 +1,10 @@
 import grpc
+import os
+import sys
+
+sys.path.insert(0, "/Users/corey/vs-code/cloudvision-mcp")
+from cloudvision_mcp import _normalize_api_token
+
 from .models import (
     SwitchInfo,
     ProbeStats,
@@ -44,15 +50,13 @@ def datetime_to_readable_format(dt, format_type="full"):
 
 def createConnection(datadict):
     # datadict = get_env_vars()
-    token = (datadict.get("cvtoken") or "").strip()
-    if token.lower().startswith("bearer "):
-        token = token[7:].strip()
+    token = _normalize_api_token(datadict.get("cvtoken"))
     callCreds = grpc.access_token_call_credentials(token)
 
     cert_path = datadict.get("cert")
     if cert_path:
         cert_path = cert_path.strip()
-    if cert_path:
+    if cert_path and os.path.exists(cert_path):
         with open(cert_path, "rb") as f:
             cert = f.read()
         channelCreds = grpc.ssl_channel_credentials(root_certificates=cert)

@@ -37,17 +37,22 @@ def datetime_to_readable_format(dt, format_type="full"):
     
 def createConnection(datadict):
     # datadict = get_env_vars()
-    # create the header object for the token
-    callCreds = grpc.access_token_call_credentials(datadict['cvtoken'])
+    token = (datadict.get("cvtoken") or "").strip()
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
+    callCreds = grpc.access_token_call_credentials(token)
 
-    if datadict["cert"]:
-        with open(datadict["cert"], "rb") as f:
+    cert_path = datadict.get("cert")
+    if cert_path:
+        cert_path = cert_path.strip()
+    if cert_path:
+        with open(cert_path, "rb") as f:
             cert = f.read()
         channelCreds = grpc.ssl_channel_credentials(root_certificates=cert)
     else:
         channelCreds = grpc.ssl_channel_credentials()
     connCreds = grpc.composite_channel_credentials(channelCreds, callCreds)
-    return(connCreds)
+    return connCreds
 
 def serialize_repeated_int32(repeated_int32):
      # Convert RepeatedInt32 to a list of integers

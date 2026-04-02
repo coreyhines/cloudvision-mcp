@@ -17,6 +17,47 @@ import sys
 import logging
 import os
 
+
+def _normalize_api_token(token: str | None) -> str:
+    """Strip whitespace and optional Bearer prefix from CVPTOKEN (env-file safe)."""
+    if not token:
+        return ""
+    token = token.strip()
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
+    return token
+
+
+def _normalize_cvp_endpoint(cvp: str | None) -> str:
+    """
+    Strip URL scheme/path; ensure host:443 for gRPC (matches Arista CVP examples).
+    """
+    if not cvp:
+        return ""
+    cvp = cvp.strip()
+    for prefix in ("https://", "http://"):
+        if cvp.startswith(prefix):
+            cvp = cvp[len(prefix) :]
+    cvp = cvp.split("/")[0]
+    if ":" not in cvp:
+        cvp = f"{cvp}:443"
+    return cvp
+
+
+def _resolve_cert_path(certfile: str | None) -> str | None:
+    if not certfile:
+        return None
+    certfile = certfile.strip()
+    if not certfile:
+        return None
+    if os.path.isabs(certfile):
+        return certfile
+    root = os.environ.get("CLOUDVISION_MCP_INSTALL_ROOT", "").strip()
+    if root:
+        return os.path.join(root, certfile)
+    return certfile
+
+
 CVP_TRANSPORT = "grpc"
 
 logging.basicConfig(
@@ -36,11 +77,11 @@ mcp = FastMCP(
 
 #async function to return creds
 def get_env_vars():
-    cvp = os.environ.get("CVP")
-    cvtoken = os.environ.get("CVPTOKEN")
-    certfile = os.environ.get("CERT")
+    cvp = _normalize_cvp_endpoint(os.environ.get("CVP"))
+    cvtoken = _normalize_api_token(os.environ.get("CVPTOKEN"))
+    certfile = _resolve_cert_path(os.environ.get("CERT"))
     datadict = {}
-    datadict['cvtoken'] = cvtoken
+    datadict["cvtoken"] = cvtoken
     datadict["cvp"] = cvp
     datadict["cert"] = certfile
     return datadict

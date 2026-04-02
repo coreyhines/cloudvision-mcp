@@ -109,7 +109,7 @@ def get_cvp_one_device(device_id) -> str:
     """
     Prints out information about a single device in CVP
     For one switch it gets the serial number, system mac address,
-    hostname, EOS version, streaming status, device type, harware revision,
+    hostname, EOS version, streaming status, device type, hardware revision,
     FQDN, domain name, and model
     """
     datadict = get_env_vars()
@@ -133,7 +133,7 @@ def get_cvp_all_inventory() -> dict:
     """
     Grabs all switches and devices from CloudVision (CVP)
     For all devices it gets the serial number, system mac address,
-    hostname, EOS version, streaming status, device type, harware revision,
+    hostname, EOS version, streaming status, device type, hardware revision,
     FQDN, domain name, and model
     """
     datadict = get_env_vars()
@@ -167,7 +167,7 @@ def get_cvp_all_bugs() -> dict:
     list of CVE IDs, bug count, cve count and the highest exposure to bugs and CVEs.
     This will also get switches based on the found serial numbers in the bug report,
     It will get  the serial number, system mac address,
-    hostname, EOS version, streaming status, device type, harware revision,
+    hostname, EOS version, streaming status, device type, hardware revision,
     FQDN, domain name, and model
     """
     all_data = {}
@@ -210,7 +210,7 @@ def get_cvp_all_bugs() -> dict:
 
 
 # ===================================================
-# Commectivty Monitor Based Tools
+# Connectivity Monitor Based Tools
 # ===================================================
 
 

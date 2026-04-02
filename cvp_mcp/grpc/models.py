@@ -21,7 +21,7 @@ class BugExposure(TypedDict):
     bug_count: int
     cve_count: int
     highest_cve_exposure: str
-    highest_but_exposure: str
+    highest_bug_exposure: str
 
 
 class ProbeStats(TypedDict):

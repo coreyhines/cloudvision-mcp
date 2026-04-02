@@ -27,7 +27,7 @@ def serialize_cloudvision_data(data):
     return(converted)
 
 def get(client, dataset, pathElts):
-    ''' Returns a query on a path element'''
+     ''' Return a query on a path element'''
     result = {}
     query = [
         create_query([(pathElts, [])], dataset)

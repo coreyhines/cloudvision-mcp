@@ -13,7 +13,7 @@ def grpc_all_bug_exposure(channel):
     """
     Gets all bugs in CVP
     """
-    all_bugs= []
+    all_bugs = []
     # create the Python stub for the inventory API
     # this is essentially the client, but Python gRPC refers to them as "stubs"
     # because they call into the gRPC C API
@@ -46,16 +46,16 @@ def grpc_all_bug_exposure(channel):
                 for id in bug.value.bug_ids.values:
                     ids = int(id)
                 bug_exposure = BugExposure(
-                    serial_number = bug.value.key.device_id.value,
-                    bug_ids = serialize_repeated_int32(bug.value.bug_ids.values),
-                    cve_ids = serialize_repeated_int32(bug.value.cve_ids.values),
-                    bug_count = bug.value.bug_count.value,
-                    cve_count = bug.value.cve_count.value,
-                    highest_cve_exposure = highest_cve,
-                    highest_bug_exposre = highest_bug
+                    serial_number=bug.value.key.device_id.value,
+                    bug_ids=serialize_repeated_int32(bug.value.bug_ids.values),
+                    cve_ids=serialize_repeated_int32(bug.value.cve_ids.values),
+                    bug_count=bug.value.bug_count.value,
+                    cve_count=bug.value.cve_count.value,
+                    highest_cve_exposure=highest_cve,
+                    highest_bug_exposure=highest_bug,
                 )
                 all_bugs.append(bug_exposure)
         except Exception as e:
             logging.error(f"Error with device: {e}")
-    return(all_bugs)
+    return all_bugs
     # return(json.dumps(all_devices))

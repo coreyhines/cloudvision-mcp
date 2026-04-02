@@ -1,13 +1,17 @@
 #!/usr/bin/python3
 
 from mcp.server.fastmcp import FastMCP
-from typing import TypedDict, Optional
+from typing import Optional
 from cvp_mcp.grpc.inventory import grpc_all_inventory, grpc_one_inventory_serial
 from cvp_mcp.grpc.bugs import grpc_all_bug_exposure
 from cvp_mcp.grpc.monitor import grpc_all_probe_status, grpc_one_probe_status
 from cvp_mcp.grpc.lifecycle import grpc_all_device_lifecycle
-from cvp_mcp.grpc.endpoint import grpc_one_endpoint_location
-from cvp_mcp.grpc.models import SwitchInfo, BugExposure, DeviceLifecycleSummary
+from cvp_mcp.grpc.endpoint import (
+    grpc_all_endpoint_locations,
+    grpc_endpoints_by_filter,
+    grpc_one_endpoint_location,
+)
+from cvp_mcp.grpc.flow import conn_get_flow_data
 from cvp_mcp.grpc.connector import conn_get_info_bugs
 from cvp_mcp.grpc.utils import createConnection
 import argparse
@@ -61,21 +65,17 @@ def _resolve_cert_path(certfile: str | None) -> str | None:
 CVP_TRANSPORT = "grpc"
 
 logging.basicConfig(
-    level=logging.INFO,                # Minimum log level
-    format='%(asctime)s - %(levelname)s - %(message)s'  # Log message format
+    level=logging.INFO,  # Minimum log level
+    format="%(asctime)s - %(levelname)s - %(message)s",  # Log message format
 )
 
-logging.info('Starting the FastMCP server...')
+logging.info("Starting the FastMCP server...")
 
 # Initialize FastMCP server
-mcp = FastMCP(
-    name = "CVP MCP Server",
-    host = "0.0.0.0",
-    stateless_http = True
-)
+mcp = FastMCP(name="CVP MCP Server", host="0.0.0.0", stateless_http=True)
 
 
-#async function to return creds
+# async function to return creds
 def get_env_vars():
     cvp = _normalize_cvp_endpoint(os.environ.get("CVP"))
     cvtoken = _normalize_api_token(os.environ.get("CVPTOKEN"))
@@ -86,9 +86,11 @@ def get_env_vars():
     datadict["cert"] = certfile
     return datadict
 
+
 # ===================================================
 # Inventory Based Tools
 # ===================================================
+
 
 @mcp.tool()
 def get_cvp_one_device(device_id) -> str:
@@ -111,8 +113,9 @@ def get_cvp_one_device(device_id) -> str:
     except Exception as e:
         logging.error(e)
     logging.debug(json.dumps(device, indent=2))
-    return(json.dumps(device, indent=2))
-    
+    return json.dumps(device, indent=2)
+
+
 @mcp.tool()
 def get_cvp_all_inventory() -> dict:
     """
@@ -134,13 +137,15 @@ def get_cvp_all_inventory() -> dict:
         case "http":
             logging.info("CVP HTTP Request for all devices")
             all_devices = ""
-    logging.debug(json.dumps(all_devices))    
+    logging.debug(json.dumps(all_devices))
     # return(json.dumps(all_devices, indent=2))
-    return(all_devices)
+    return all_devices
+
 
 # ===================================================
 # Bug Based Tools
 # ===================================================
+
 
 @mcp.tool()
 def get_cvp_all_bugs() -> dict:
@@ -169,30 +174,33 @@ def get_cvp_all_bugs() -> dict:
                         for id in bug["bug_ids"]:
                             if id not in all_bug_ids:
                                 all_bug_ids.append(id)
-                        device = grpc_one_inventory_serial(channel, bug["serial_number"])
+                        device = grpc_one_inventory_serial(
+                            channel, bug["serial_number"]
+                        )
                         if device:
                             all_devices.append(device)
         case "http":
             logging.info("HTTP Transport to get all bugs")
             all_bugs = ""
-    logging.debug(json.dumps(all_bugs))    
+    logging.debug(json.dumps(all_bugs))
     # Grab information about each bug
     all_bug_info = conn_get_info_bugs(datadict, all_bug_ids)
     all_data["bug_info"] = all_bug_info
-    all_data['bugs'] = all_bugs
-    all_data['devices'] = all_devices
+    all_data["bugs"] = all_bugs
+    all_data["devices"] = all_devices
     try:
         logging.debug(f"Bug Data: {type(all_data['bug_info'])} {all_data['bug_info']}")
         logging.debug(f"All data: {json.dumps(all_data)}")
     except Exception as y:
         logging.error(y)
     # return(json.dumps(all_data, indent=2))
-    return(all_data)
+    return all_data
 
 
 # ===================================================
 # Commectivty Monitor Based Tools
 # ===================================================
+
 
 @mcp.tool()
 def get_cvp_all_connectivity_probes() -> dict:
@@ -208,33 +216,37 @@ def get_cvp_all_connectivity_probes() -> dict:
         case "grpc":
             connCreds = createConnection(datadict)
             with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                all_probes= grpc_all_probe_status(channel)
+                all_probes = grpc_all_probe_status(channel)
                 # Gather information about the source switches for analytics
                 for probe in all_probes:
-                    serial_number = probe['serial_number']
+                    serial_number = probe["serial_number"]
                     if serial_number not in all_devices.keys():
-                        all_devices[serial_number] = grpc_one_inventory_serial(channel, serial_number)
+                        all_devices[serial_number] = grpc_one_inventory_serial(
+                            channel, serial_number
+                        )
         case "http":
             logging.info("CVP HTTP Request for all devices")
             all_devices = ""
-    all_data['devices'] = all_devices
-    all_data['probes'] = all_probes
-    logging.debug(json.dumps(all_data))    
+    all_data["devices"] = all_devices
+    all_data["probes"] = all_probes
+    logging.debug(json.dumps(all_data))
     # return(json.dumps(all_data, indent=2))
-    return(all_data)
+    return all_data
+
 
 @mcp.tool()
 def get_cvp_one_connectivity_probe(
     serial_number: Optional[str] = None,
     endpoint: Optional[str] = None,
     vrf: Optional[str] = None,
-    source_interface: Optional[str] = None) -> str:
+    source_interface: Optional[str] = None,
+) -> str:
     """
     Prints out information about a single device in CVP
     Displays latency, jitter, http response time and packet loss
     """
     datadict = get_env_vars()
-    logging.debug(f"CVP Get One Probe State")
+    logging.debug("CVP Get One Probe State")
     all_data = {}
     all_devices = {}
     try:
@@ -242,28 +254,33 @@ def get_cvp_one_connectivity_probe(
             case "grpc":
                 connCreds = createConnection(datadict)
                 with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    probes = grpc_one_probe_status(channel, serial_number, endpoint, vrf, source_interface)
+                    probes = grpc_one_probe_status(
+                        channel, serial_number, endpoint, vrf, source_interface
+                    )
                     for _probe in probes:
                         logging.debug(f"MON S/n: {_probe['serial_number']}")
-                        serial_number = _probe['serial_number']
-                        if serial_number  not in all_devices.keys():
-                            all_devices[serial_number]= grpc_one_inventory_serial(channel, serial_number)
-                    all_data['probes'] = probes
-                    all_data['devices'] = all_devices
+                        serial_number = _probe["serial_number"]
+                        if serial_number not in all_devices.keys():
+                            all_devices[serial_number] = grpc_one_inventory_serial(
+                                channel, serial_number
+                            )
+                    all_data["probes"] = probes
+                    all_data["devices"] = all_devices
             case "http":
-                device = ""
+                pass
     except Exception as e:
         logging.error(e)
     logging.debug(json.dumps(all_data, indent=2))
-    return(json.dumps(all_data, indent=2))
+    return json.dumps(all_data, indent=2)
 
 
 # ===================================================
 # Device Lifecycle Based Tools
 # ===================================================
 
+
 @mcp.tool()
-def get_cvp_all_device_lifecycle()-> dict:
+def get_cvp_all_device_lifecycle() -> dict:
     """
     Gets all device lifecycle from CVP
     Displays information about switch software end of life,
@@ -280,24 +297,28 @@ def get_cvp_all_device_lifecycle()-> dict:
                 all_lifecycle = grpc_all_device_lifecycle(channel)
                 # Gather information about the source switches for analytics
                 for _lifecycle in all_lifecycle:
-                    serial_number = _lifecycle['serial_number']
+                    serial_number = _lifecycle["serial_number"]
                     if serial_number not in all_devices.keys():
-                        all_devices[serial_number] = grpc_one_inventory_serial(channel, serial_number)
+                        all_devices[serial_number] = grpc_one_inventory_serial(
+                            channel, serial_number
+                        )
         case "http":
             logging.info("CVP HTTP Request for all devices")
             all_devices = ""
-    all_data['devices'] = all_devices
-    all_data['lifecycle'] = all_lifecycle
-    logging.debug(json.dumps(all_data))    
+    all_data["devices"] = all_devices
+    all_data["lifecycle"] = all_lifecycle
+    logging.debug(json.dumps(all_data))
     # return(json.dumps(all_data, indent=2))
-    return(all_data)
+    return all_data
+
 
 # ===================================================
 # Endpoint Location  Based Tools
 # ===================================================
 
+
 @mcp.tool()
-def get_cvp_endpoint_location(search_term: str)-> dict:
+def get_cvp_endpoint_location(search_term: str) -> dict:
     """
     Gets all endpoint locations from CVP for a user device, or connected endpoint
      based on a query of MAC, IP or hostname
@@ -316,20 +337,115 @@ def get_cvp_endpoint_location(search_term: str)-> dict:
                 all_endpoints = grpc_one_endpoint_location(channel, search_term)
                 # Gather information about the source switches for analytics
                 for _endpoint in all_endpoints:
-                    _endpoint = _endpoint[0]
                     logging.debug(f"END FOR: {_endpoint} - {_endpoint.keys()}")
                     for _device in _endpoint["location_list"]:
-                        serial_number = _device['device_id']['value']
+                        serial_number = _device["device_id"]["value"]
                         if serial_number not in all_devices.keys():
-                            all_devices[serial_number] = grpc_one_inventory_serial(channel, serial_number)
+                            all_devices[serial_number] = grpc_one_inventory_serial(
+                                channel, serial_number
+                            )
         case "http":
             logging.info("CVP HTTP Request for all devices")
             all_devices = ""
-    all_data['devices'] = all_devices
-    all_data['endpoints'] = all_endpoints
-    logging.debug(json.dumps(all_data))    
+    all_data["devices"] = all_devices
+    all_data["endpoints"] = all_endpoints
+    logging.debug(json.dumps(all_data))
     # return(json.dumps(all_data, indent=2))
-    return(all_data)
+    return all_data
+
+
+@mcp.tool()
+def get_cvp_all_endpoint_locations() -> dict:
+    """Streams all endpoint locations from CVP. Returns all known endpoints
+    with MAC, IP, hostname, and their switch attachment locations (device + interface + VLAN).
+    """
+    datadict = get_env_vars()
+    all_devices = {}
+    all_data = {}
+    logging.info("CVP Get All Endpoint Locations")
+    all_endpoints = []
+    match CVP_TRANSPORT:
+        case "grpc":
+            connCreds = createConnection(datadict)
+            with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
+                all_endpoints = grpc_all_endpoint_locations(channel)
+                for _endpoint in all_endpoints:
+                    for _device in _endpoint["location_list"]:
+                        serial_number = _device["device_id"]["value"]
+                        if serial_number not in all_devices:
+                            all_devices[serial_number] = grpc_one_inventory_serial(
+                                channel, serial_number
+                            )
+        case "http":
+            logging.info("CVP HTTP Request for all devices")
+            all_devices = ""
+    all_data["devices"] = all_devices
+    all_data["endpoints"] = all_endpoints
+    return all_data
+
+
+@mcp.tool()
+def get_cvp_endpoint_locations_filtered(
+    device_id: Optional[str] = None,
+    interface: Optional[str] = None,
+    vlan_id: Optional[int] = None,
+) -> dict:
+    """Filters endpoint locations by switch serial number, interface name (e.g. 'Ethernet1'),
+    or VLAN ID. Provide at least one filter. Filtering is applied client-side."""
+    datadict = get_env_vars()
+    all_devices = {}
+    all_data = {}
+    logging.info(
+        f"CVP Get Filtered Endpoint Locations: device={device_id} intf={interface} vlan={vlan_id}"
+    )
+    if device_id is None and interface is None and vlan_id is None:
+        logging.warning(
+            "get_cvp_endpoint_locations_filtered called with no filters; "
+            "this may return a large result set."
+        )
+    all_endpoints = []
+    match CVP_TRANSPORT:
+        case "grpc":
+            connCreds = createConnection(datadict)
+            with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
+                all_endpoints = grpc_endpoints_by_filter(
+                    channel, device_id, interface, vlan_id
+                )
+                for _endpoint in all_endpoints:
+                    for _device in _endpoint["location_list"]:
+                        serial_number = _device["device_id"]["value"]
+                        if serial_number not in all_devices:
+                            all_devices[serial_number] = grpc_one_inventory_serial(
+                                channel, serial_number
+                            )
+        case "http":
+            logging.info("CVP HTTP Request for all devices")
+            all_devices = ""
+    all_data["devices"] = all_devices
+    all_data["endpoints"] = all_endpoints
+    return all_data
+
+
+# ===================================================
+# Flow Data Tools
+# ===================================================
+
+
+@mcp.tool()
+def get_cvp_flow_data(
+    device_id: Optional[str] = None,
+    flow_index: Optional[int] = None,
+) -> dict:
+    """Retrieves Clover flow records from CloudVision analytics (/Clover/flows/v1/path/...).
+    flow_index: optional integer path suffix (e.g. 0 for .../path/0); omit to query the parent path.
+    device_id: optional switch serial; keeps only records whose node matches that device.
+    Returns flow records with src/dst IPs, ports, protocol, bytes/packets, and interfaces.
+    """
+    datadict = get_env_vars()
+    logging.info(f"CVP Get Flow Data: device={device_id} flow_index={flow_index}")
+    flows = conn_get_flow_data(datadict, device_id, flow_index)
+    return {"flows": flows}
+
 
 def main(args):
     """Entry point for the direct execution server."""
@@ -356,11 +472,37 @@ def main(args):
     else:
         mcp.run(transport="stdio")
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-t", "--transport", type=str, help="MCP Transport method", default="http", choices=["http", "stdio"], required=False)
-    parser.add_argument("-p", "--port", type=int, help="Port to run the Streamable HTTP Server", default=8000, required=False)
-    parser.add_argument("-c", "--cvp", type=str, help="CVP Connection protocol", choices=["grpc", "http"], default="grpc", required=False)
-    parser.add_argument("-d", "--debug", help="Enable debug logging", action="store_true")
+    parser.add_argument(
+        "-t",
+        "--transport",
+        type=str,
+        help="MCP Transport method",
+        default="http",
+        choices=["http", "stdio"],
+        required=False,
+    )
+    parser.add_argument(
+        "-p",
+        "--port",
+        type=int,
+        help="Port to run the Streamable HTTP Server",
+        default=8000,
+        required=False,
+    )
+    parser.add_argument(
+        "-c",
+        "--cvp",
+        type=str,
+        help="CVP Connection protocol",
+        choices=["grpc", "http"],
+        default="grpc",
+        required=False,
+    )
+    parser.add_argument(
+        "-d", "--debug", help="Enable debug logging", action="store_true"
+    )
     args = parser.parse_args()
     main(args)

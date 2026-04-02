@@ -22,4 +22,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["cvp_mcp"]
 
+[tool.ruff.lint.per-file-ignores]
+"cvp_mcp/grpc/__init__.py" = ["F401"]
 

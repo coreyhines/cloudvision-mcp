@@ -14,6 +14,7 @@ from cvp_mcp.grpc.endpoint import (
 from cvp_mcp.grpc.flow import conn_get_flow_data
 from cvp_mcp.grpc.connector import conn_get_info_bugs
 from cvp_mcp.grpc.utils import createConnection
+from cvp_mcp.grpc.hostname_resolve import resolve_endpoint_query
 import argparse
 import grpc
 import json
@@ -85,6 +86,17 @@ def get_env_vars():
     datadict["cvp"] = cvp
     datadict["cert"] = certfile
     return datadict
+
+
+def _endpoint_search_queries(search_term: str) -> list[str]:
+    """Try resolved IP first, then the raw string (CVP may index by hostname or IP)."""
+    st = (search_term or "").strip()
+    if not st:
+        return [st]
+    resolved = resolve_endpoint_query(st)
+    if resolved != st:
+        return [resolved, st]
+    return [st]
 
 
 # ===================================================
@@ -243,20 +255,35 @@ def get_cvp_one_connectivity_probe(
 ) -> str:
     """
     Prints out information about a single device in CVP
-    Displays latency, jitter, http response time and packet loss
+    Displays latency, jitter, http response time and packet loss.
+    If ``endpoint`` is a hostname/FQDN, it is resolved to an IP (DNS) before
+    querying probe stats, matching how OPNsense MCP resolves names before API calls.
     """
     datadict = get_env_vars()
     logging.debug("CVP Get One Probe State")
     all_data = {}
     all_devices = {}
+    probe_hosts: list[str] = [""]
+    if endpoint and endpoint.strip():
+        raw_ep = endpoint.strip()
+        resolved_ep = resolve_endpoint_query(raw_ep)
+        probe_hosts = [resolved_ep, raw_ep] if resolved_ep != raw_ep else [raw_ep]
     try:
         match CVP_TRANSPORT:
             case "grpc":
                 connCreds = createConnection(datadict)
                 with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    probes = grpc_one_probe_status(
-                        channel, serial_number, endpoint, vrf, source_interface
-                    )
+                    probes: list = []
+                    for host_key in probe_hosts:
+                        probes = grpc_one_probe_status(
+                            channel,
+                            serial_number or "",
+                            host_key,
+                            vrf or "",
+                            source_interface or "",
+                        )
+                        if probes:
+                            break
                     for _probe in probes:
                         logging.debug(f"MON S/n: {_probe['serial_number']}")
                         serial_number = _probe["serial_number"]
@@ -325,16 +352,23 @@ def get_cvp_endpoint_location(search_term: str) -> dict:
     Displays information about endpoint device location, ip address
     mac address. This will also convert the switch serial number hostname and get information
     of the switch.
+    Hostname/FQDN inputs are resolved via DNS to an IP before querying CVP when needed
+    (same idea as OPNsense MCP resolve-then-query); if the IP lookup returns nothing,
+    the original search term is tried as a fallback.
     """
     datadict = get_env_vars()
     all_devices = {}
     all_data = {}
+    all_endpoints = []
     logging.info("CVP Get Endpoint Location")
     match CVP_TRANSPORT:
         case "grpc":
             connCreds = createConnection(datadict)
             with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                all_endpoints = grpc_one_endpoint_location(channel, search_term)
+                for q in _endpoint_search_queries(search_term):
+                    all_endpoints = grpc_one_endpoint_location(channel, q)
+                    if all_endpoints:
+                        break
                 # Gather information about the source switches for analytics
                 for _endpoint in all_endpoints:
                     logging.debug(f"END FOR: {_endpoint} - {_endpoint.keys()}")

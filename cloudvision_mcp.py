@@ -123,7 +123,8 @@ def get_cvp_one_device(device_id) -> str:
             case "http":
                 device = ""
     except Exception as e:
-        logging.error(e)
+        logging.error(f"Error fetching device {device_id}: {e}")
+        return '{"error": "Device fetch failed"}'
     logging.debug(json.dumps(device, indent=2))
     return json.dumps(device, indent=2)
 
@@ -148,7 +149,7 @@ def get_cvp_all_inventory() -> dict:
                 all_devices["streaming_inactive"] = all_inactive
         case "http":
             logging.info("CVP HTTP Request for all devices")
-            all_devices = ""
+            all_devices = {}
     logging.debug(json.dumps(all_devices))
     # return(json.dumps(all_devices, indent=2))
     return all_devices
@@ -193,7 +194,7 @@ def get_cvp_all_bugs() -> dict:
                             all_devices.append(device)
         case "http":
             logging.info("HTTP Transport to get all bugs")
-            all_bugs = ""
+            all_bugs = {}
     logging.debug(json.dumps(all_bugs))
     # Grab information about each bug
     all_bug_info = conn_get_info_bugs(datadict, all_bug_ids)
@@ -204,7 +205,8 @@ def get_cvp_all_bugs() -> dict:
         logging.debug(f"Bug Data: {type(all_data['bug_info'])} {all_data['bug_info']}")
         logging.debug(f"All data: {json.dumps(all_data)}")
     except Exception as y:
-        logging.error(y)
+        logging.error(f"Error processing bug data: {y}")
+        return '{"error": "Bug data processing failed"}'
     # return(json.dumps(all_data, indent=2))
     return all_data
 
@@ -296,7 +298,8 @@ def get_cvp_one_connectivity_probe(
             case "http":
                 pass
     except Exception as e:
-        logging.error(e)
+        logging.error(f"Error in lifecycle flow: {e}")
+        return '{"error": "Lifecycle fetch failed"}'
     logging.debug(json.dumps(all_data, indent=2))
     return json.dumps(all_data, indent=2)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -22,6 +23,7 @@ from cvp_mcp.grpc.inventory import grpc_one_inventory_serial
 from cvp_mcp.grpc.uri_fetch import (
     fetch_uri_with_bearer,
     get_json_with_bearer,
+    post_json_many_with_bearer_async,
     post_raw_with_bearer,
 )
 from cvp_mcp.grpc.utils import RPC_TIMEOUT, serialize_arista_protobuf
@@ -86,43 +88,84 @@ def _fetch_running_config_from_compliance_rest(
 
     now = datetime.now(UTC)
     now_ns = int(now.timestamp() * 1_000_000_000)
-    raw_bodies: list[tuple[str, str]] = []
+    payloads: list[Any] = []
     for serial in ids:
-        # Service endpoint expects top-level string input.
-        canonical_req = {
+        request_obj = {
             "device_id": serial,
             "timestamp": now_ns,
             "type": "RUNNING_CONFIG",
         }
-        raw_bodies.extend(
+        payloads.extend(
             [
-                (serial, "text/plain"),
-                (json.dumps(serial), "application/json"),
-                (json.dumps(canonical_req), "text/plain"),
+                serial,
+                request_obj,
+                {"request": request_obj},
             ]
         )
 
-    # Service endpoint expects string input; do not send object payloads.
-    last_err = "unknown_error"
-    for raw_body, ctype in raw_bodies:
+    def _configs_from_compliance_response(obj: Any) -> list[str]:
+        configs: list[str] = []
+        if isinstance(obj, list):
+            for row in obj:
+                configs.extend(_configs_from_compliance_response(row))
+            return configs
+        if isinstance(obj, dict):
+            c = obj.get("config")
+            if isinstance(c, str) and c.strip():
+                configs.append(c)
+            if isinstance(c, dict):
+                cv = c.get("value")
+                if isinstance(cv, str) and cv.strip():
+                    configs.append(cv)
+            for v in obj.values():
+                configs.extend(_configs_from_compliance_response(v))
+            return configs
+        return configs
+
+    # Preferred path: async service calls with json=payload.
+    try:
+        objs, async_err = asyncio.run(
+            post_json_many_with_bearer_async(
+                url,
+                payloads,
+                token,
+                cafile=cafile,
+            )
+        )
+    except RuntimeError:
+        objs, async_err = [], "event_loop_running"
+
+    last_err = async_err or "no_config_in_response"
+    for obj in objs:
+        if obj is None:
+            continue
+        for cfg in _configs_from_compliance_response(obj):
+            if _looks_like_eos_running_config(cfg):
+                return cfg, None
+        hit = _extract_running_config_text(obj)
+        if hit:
+            return hit, None
+
+    # Sync fallback only when async path yields no usable config.
+    for payload in payloads:
+        body = json.dumps(payload) if not isinstance(payload, str) else payload
+        ctype = "application/json" if not isinstance(payload, str) else "text/plain"
         raw_resp, raw_err = post_raw_with_bearer(
-            url,
-            raw_body,
-            token,
-            cafile=cafile,
-            content_type=ctype,
+            url, body, token, cafile=cafile, content_type=ctype
         )
         if raw_err:
             last_err = raw_err
             continue
-        hit = _extract_running_config_text(raw_resp)
+        try:
+            parsed = json.loads(raw_resp or "")
+        except Exception:
+            parsed = raw_resp
+        for cfg in _configs_from_compliance_response(parsed):
+            if _looks_like_eos_running_config(cfg):
+                return cfg, None
+        hit = _extract_running_config_text(parsed)
         if hit:
             return hit, None
-        if raw_resp and _looks_like_eos_running_config(raw_resp):
-            return raw_resp, None
-        if raw_resp and "hostname " in raw_resp:
-            return raw_resp, None
-        last_err = "raw_no_config_in_response"
     return None, last_err
 
 

@@ -208,7 +208,7 @@ def post_raw_with_bearer(
 
 async def post_json_many_with_bearer_async(
     uri: str,
-    payloads: list[dict[str, Any]],
+    payloads: list[Any],
     bearer_token: str,
     *,
     cafile: str | None = None,
@@ -231,11 +231,14 @@ async def post_json_many_with_bearer_async(
         "Accept": "application/json",
     }
     results: list[dict | list | None] = [None] * len(payloads)
+    errors: list[str] = []
 
-    async def _one(session: aiohttp.ClientSession, idx: int, payload: dict[str, Any]):
+    async def _one(session: aiohttp.ClientSession, idx: int, payload: Any):
         try:
             async with session.post(uri.strip(), json=payload, ssl=ssl_ctx) as resp:
                 if resp.status >= 400:
+                    body = (await resp.text())[:200].replace("\n", "\\n")
+                    errors.append(f"http_error:{resp.status}:{body}")
                     return idx, None
                 text = await resp.text()
                 if len(text.encode("utf-8", errors="ignore")) > max_bytes:
@@ -253,6 +256,8 @@ async def post_json_many_with_bearer_async(
             done = await asyncio.gather(*tasks, return_exceptions=False)
             for idx, obj in done:
                 results[idx] = obj
+            if errors:
+                return results, errors[-1]
             return results, None
     except Exception as e:
         logging.error("POST async error: %s %s", uri, e)

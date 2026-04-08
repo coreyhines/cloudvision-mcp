@@ -145,39 +145,27 @@ async def get_config(
     device: str,
     timestamp: int,
 ) -> tuple[str | None, str | None]:
-    payloads: list[Any] = [
-        {
-            "request": {
-                "device_id": device,
-                "timestamp": timestamp,
-                "type": "RUNNING_CONFIG",
-            }
-        },
-        {
+    payload: dict[str, Any] = {
+        "request": {
             "device_id": device,
             "timestamp": timestamp,
             "type": "RUNNING_CONFIG",
-        },
-        {"request": {"device_id": device, "type": "RUNNING_CONFIG"}},
-    ]
-    last_err: str | None = None
-    for payload in payloads:
-        try:
-            async with session.post(url, json=payload) as resp:
-                raw = await resp.text()
-                if resp.status >= 400:
-                    preview = (raw or "")[:240].replace("\n", "\\n")
-                    last_err = (
-                        f"{resp.status}:{preview}" if preview else str(resp.status)
-                    )
-                    continue
-                data = _decode_json_maybe_multi(raw)
-                cfg = _extract_config_from_response(data)
-                if cfg:
-                    return cfg, None
-        except Exception as e:  # noqa: BLE001
-            last_err = str(e)
-    return None, last_err or "no_config_in_response"
+        }
+    }
+    try:
+        timeout = aiohttp.ClientTimeout(total=180.0)
+        async with session.post(url, json=payload, timeout=timeout) as resp:
+            raw = await resp.text()
+            if resp.status >= 400:
+                preview = (raw or "")[:240].replace("\n", "\\n")
+                return None, f"{resp.status}:{preview}" if preview else str(resp.status)
+            data = _decode_json_maybe_multi(raw)
+            cfg = _extract_config_from_response(data)
+            if cfg:
+                return cfg, None
+            return None, "no_config_in_response"
+    except Exception as e:  # noqa: BLE001
+        return None, str(e)
 
 
 async def save_config(

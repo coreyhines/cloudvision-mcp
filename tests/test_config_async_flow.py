@@ -31,7 +31,7 @@ def test_decode_json_maybe_multi_with_xssi_prefix():
     assert obj["config"] == "cfg"
 
 
-def test_get_config_payload_probe_sequence():
+def test_get_config_single_payload_path():
     class _Resp:
         def __init__(self, status: int, body: str):
             self.status = status
@@ -50,15 +50,13 @@ def test_get_config_payload_probe_sequence():
         def __init__(self):
             self.calls = 0
 
-        def post(self, url, json):  # noqa: A002
+        def post(self, url, json, timeout=None):  # noqa: A002
             self.calls += 1
-            if self.calls == 1:
-                return _Resp(400, "bad payload 1")
-            if self.calls == 2:
-                return _Resp(200, '[{"config":"!\\nhostname x\\n"}]')
-            return _Resp(400, "unexpected")
+            return _Resp(200, '[{"config":"!\\nhostname x\\n"}]')
 
-    cfg, err = asyncio.run(caf.get_config(_Sess(), "https://x", "dev1", 1))
+    sess = _Sess()
+    cfg, err = asyncio.run(caf.get_config(sess, "https://x", "dev1", 1))
     assert err is None
     assert isinstance(cfg, str)
     assert "hostname x" in cfg
+    assert sess.calls == 1

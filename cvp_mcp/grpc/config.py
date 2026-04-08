@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
-from datetime import UTC, datetime
 from typing import Any
 
+import aiohttp
 import grpc
 from arista.configstatus.v1 import models as cm
 from arista.configstatus.v1 import services as cs
 from google.protobuf import wrappers_pb2 as wrappers
 
+from cvp_mcp.grpc.config_async_flow import (
+    get_config as async_get_config,
+)
+from cvp_mcp.grpc.config_async_flow import (
+    now_ns,
+    resolve_device_facts,
+)
 from cvp_mcp.grpc.config_connector import (
     _looks_like_eos_running_config,
     connector_fetch_running_config_text,
@@ -22,9 +28,6 @@ from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.inventory import grpc_one_inventory_serial
 from cvp_mcp.grpc.uri_fetch import (
     fetch_uri_with_bearer,
-    get_json_with_bearer,
-    post_json_many_with_bearer_async,
-    post_raw_with_bearer,
 )
 from cvp_mcp.grpc.utils import RPC_TIMEOUT, serialize_arista_protobuf
 
@@ -81,92 +84,41 @@ def _fetch_running_config_from_compliance_rest(
     if not base:
         return None, "missing_cvp"
     url = f"{base}/api/v3/services/compliancecheck.Compliance/GetConfig"
-    cafile = datadict.get("cert")
     ids = [d.strip() for d in serials if d and d.strip()]
     if not ids:
         return None, "missing_serial"
+    cafile = datadict.get("cert")
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    timestamp = now_ns()
 
-    now = datetime.now(UTC)
-    now_ns = int(now.timestamp() * 1_000_000_000)
-    payloads: list[Any] = []
-    for serial in ids:
-        request_obj = {
-            "device_id": serial,
-            "timestamp": now_ns,
-            "type": "RUNNING_CONFIG",
-        }
-        payloads.extend(
-            [
-                serial,
-                request_obj,
-                {"request": request_obj},
-            ]
-        )
+    async def _run() -> tuple[str | None, str | None]:
+        timeout = aiohttp.ClientTimeout(total=60.0)
+        ssl_ctx = None
+        if cafile:
+            import ssl
 
-    def _configs_from_compliance_response(obj: Any) -> list[str]:
-        configs: list[str] = []
-        if isinstance(obj, list):
-            for row in obj:
-                configs.extend(_configs_from_compliance_response(row))
-            return configs
-        if isinstance(obj, dict):
-            c = obj.get("config")
-            if isinstance(c, str) and c.strip():
-                configs.append(c)
-            if isinstance(c, dict):
-                cv = c.get("value")
-                if isinstance(cv, str) and cv.strip():
-                    configs.append(cv)
-            for v in obj.values():
-                configs.extend(_configs_from_compliance_response(v))
-            return configs
-        return configs
+            ssl_ctx = ssl.create_default_context(cafile=cafile)
+        connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+        async with aiohttp.ClientSession(
+            headers=headers, timeout=timeout, connector=connector
+        ) as session:
+            for serial in ids:
+                try:
+                    text = await async_get_config(session, url, serial, timestamp)
+                except Exception as e:  # noqa: BLE001
+                    return None, str(e)
+                if text and _looks_like_eos_running_config(text):
+                    return text, None
+            return None, "no_config_in_response"
 
-    # Preferred path: async service calls with json=payload.
     try:
-        objs, async_err = asyncio.run(
-            post_json_many_with_bearer_async(
-                url,
-                payloads,
-                token,
-                cafile=cafile,
-            )
-        )
+        return asyncio.run(_run())
     except RuntimeError:
-        objs, async_err = [], "event_loop_running"
-
-    last_err = async_err or "no_config_in_response"
-    for obj in objs:
-        if obj is None:
-            continue
-        for cfg in _configs_from_compliance_response(obj):
-            if _looks_like_eos_running_config(cfg):
-                return cfg, None
-        hit = _extract_running_config_text(obj)
-        if hit:
-            return hit, None
-
-    # Sync fallback only when async path yields no usable config.
-    for payload in payloads:
-        body = json.dumps(payload) if not isinstance(payload, str) else payload
-        ctype = "application/json" if not isinstance(payload, str) else "text/plain"
-        raw_resp, raw_err = post_raw_with_bearer(
-            url, body, token, cafile=cafile, content_type=ctype
-        )
-        if raw_err:
-            last_err = raw_err
-            continue
-        try:
-            parsed = json.loads(raw_resp or "")
-        except Exception:
-            parsed = raw_resp
-        for cfg in _configs_from_compliance_response(parsed):
-            if _looks_like_eos_running_config(cfg):
-                return cfg, None
-        hit = _extract_running_config_text(parsed)
-        if hit:
-            return hit, None
-    return None, last_err
+        return None, "event_loop_running"
 
 
 def _inventory_lookup_device(
@@ -183,62 +135,35 @@ def _inventory_lookup_device(
     if not query_target:
         return {}, "missing_target"
 
-    url = f"{base}/api/resources/inventory/v1/Device/all"
+    inventory_url = f"{base}/api/resources/inventory/v1/Device/all"
     cafile = datadict.get("cert")
-    obj, err = get_json_with_bearer(url, token, cafile=cafile)
-    if err:
-        return {}, err
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
 
-    def _as_str(x: Any) -> str:
-        if isinstance(x, str):
-            return x
-        if isinstance(x, dict):
-            v = x.get("value")
-            if isinstance(v, str):
-                return v
-        return ""
+    async def _run() -> tuple[dict[str, str], str | None]:
+        timeout = aiohttp.ClientTimeout(total=60.0)
+        ssl_ctx = None
+        if cafile:
+            import ssl
 
-    def _iter_dicts(x: Any):
-        if isinstance(x, dict):
-            yield x
-            for v in x.values():
-                yield from _iter_dicts(v)
-        elif isinstance(x, list):
-            for v in x:
-                yield from _iter_dicts(v)
+            ssl_ctx = ssl.create_default_context(cafile=cafile)
+        connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+        async with aiohttp.ClientSession(
+            headers=headers, timeout=timeout, connector=connector
+        ) as session:
+            facts = await resolve_device_facts(session, inventory_url, query_target)
+            return (
+                {**{"device_id_input": query_target}, **facts} if facts else {},
+                None if facts else "not_found",
+            )
 
-    q = query_target.lower()
-    for node in _iter_dicts(obj):
-        serial = _as_str(node.get("device_id") or node.get("serial_number"))
-        host = _as_str(node.get("hostname"))
-        mgmt_ip = _as_str(
-            node.get("ip_address")
-            or node.get("management_ip")
-            or node.get("primary_management_ip")
-            or node.get("primaryManagementIP")
-        )
-        system_mac = _as_str(
-            node.get("system_mac_address")
-            or node.get("system_mac")
-            or node.get("systemMacAddress")
-            or node.get("mac_address")
-            or node.get("mac")
-        )
-        key = node.get("key")
-        if isinstance(key, dict):
-            serial = serial or _as_str(key.get("device_id"))
-
-        if serial.lower() == q or host.lower() == q:
-            facts = {
-                "device_id_input": query_target,
-                "serial_number": serial,
-                "hostname": host,
-                "management_ip": mgmt_ip,
-                "system_mac": system_mac,
-            }
-            return {k: v for k, v in facts.items() if v}, None
-
-    return {}, "not_found"
+    try:
+        return asyncio.run(_run())
+    except RuntimeError:
+        return {}, "event_loop_running"
 
 
 def grpc_get_device_config(

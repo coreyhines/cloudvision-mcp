@@ -20,3 +20,9 @@ def test_decode_json_maybe_multi_ndjson_lines():
     obj = _decode_json_maybe_multi('{"x":1}\n{"config":"cfg"}\n')
     assert isinstance(obj, list)
     assert obj[1]["config"] == "cfg"
+
+
+def test_decode_json_maybe_multi_with_xssi_prefix():
+    obj = _decode_json_maybe_multi(')]}\'\n{"config":"cfg"}\n')
+    assert isinstance(obj, dict)
+    assert obj["config"] == "cfg"

@@ -112,7 +112,8 @@ async def get_inventory(
 ) -> list[dict[str, Any]]:
     async with session.get(url) as resp:
         resp.raise_for_status()
-        data = await resp.json(content_type=None)
+        raw = await resp.text()
+        data = _decode_json_maybe_multi(raw)
 
     rows: list[dict[str, Any]] = []
     for node in _iter_dicts(data):

@@ -22,24 +22,21 @@ def test_extract_running_config_text_finds_nested_value():
 
 def test_fetch_running_config_from_compliance_rest(monkeypatch):
     text = "!\nhostname 720xp-48\nip routing\n" + ("y" * 60)
-    seen = {}
+    seen = {"bodies": []}
 
-    async def fake_post_many(uri, payloads, bearer_token, **kwargs):
-        seen["payloads"] = payloads
-        return [{"result": {"runningConfig": text}}], None
+    def fake_post_raw(uri, body, bearer_token, **kwargs):
+        seen["bodies"].append(body)
+        return text, None
 
-    monkeypatch.setattr(config, "post_json_many_with_bearer_async", fake_post_many)
+    monkeypatch.setattr(config, "post_raw_with_bearer", fake_post_raw)
     datadict = {"cvp": "cvp.example.com:443", "cvtoken": "token", "cert": None}
     out, err = config._fetch_running_config_from_compliance_rest(
         datadict, ["HBG254804R6"]
     )
     assert err is None
     assert out == text
-    assert seen["payloads"]
-    req = seen["payloads"][0]["request"]
-    assert req["device_id"] == "HBG254804R6"
-    assert req["type"] == "RUNNING_CONFIG"
-    assert isinstance(req["timestamp"], int)
+    assert seen["bodies"]
+    assert "HBG254804R6" in seen["bodies"][0]
 
 
 def test_inventory_lookup_device_by_hostname(monkeypatch):

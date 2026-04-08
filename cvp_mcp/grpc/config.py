@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -23,8 +22,6 @@ from cvp_mcp.grpc.inventory import grpc_one_inventory_serial
 from cvp_mcp.grpc.uri_fetch import (
     fetch_uri_with_bearer,
     get_json_with_bearer,
-    post_json_many_with_bearer_async,
-    post_json_with_bearer,
     post_raw_with_bearer,
 )
 from cvp_mcp.grpc.utils import RPC_TIMEOUT, serialize_arista_protobuf
@@ -89,39 +86,23 @@ def _fetch_running_config_from_compliance_rest(
 
     now = datetime.now(UTC)
     now_ns = int(now.timestamp() * 1_000_000_000)
-    payloads: list[dict[str, Any]] = []
     raw_bodies: list[tuple[str, str]] = []
     for serial in ids:
-        # Canonical payload requested by user.
-        req_obj = {
-            "request": {
-                "device_id": serial,
-                "timestamp": now_ns,
-                "type": "RUNNING_CONFIG",
-            }
+        # Service endpoint expects top-level string input.
+        canonical_req = {
+            "device_id": serial,
+            "timestamp": now_ns,
+            "type": "RUNNING_CONFIG",
         }
-        payloads.append(req_obj)
-        # Wrapper variant for protobuf JSON gateways.
-        payloads.append(
-            {
-                "request": {
-                    "device_id": {"value": serial},
-                    "timestamp": {"value": now_ns},
-                    "type": "RUNNING_CONFIG",
-                }
-            }
-        )
-        # Service endpoint may expect top-level string body.
         raw_bodies.extend(
             [
-                (json.dumps(req_obj), "application/json"),
-                (json.dumps(req_obj["request"]), "application/json"),
-                (json.dumps(serial), "application/json"),
                 (serial, "text/plain"),
+                (json.dumps(serial), "application/json"),
+                (json.dumps(canonical_req), "text/plain"),
             ]
         )
 
-    # Service endpoint appears to expect top-level string input.
+    # Service endpoint expects string input; do not send object payloads.
     last_err = "unknown_error"
     for raw_body, ctype in raw_bodies:
         raw_resp, raw_err = post_raw_with_bearer(
@@ -142,39 +123,6 @@ def _fetch_running_config_from_compliance_rest(
         if raw_resp and "hostname " in raw_resp:
             return raw_resp, None
         last_err = "raw_no_config_in_response"
-
-    # Fallback to JSON object payloads for compatibility.
-    try:
-        objs, async_err = asyncio.run(
-            post_json_many_with_bearer_async(
-                url,
-                payloads,
-                token,
-                cafile=cafile,
-            )
-        )
-    except RuntimeError:
-        objs, async_err = [], "event_loop_running"
-
-    if objs:
-        for obj in objs:
-            if obj is None:
-                continue
-            text = _extract_running_config_text(obj)
-            if text:
-                return text, None
-        last_err = f"async:{async_err}" if async_err else "no_config_in_response"
-        return None, last_err
-
-    for payload in payloads:
-        obj, err = post_json_with_bearer(url, payload, token, cafile=cafile)
-        if err:
-            last_err = err
-            continue
-        text = _extract_running_config_text(obj)
-        if text:
-            return text, None
-        last_err = "no_config_in_response"
     return None, last_err
 
 

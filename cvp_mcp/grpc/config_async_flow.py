@@ -144,19 +144,40 @@ async def get_config(
     url: str,
     device: str,
     timestamp: int,
-) -> str | None:
-    payload = {
-        "request": {
+) -> tuple[str | None, str | None]:
+    payloads: list[Any] = [
+        {
+            "request": {
+                "device_id": device,
+                "timestamp": timestamp,
+                "type": "RUNNING_CONFIG",
+            }
+        },
+        {
             "device_id": device,
             "timestamp": timestamp,
             "type": "RUNNING_CONFIG",
-        }
-    }
-    async with session.post(url, json=payload) as resp:
-        resp.raise_for_status()
-        raw = await resp.text()
-        data = _decode_json_maybe_multi(raw)
-    return _extract_config_from_response(data)
+        },
+        {"request": {"device_id": device, "type": "RUNNING_CONFIG"}},
+    ]
+    last_err: str | None = None
+    for payload in payloads:
+        try:
+            async with session.post(url, json=payload) as resp:
+                raw = await resp.text()
+                if resp.status >= 400:
+                    preview = (raw or "")[:240].replace("\n", "\\n")
+                    last_err = (
+                        f"{resp.status}:{preview}" if preview else str(resp.status)
+                    )
+                    continue
+                data = _decode_json_maybe_multi(raw)
+                cfg = _extract_config_from_response(data)
+                if cfg:
+                    return cfg, None
+        except Exception as e:  # noqa: BLE001
+            last_err = str(e)
+    return None, last_err or "no_config_in_response"
 
 
 async def save_config(
@@ -166,7 +187,7 @@ async def save_config(
     timestamp: int,
     output_dir: str,
 ) -> str | None:
-    config_text = await get_config(session, url, device, timestamp)
+    config_text, _ = await get_config(session, url, device, timestamp)
     if not config_text:
         return None
     Path(output_dir).mkdir(parents=True, exist_ok=True)

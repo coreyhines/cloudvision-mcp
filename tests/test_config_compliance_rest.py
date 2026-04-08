@@ -40,7 +40,7 @@ def test_fetch_running_config_from_compliance_rest(monkeypatch):
         seen["calls"] += 1
         assert device == "HBG254804R6"
         assert isinstance(timestamp, int)
-        return text
+        return text, None
 
     monkeypatch.setattr(config, "async_get_config", fake_get_config)
     datadict = {"cvp": "cvp.example.com:443", "cvtoken": "token", "cert": None}

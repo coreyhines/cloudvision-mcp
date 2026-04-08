@@ -123,11 +123,13 @@ def _fetch_running_config_from_compliance_rest(
         ) as session:
             for serial in ids:
                 try:
-                    text = await async_get_config(session, url, serial, timestamp)
+                    text, err = await async_get_config(session, url, serial, timestamp)
                 except Exception as e:  # noqa: BLE001
                     return None, str(e)
                 if text and _looks_like_eos_running_config(text):
                     return text, None
+                if err:
+                    return None, err
             return None, "no_config_in_response"
 
     return _run_async_in_sync_context(_run())

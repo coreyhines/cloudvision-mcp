@@ -148,7 +148,7 @@ async def get_config(
     payload: dict[str, Any] = {
         "request": {
             "device_id": device,
-            "timestamp": timestamp,
+            "timestamp": str(timestamp),
             "type": "RUNNING_CONFIG",
         }
     }

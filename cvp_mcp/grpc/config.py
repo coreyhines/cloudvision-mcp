@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from datetime import UTC, datetime
@@ -24,6 +25,7 @@ from cvp_mcp.grpc.uri_fetch import (
     get_json_with_bearer,
     post_json_many_with_bearer_async,
     post_json_with_bearer,
+    post_raw_with_bearer,
 )
 from cvp_mcp.grpc.utils import RPC_TIMEOUT, serialize_arista_protobuf
 
@@ -88,17 +90,17 @@ def _fetch_running_config_from_compliance_rest(
     now = datetime.now(UTC)
     now_ns = int(now.timestamp() * 1_000_000_000)
     payloads: list[dict[str, Any]] = []
+    raw_bodies: list[tuple[str, str]] = []
     for serial in ids:
         # Canonical payload requested by user.
-        payloads.append(
-            {
-                "request": {
-                    "device_id": serial,
-                    "timestamp": now_ns,
-                    "type": "RUNNING_CONFIG",
-                }
+        req_obj = {
+            "request": {
+                "device_id": serial,
+                "timestamp": now_ns,
+                "type": "RUNNING_CONFIG",
             }
-        )
+        }
+        payloads.append(req_obj)
         # Wrapper variant for protobuf JSON gateways.
         payloads.append(
             {
@@ -108,6 +110,15 @@ def _fetch_running_config_from_compliance_rest(
                     "type": "RUNNING_CONFIG",
                 }
             }
+        )
+        # Service endpoint may expect top-level string body.
+        raw_bodies.extend(
+            [
+                (json.dumps(req_obj), "application/json"),
+                (json.dumps(req_obj["request"]), "application/json"),
+                (json.dumps(serial), "application/json"),
+                (serial, "text/plain"),
+            ]
         )
 
     # Async fan-out first for faster retrieval.
@@ -130,7 +141,28 @@ def _fetch_running_config_from_compliance_rest(
             text = _extract_running_config_text(obj)
             if text:
                 return text, None
-        return None, f"async:{async_err}" if async_err else "no_config_in_response"
+        # If service rejected JSON object shape, try raw string-body variants.
+        last_err = f"async:{async_err}" if async_err else "no_config_in_response"
+        for raw_body, ctype in raw_bodies:
+            raw_resp, raw_err = post_raw_with_bearer(
+                url,
+                raw_body,
+                token,
+                cafile=cafile,
+                content_type=ctype,
+            )
+            if raw_err:
+                last_err = raw_err
+                continue
+            hit = _extract_running_config_text(raw_resp)
+            if hit:
+                return hit, None
+            if raw_resp and _looks_like_eos_running_config(raw_resp):
+                return raw_resp, None
+            if raw_resp and "hostname " in raw_resp:
+                return raw_resp, None
+            last_err = "raw_no_config_in_response"
+        return None, last_err
 
     last_err = "unknown_error"
     for payload in payloads:

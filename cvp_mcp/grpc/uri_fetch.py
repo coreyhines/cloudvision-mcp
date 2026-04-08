@@ -158,6 +158,54 @@ def post_json_with_bearer(
     return obj, None
 
 
+def post_raw_with_bearer(
+    uri: str,
+    body: str,
+    bearer_token: str,
+    *,
+    cafile: str | None = None,
+    content_type: str = "application/json",
+    max_bytes: int = 2_000_000,
+    timeout_sec: float = 60.0,
+) -> tuple[str | None, str | None]:
+    """POST raw text body with bearer auth."""
+    if not uri or not uri.strip():
+        return None, "empty_uri"
+    if not bearer_token:
+        return None, "missing_token"
+
+    req = urllib.request.Request(
+        uri.strip(),
+        data=body.encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {bearer_token}",
+            "Content-Type": content_type,
+            "Accept": "application/json, text/plain, */*",
+        },
+        method="POST",
+    )
+    ctx = ssl.create_default_context(cafile=cafile if cafile else None)
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=timeout_sec) as resp:
+            raw = resp.read(max_bytes + 1)
+    except urllib.error.HTTPError as e:
+        msg = ""
+        try:
+            msg = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            msg = ""
+        preview = msg[:200].replace("\n", "\\n")
+        if preview:
+            return None, f"http_error:{e.code}:{preview}"
+        return None, f"http_error:{e.code}"
+    except Exception as e:
+        return None, str(e)
+
+    if len(raw) > max_bytes:
+        raw = raw[:max_bytes]
+    return raw.decode("utf-8", errors="replace"), None
+
+
 async def post_json_many_with_bearer_async(
     uri: str,
     payloads: list[dict[str, Any]],

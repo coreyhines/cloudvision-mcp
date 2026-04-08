@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,61 @@ def _extract_config_from_response(obj: Any) -> str | None:
             if hit:
                 return hit
     return None
+
+
+def _decode_json_maybe_multi(raw_text: str) -> Any:
+    """
+    Decode JSON that may contain multiple top-level documents.
+
+    CloudVision service endpoints sometimes return NDJSON-ish or concatenated
+    JSON objects instead of a single document.
+    """
+    text = (raw_text or "").strip()
+    if not text:
+        return {}
+    if text.startswith(")]}'"):
+        nl = text.find("\n")
+        if nl != -1:
+            text = text[nl + 1 :].strip()
+
+    # Fast path: normal single-document JSON.
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    # Multi-document fallback: parse sequential JSON values.
+    decoder = json.JSONDecoder()
+    idx = 0
+    docs: list[Any] = []
+    length = len(text)
+    while idx < length:
+        while idx < length and text[idx].isspace():
+            idx += 1
+        if idx >= length:
+            break
+        try:
+            obj, end = decoder.raw_decode(text, idx)
+        except Exception:
+            # NDJSON fallback: first line that is valid JSON wins.
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    docs.append(json.loads(line))
+                    continue
+                except Exception:
+                    continue
+            break
+        docs.append(obj)
+        idx = end
+
+    if not docs:
+        return {}
+    if len(docs) == 1:
+        return docs[0]
+    return docs
 
 
 async def get_inventory(
@@ -97,7 +153,8 @@ async def get_config(
     }
     async with session.post(url, json=payload) as resp:
         resp.raise_for_status()
-        data = await resp.json(content_type=None)
+        raw = await resp.text()
+        data = _decode_json_maybe_multi(raw)
     return _extract_config_from_response(data)
 
 

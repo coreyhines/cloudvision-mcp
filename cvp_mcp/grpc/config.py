@@ -71,7 +71,7 @@ def _extract_running_config_text(obj: Any) -> str | None:
 
 
 def _fetch_running_config_from_compliance_rest(
-    datadict: dict[str, Any], device_ids: list[str]
+    datadict: dict[str, Any], serials: list[str]
 ) -> tuple[str | None, str | None]:
     token = (datadict.get("cvtoken") or "").strip()
     base = _cvp_https_base(str(datadict.get("cvp") or ""))
@@ -81,49 +81,34 @@ def _fetch_running_config_from_compliance_rest(
         return None, "missing_cvp"
     url = f"{base}/api/v3/services/compliancecheck.Compliance/GetConfig"
     cafile = datadict.get("cert")
-    ids = [d.strip() for d in device_ids if d and d.strip()]
+    ids = [d.strip() for d in serials if d and d.strip()]
     if not ids:
-        return None, "missing_device_id"
+        return None, "missing_serial"
 
     now = datetime.now(UTC)
     now_ns = int(now.timestamp() * 1_000_000_000)
-    now_ms = int(now.timestamp() * 1_000)
-    now_iso = now.isoformat().replace("+00:00", "Z")
-
     payloads: list[dict[str, Any]] = []
-
-    def _with_time_anchors(base_payload: dict[str, Any]) -> list[dict[str, Any]]:
-        return [
-            base_payload,
-            {**base_payload, "time": {"value": now_ns}},
-            {**base_payload, "time": now_ns},
-            {**base_payload, "timestamp": {"value": now_ns}},
-            {**base_payload, "timestamp": now_ns},
+    for serial in ids:
+        # Canonical payload requested by user.
+        payloads.append(
             {
-                **base_payload,
-                "start_time": {"value": now_ns},
-                "end_time": {"value": now_ns},
-            },
+                "request": {
+                    "device_id": serial,
+                    "timestamp": now_ns,
+                    "type": "RUNNING_CONFIG",
+                }
+            }
+        )
+        # Wrapper variant for protobuf JSON gateways.
+        payloads.append(
             {
-                **base_payload,
-                "start_time": now_ns,
-                "end_time": now_ns,
-            },
-            {
-                **base_payload,
-                "startTime": {"value": now_ns},
-                "endTime": {"value": now_ns},
-            },
-            {**base_payload, "time_ms": now_ms},
-            {**base_payload, "time": {"value": now_iso}},
-            {**base_payload, "timestamp": {"value": now_iso}},
-        ]
-
-    for did in ids:
-        payloads.extend(_with_time_anchors({"key": {"device_id": {"value": did}}}))
-        payloads.extend(_with_time_anchors({"key": {"device_id": did}}))
-        payloads.extend(_with_time_anchors({"device_id": {"value": did}}))
-        payloads.extend(_with_time_anchors({"device_id": did}))
+                "request": {
+                    "device_id": {"value": serial},
+                    "timestamp": {"value": now_ns},
+                    "type": "RUNNING_CONFIG",
+                }
+            }
+        )
 
     # Async fan-out first for faster retrieval.
     try:
@@ -162,23 +147,23 @@ def _fetch_running_config_from_compliance_rest(
 
 def _inventory_lookup_device(
     datadict: dict[str, Any], target: str
-) -> tuple[str | None, str | None, str | None]:
-    """Resolve target to (serial/device_id, hostname, error) via inventory REST."""
+) -> tuple[dict[str, str], str | None]:
+    """Resolve target to reusable device facts via inventory REST."""
     token = (datadict.get("cvtoken") or "").strip()
     base = _cvp_https_base(str(datadict.get("cvp") or ""))
     if not token:
-        return None, None, "missing_token"
+        return {}, "missing_token"
     if not base:
-        return None, None, "missing_cvp"
+        return {}, "missing_cvp"
     query_target = (target or "").strip()
     if not query_target:
-        return None, None, "missing_target"
+        return {}, "missing_target"
 
     url = f"{base}/api/resources/inventory/v1/Device/all"
     cafile = datadict.get("cert")
     obj, err = get_json_with_bearer(url, token, cafile=cafile)
     if err:
-        return None, None, err
+        return {}, err
 
     def _as_str(x: Any) -> str:
         if isinstance(x, str):
@@ -202,14 +187,34 @@ def _inventory_lookup_device(
     for node in _iter_dicts(obj):
         serial = _as_str(node.get("device_id") or node.get("serial_number"))
         host = _as_str(node.get("hostname"))
+        mgmt_ip = _as_str(
+            node.get("ip_address")
+            or node.get("management_ip")
+            or node.get("primary_management_ip")
+            or node.get("primaryManagementIP")
+        )
+        system_mac = _as_str(
+            node.get("system_mac_address")
+            or node.get("system_mac")
+            or node.get("systemMacAddress")
+            or node.get("mac_address")
+            or node.get("mac")
+        )
         key = node.get("key")
         if isinstance(key, dict):
             serial = serial or _as_str(key.get("device_id"))
 
         if serial.lower() == q or host.lower() == q:
-            return (serial or None), (host or None), None
+            facts = {
+                "device_id_input": query_target,
+                "serial_number": serial,
+                "hostname": host,
+                "management_ip": mgmt_ip,
+                "system_mac": system_mac,
+            }
+            return {k: v for k, v in facts.items() if v}, None
 
-    return None, None, "not_found"
+    return {}, "not_found"
 
 
 def grpc_get_device_config(
@@ -237,15 +242,14 @@ def grpc_get_device_config(
     summary_stub = cs.SummaryServiceStub(channel)
     cfg_stub = cs.ConfigurationServiceStub(channel)
 
+    device_facts: dict[str, str] = {"device_id_input": device_id}
     hostname = ""
     connector_device_id = device_id
-    inv_rest_serial, inv_rest_host, inv_rest_err = _inventory_lookup_device(
-        datadict, device_id
-    )
-    if inv_rest_serial:
-        connector_device_id = inv_rest_serial
-    if inv_rest_host:
-        hostname = inv_rest_host
+    inv_rest_facts, inv_rest_err = _inventory_lookup_device(datadict, device_id)
+    if inv_rest_facts:
+        device_facts.update(inv_rest_facts)
+        hostname = device_facts.get("hostname", "")
+        connector_device_id = device_facts.get("serial_number", connector_device_id)
     if inv_rest_err and inv_rest_err not in ("not_found",):
         warnings.append(f"inventory_rest_lookup:{inv_rest_err}")
 
@@ -253,9 +257,25 @@ def grpc_get_device_config(
         inv = grpc_one_inventory_serial(channel, device_id)
         if isinstance(inv, dict):
             hostname = str(inv.get("hostname") or "") or hostname
+            if hostname:
+                device_facts["hostname"] = hostname
             serial = str(inv.get("serial_number") or "").strip()
             if serial:
                 connector_device_id = serial
+                device_facts["serial_number"] = serial
+            mgmt_ip = str(
+                inv.get("management_ip")
+                or inv.get("primary_management_ip")
+                or inv.get("ip_address")
+                or ""
+            ).strip()
+            if mgmt_ip:
+                device_facts["management_ip"] = mgmt_ip
+            system_mac = str(
+                inv.get("system_mac") or inv.get("system_mac_address") or ""
+            ).strip()
+            if system_mac:
+                device_facts["system_mac"] = system_mac
     except Exception as e:
         logging.debug("inventory for hostname: %s", e)
 
@@ -318,7 +338,8 @@ def grpc_get_device_config(
         ):
             compliance_text, compliance_err = (
                 _fetch_running_config_from_compliance_rest(
-                    datadict, [connector_device_id, device_id]
+                    datadict,
+                    [device_facts.get("serial_number", ""), connector_device_id],
                 )
             )
             if compliance_text:
@@ -366,6 +387,7 @@ def grpc_get_device_config(
     obj = {
         "hostname": hostname,
         "device_id": device_id,
+        "device_facts": device_facts,
         "config_summary": summary_obj,
         "designed_config_uri": designed_uri,
         "running_config_uri": running_uri,

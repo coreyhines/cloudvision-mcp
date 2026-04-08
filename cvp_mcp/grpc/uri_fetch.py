@@ -76,10 +76,27 @@ def get_json_with_bearer(
         return None, err
     if not text:
         return None, "empty_response"
+    text = text.strip()
+    if text.startswith(")]}'"):
+        nl = text.find("\n")
+        if nl != -1:
+            text = text[nl + 1 :].strip()
     try:
         obj = json.loads(text)
     except Exception:
-        return None, "invalid_json_response"
+        # Some endpoints can return JSON lines; parse first valid object line.
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                break
+            except Exception:
+                continue
+        else:
+            preview = text[:200].replace("\n", "\\n")
+            return None, f"invalid_json_response:{preview}"
     if not isinstance(obj, (dict, list)):
         return None, "unexpected_json_type"
     return obj, None
@@ -116,7 +133,15 @@ def post_json_with_bearer(
         with urllib.request.urlopen(req, context=ctx, timeout=timeout_sec) as resp:
             raw = resp.read(max_bytes + 1)
     except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        preview = body[:200].replace("\n", "\\n")
         logging.error("POST HTTP error: %s %s", e.code, uri)
+        if preview:
+            return None, f"http_error:{e.code}:{preview}"
         return None, f"http_error:{e.code}"
     except Exception as e:
         logging.error("POST error: %s %s", uri, e)

@@ -336,11 +336,32 @@ def grpc_get_device_config(
     else:
         obj_fb = {}
 
-    data_source = "resource_api:configstatus.v1"
-    if include_running_config and running_config_source == "compliance_rest":
-        data_source += "+rest:compliancecheck.getconfig"
-    if include_running_config and running_config_source == "connector":
-        data_source += "+connector:sysdb_smash_analytics"
+    attempted_sources: list[str] = []
+    if (
+        summary_obj
+        or designed_uri
+        or running_uri
+        or any(
+            w.startswith("summary_fetch_failed")
+            or w.startswith("configuration_uri_fetch_failed")
+            for w in warnings
+        )
+    ):
+        attempted_sources.append("resource_api:configstatus.v1")
+    if include_running_config:
+        attempted_sources.append("service_api:compliancecheck.getconfig")
+        if running_config_source == "connector":
+            attempted_sources.append("connector:sysdb_smash_analytics")
+
+    # Prefer actual winning source; otherwise report attempted path(s) explicitly.
+    if running_config_source == "resource_uri":
+        data_source = "resource_api:configstatus.v1"
+    elif running_config_source == "compliance_rest":
+        data_source = "service_api:compliancecheck.getconfig"
+    elif running_config_source == "connector":
+        data_source = "connector:sysdb_smash_analytics"
+    else:
+        data_source = "+".join(dict.fromkeys(attempted_sources)) or "unknown"
 
     obj = {
         "hostname": hostname,

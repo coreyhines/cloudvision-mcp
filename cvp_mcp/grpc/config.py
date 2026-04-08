@@ -121,7 +121,29 @@ def _fetch_running_config_from_compliance_rest(
             ]
         )
 
-    # Async fan-out first for faster retrieval.
+    # Service endpoint appears to expect top-level string input.
+    last_err = "unknown_error"
+    for raw_body, ctype in raw_bodies:
+        raw_resp, raw_err = post_raw_with_bearer(
+            url,
+            raw_body,
+            token,
+            cafile=cafile,
+            content_type=ctype,
+        )
+        if raw_err:
+            last_err = raw_err
+            continue
+        hit = _extract_running_config_text(raw_resp)
+        if hit:
+            return hit, None
+        if raw_resp and _looks_like_eos_running_config(raw_resp):
+            return raw_resp, None
+        if raw_resp and "hostname " in raw_resp:
+            return raw_resp, None
+        last_err = "raw_no_config_in_response"
+
+    # Fallback to JSON object payloads for compatibility.
     try:
         objs, async_err = asyncio.run(
             post_json_many_with_bearer_async(
@@ -141,30 +163,9 @@ def _fetch_running_config_from_compliance_rest(
             text = _extract_running_config_text(obj)
             if text:
                 return text, None
-        # If service rejected JSON object shape, try raw string-body variants.
         last_err = f"async:{async_err}" if async_err else "no_config_in_response"
-        for raw_body, ctype in raw_bodies:
-            raw_resp, raw_err = post_raw_with_bearer(
-                url,
-                raw_body,
-                token,
-                cafile=cafile,
-                content_type=ctype,
-            )
-            if raw_err:
-                last_err = raw_err
-                continue
-            hit = _extract_running_config_text(raw_resp)
-            if hit:
-                return hit, None
-            if raw_resp and _looks_like_eos_running_config(raw_resp):
-                return raw_resp, None
-            if raw_resp and "hostname " in raw_resp:
-                return raw_resp, None
-            last_err = "raw_no_config_in_response"
         return None, last_err
 
-    last_err = "unknown_error"
     for payload in payloads:
         obj, err = post_json_with_bearer(url, payload, token, cafile=cafile)
         if err:

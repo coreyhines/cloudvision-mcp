@@ -1,67 +1,42 @@
 #!/usr/bin/python3
 
+import argparse
+import json
+import logging
+import sys
+
+import grpc
 from mcp.server.fastmcp import FastMCP
-from typing import Optional
-from cvp_mcp.grpc.inventory import grpc_all_inventory, grpc_one_inventory_serial
+
+from cvp_mcp.env import env_datadict_from_os
 from cvp_mcp.grpc.bugs import grpc_all_bug_exposure
-from cvp_mcp.grpc.monitor import grpc_all_probe_status, grpc_one_probe_status
-from cvp_mcp.grpc.lifecycle import grpc_all_device_lifecycle
+from cvp_mcp.grpc.capability import probe_arista_v1_packages
+from cvp_mcp.grpc.config import grpc_get_device_config
+from cvp_mcp.grpc.connector import conn_get_info_bugs
 from cvp_mcp.grpc.endpoint import (
     grpc_all_endpoint_locations,
     grpc_endpoints_by_filter,
     grpc_one_endpoint_location,
 )
+from cvp_mcp.grpc.events import grpc_get_cvp_events, grpc_search_cvp_events
 from cvp_mcp.grpc.flow import conn_get_flow_data
-from cvp_mcp.grpc.connector import conn_get_info_bugs
-from cvp_mcp.grpc.utils import createConnection
 from cvp_mcp.grpc.hostname_resolve import resolve_endpoint_query
-import argparse
-import grpc
-import json
-import sys
-import logging
-import os
-
-
-def _normalize_api_token(token: str | None) -> str:
-    """Strip whitespace and optional Bearer prefix from CVPTOKEN (env-file safe)."""
-    if not token:
-        return ""
-    token = token.strip()
-    if token.lower().startswith("bearer "):
-        token = token[7:].strip()
-    return token
-
-
-def _normalize_cvp_endpoint(cvp: str | None) -> str:
-    """
-    Strip URL scheme/path; ensure host:443 for gRPC (matches Arista CVP examples).
-    """
-    if not cvp:
-        return ""
-    cvp = cvp.strip()
-    for prefix in ("https://", "http://"):
-        if cvp.startswith(prefix):
-            cvp = cvp[len(prefix) :]
-    cvp = cvp.split("/")[0]
-    if ":" not in cvp:
-        cvp = f"{cvp}:443"
-    return cvp
-
-
-def _resolve_cert_path(certfile: str | None) -> str | None:
-    if not certfile:
-        return None
-    certfile = certfile.strip()
-    if not certfile:
-        return None
-    if os.path.isabs(certfile):
-        return certfile
-    root = os.environ.get("CLOUDVISION_MCP_INSTALL_ROOT", "").strip()
-    if root:
-        return os.path.join(root, certfile)
-    return certfile
-
+from cvp_mcp.grpc.interfaces import (
+    grpc_get_interfaces,
+    grpc_get_ip_interfaces,
+    grpc_get_vlans,
+)
+from cvp_mcp.grpc.inventory import grpc_all_inventory, grpc_one_inventory_serial
+from cvp_mcp.grpc.lifecycle import grpc_all_device_lifecycle
+from cvp_mcp.grpc.monitor import grpc_all_probe_status, grpc_one_probe_status
+from cvp_mcp.grpc.overlay import (
+    grpc_get_evpn,
+    grpc_get_features,
+    grpc_get_system_health,
+    grpc_get_vxlan,
+)
+from cvp_mcp.grpc.routing import grpc_get_bgp_status, grpc_get_routes
+from cvp_mcp.grpc.utils import createConnection
 
 CVP_TRANSPORT = "grpc"
 
@@ -78,14 +53,7 @@ mcp = FastMCP(name="CVP MCP Server", host="0.0.0.0", stateless_http=True)
 
 # async function to return creds
 def get_env_vars():
-    cvp = _normalize_cvp_endpoint(os.environ.get("CVP"))
-    cvtoken = _normalize_api_token(os.environ.get("CVPTOKEN"))
-    certfile = _resolve_cert_path(os.environ.get("CERT"))
-    datadict = {}
-    datadict["cvtoken"] = cvtoken
-    datadict["cvp"] = cvp
-    datadict["cert"] = certfile
-    return datadict
+    return env_datadict_from_os()
 
 
 def _endpoint_search_queries(search_term: str) -> list[str]:
@@ -250,10 +218,10 @@ def get_cvp_all_connectivity_probes() -> dict:
 
 @mcp.tool()
 def get_cvp_one_connectivity_probe(
-    serial_number: Optional[str] = None,
-    endpoint: Optional[str] = None,
-    vrf: Optional[str] = None,
-    source_interface: Optional[str] = None,
+    serial_number: str | None = None,
+    endpoint: str | None = None,
+    vrf: str | None = None,
+    source_interface: str | None = None,
 ) -> str:
     """
     Prints out information about a single device in CVP
@@ -423,9 +391,9 @@ def get_cvp_all_endpoint_locations() -> dict:
 
 @mcp.tool()
 def get_cvp_endpoint_locations_filtered(
-    device_id: Optional[str] = None,
-    interface: Optional[str] = None,
-    vlan_id: Optional[int] = None,
+    device_id: str | None = None,
+    interface: str | None = None,
+    vlan_id: int | None = None,
 ) -> dict:
     """Filters endpoint locations by switch serial number, interface name (e.g. 'Ethernet1'),
     or VLAN ID. Provide at least one filter. Filtering is applied client-side."""
@@ -464,14 +432,263 @@ def get_cvp_endpoint_locations_filtered(
 
 
 # ===================================================
+# Capability (installed Resource API packages)
+# ===================================================
+
+
+@mcp.tool()
+def get_cvp_probe_arista_apis() -> dict:
+    """Lists installed ``arista.*.v1`` Python API packages (Resource API clients bundled with cloudvision)."""
+    return {"packages": probe_arista_v1_packages()}
+
+
+# ===================================================
+# Config / interfaces / VLAN / IP (hybrid Resource API + Connector)
+# ===================================================
+
+
+@mcp.tool()
+def get_cvp_device_config(device_id: str, include_running_config: bool = False) -> dict:
+    """Device config summary (URIs, sync metadata) from configstatus API; optional running-config text via URI fetch."""
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                connCreds = createConnection(datadict)
+                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
+                    return grpc_get_device_config(
+                        channel,
+                        datadict,
+                        device_id,
+                        include_running_config=include_running_config,
+                    )
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("get_cvp_device_config: %s", e)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_cvp_interfaces(device_id: str) -> dict:
+    """Interface catalog (admin/oper, speed, MTU, description, counters) via Sysdb paths on the device dataset."""
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                return grpc_get_interfaces(datadict, device_id)
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("get_cvp_interfaces: %s", e)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_cvp_vlans(device_id: str) -> dict:
+    """VLAN and switchport-related rows from Sysdb bridging paths (best-effort across EOS versions)."""
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                return grpc_get_vlans(datadict, device_id)
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("get_cvp_vlans: %s", e)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_cvp_ip_interfaces(device_id: str) -> dict:
+    """L3 addresses per interface from Sysdb IP paths (best-effort parse)."""
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                return grpc_get_ip_interfaces(datadict, device_id)
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("get_cvp_ip_interfaces: %s", e)
+        return {"error": str(e)}
+
+
+# ===================================================
+# Events (Resource API) + routing (Connector)
+# ===================================================
+
+
+@mcp.tool()
+def get_cvp_events(
+    severity: str | None = None,
+    event_type: str | None = None,
+    device_id: str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    limit: int | None = 100,
+) -> dict:
+    """List CVP events with structured filters (severity, event_type, optional device_id substring, ISO time bounds)."""
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                connCreds = createConnection(datadict)
+                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
+                    return grpc_get_cvp_events(
+                        channel,
+                        severity=severity,
+                        event_type=event_type,
+                        device_id=device_id,
+                        start_time=start_time,
+                        end_time=end_time,
+                        limit=limit,
+                    )
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("get_cvp_events: %s", e)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def search_cvp_events(
+    query: str,
+    severity: str | None = None,
+    event_type: str | None = None,
+    device_id: str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    limit: int | None = 50,
+) -> dict:
+    """Search event title/description/type (client-side match) after optional structured filters."""
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                connCreds = createConnection(datadict)
+                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
+                    return grpc_search_cvp_events(
+                        channel,
+                        query,
+                        severity=severity,
+                        event_type=event_type,
+                        device_id=device_id,
+                        start_time=start_time,
+                        end_time=end_time,
+                        limit=limit,
+                    )
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("search_cvp_events: %s", e)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_cvp_bgp_status(device_id: str) -> dict:
+    """BGP operational snapshot from Sysdb/Smash routing paths (best-effort)."""
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                return grpc_get_bgp_status(datadict, device_id)
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("get_cvp_bgp_status: %s", e)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_cvp_routes(device_id: str, vrf: str = "default") -> dict:
+    """Active route-like RIB entries from Sysdb routing status (best-effort; vrf labels path selection)."""
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                return grpc_get_routes(datadict, device_id, vrf=vrf)
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("get_cvp_routes: %s", e)
+        return {"error": str(e)}
+
+
+# ===================================================
+# Features / overlay / system health (Connector)
+# ===================================================
+
+
+@mcp.tool()
+def get_cvp_features(device_id: str) -> dict:
+    """Enabled-feature-related Sysdb snapshots (best-effort; coverage often partial)."""
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                return grpc_get_features(datadict, device_id)
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("get_cvp_features: %s", e)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_cvp_evpn(device_id: str) -> dict:
+    """EVPN-related Sysdb subtree (best-effort)."""
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                return grpc_get_evpn(datadict, device_id)
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("get_cvp_evpn: %s", e)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_cvp_vxlan(device_id: str) -> dict:
+    """VxLAN-related Sysdb subtrees (best-effort)."""
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                return grpc_get_vxlan(datadict, device_id)
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("get_cvp_vxlan: %s", e)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_cvp_system_health(device_id: str) -> dict:
+    """System version/status and environment/platform sensors (best-effort)."""
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                return grpc_get_system_health(datadict, device_id)
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("get_cvp_system_health: %s", e)
+        return {"error": str(e)}
+
+
+# ===================================================
 # Flow Data Tools
 # ===================================================
 
 
 @mcp.tool()
 def get_cvp_flow_data(
-    device_id: Optional[str] = None,
-    flow_index: Optional[int] = None,
+    device_id: str | None = None,
+    flow_index: int | None = None,
 ) -> dict:
     """Retrieves Clover flow records from CloudVision analytics (/Clover/flows/v1/path/...).
     flow_index: optional integer path suffix (e.g. 0 for .../path/0); omit to query the parent path.

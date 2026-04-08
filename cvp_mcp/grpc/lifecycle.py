@@ -1,14 +1,8 @@
-from arista.lifecycle.v1 import models
-from arista.lifecycle.v1 import services
-from google.protobuf import wrappers_pb2 as wrappers
-from .utils import RPC_TIMEOUT, convert_response_to_device_lifecycle
-from .models import DeviceLifecycleSummary
-import grpc
 import logging
-import os
-import json
-import sys
 
+from arista.lifecycle.v1 import services
+
+from .utils import RPC_TIMEOUT, convert_response_to_device_lifecycle
 
 
 def grpc_all_device_lifecycle(channel):
@@ -24,6 +18,4 @@ def grpc_all_device_lifecycle(channel):
             all_devices.append(_device)
         except Exception as e:
             logging.error(f"Error with device Lifecycle: {e}")
-    return(all_devices)
-
-
+    return all_devices

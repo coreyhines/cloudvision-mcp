@@ -1,12 +1,12 @@
-import sys
-sys.path.insert(0, "/Users/corey/vs-code/cloudvision-mcp")
-from cloudvision.Connector.grpc_client import GRPCClient, create_query
-from cloudvision_mcp import _normalize_api_token
 import logging
-import json
+
+from cloudvision.Connector.grpc_client import GRPCClient, create_query
+
+from cvp_mcp.env import normalize_api_token
+
 
 def find_frozen_dicts(obj, path="root"):
-    if hasattr(obj, '__class__') and 'frozendict' in str(type(obj)).lower():
+    if hasattr(obj, "__class__") and "frozendict" in str(type(obj)).lower():
         logging.debug(f"Found FrozenDict at {path}: {type(obj)}")
     elif isinstance(obj, dict):
         for key, value in obj.items():
@@ -15,48 +15,50 @@ def find_frozen_dicts(obj, path="root"):
         for i, item in enumerate(obj):
             find_frozen_dicts(item, f"{path}[{i}]")
 
+
 def serialize_cloudvision_data(data):
     """Serialize CloudVision data structures to JSON, handling FrozenDict objects"""
+
     def convert_frozen_dicts(obj):
-        if hasattr(obj, '__class__') and 'FrozenDict' in str(type(obj)):
+        if hasattr(obj, "__class__") and "FrozenDict" in str(type(obj)):
             return dict(obj)
         elif isinstance(obj, dict):
             return {k: convert_frozen_dicts(v) for k, v in obj.items()}
         elif isinstance(obj, (list, tuple)):
             return [convert_frozen_dicts(item) for item in obj]
         return obj
-    
-    converted = convert_frozen_dicts(data)
-    return(converted)
 
-def get(client, dataset, pathElts):
-     ''' Return a query on a path element'''
+    converted = convert_frozen_dicts(data)
+    return converted
+
+
+def get(client, dataset, pathElts, dtype: str = "device"):
+    """Run a unary Get for a path. ``dataset`` is the Connector dataset name (device serial or e.g. analytics)."""
     result = {}
-    query = [
-        create_query([(pathElts, [])], dataset)
-    ]
+    query = [create_query([(pathElts, [])], dataset, dtype)]
 
     for batch in client.get(query):
         for notif in batch["notifications"]:
-            bug_info = serialize_cloudvision_data(notif['updates'])
+            bug_info = serialize_cloudvision_data(notif["updates"])
             result.update(bug_info)
-            # result.update(notif["updates"])
-            # find_frozen_dicts(notif['updates'])
     return result
+
+
+def get_device_path(client, device_id: str, pathElts: list):
+    """Query the device streaming dataset for ``device_id`` at ``pathElts``."""
+    return get(client, device_id, pathElts, dtype="device")
+
 
 def getBugInfo(client, bugId, mem=dict()):
     if bugId in mem:
         return mem[bugId]
-    pathElts = [
-        "BugAlerts",
-        "bugs",
-        bugId
-    ]
+    pathElts = ["BugAlerts", "bugs", bugId]
     dataset = "analytics"
     bugInfo = get(client, dataset, pathElts)
     mem[bugId] = bugInfo
 
     return bugInfo
+
 
 def conn_get_info_bugs(datadict, bug_ids):
     """
@@ -68,14 +70,10 @@ def conn_get_info_bugs(datadict, bug_ids):
     if cvp and ":" not in cvp:
         cvp = f"{cvp}:443"
     cv_addr = cvp
-    token = _normalize_api_token(datadict.get("cvtoken"))
+    token = normalize_api_token(datadict.get("cvtoken"))
     with GRPCClient(grpcAddr=cv_addr, tokenValue=token) as client:
         for bugId in bug_ids:
-            pathElts = [
-                "BugAlerts",
-                "bugs",
-                bugId
-            ]
+            pathElts = ["BugAlerts", "bugs", bugId]
             try:
                 bugInfo = get(client, dataset, pathElts)
                 all_bugs[bugId] = dict(bugInfo)
@@ -83,4 +81,4 @@ def conn_get_info_bugs(datadict, bug_ids):
                 logging.error(f"Get Bug: {e}")
     # logging.debug(type(all_bugs))
     # logging.debug(f"All Bugs: {json.dumps(all_bugs)}")
-    return(all_bugs)
+    return all_bugs

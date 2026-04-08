@@ -1,21 +1,20 @@
-import grpc
+import logging
 import os
-import sys
 
-sys.path.insert(0, "/Users/corey/vs-code/cloudvision-mcp")
-from cloudvision_mcp import _normalize_api_token
+import grpc
+from arista.endpointlocation.v1 import models as endpoint_models
+from arista.inventory.v1 import models
+
+from cvp_mcp.env import normalize_api_token
 
 from .models import (
-    SwitchInfo,
-    ProbeStats,
-    DeviceLifecycleSummary,
     DeviceHardwareEoL,
+    DeviceLifecycleSummary,
     DeviceSoftwareEoL,
     EndpointLocation,
+    ProbeStats,
+    SwitchInfo,
 )
-from arista.inventory.v1 import models
-from arista.endpointlocation.v1 import models as endpoint_models
-import logging
 
 RPC_TIMEOUT = 30
 EOS_PLATFORMS = ["DCS-", "CCS-", "AWE-"]
@@ -50,7 +49,7 @@ def datetime_to_readable_format(dt, format_type="full"):
 
 def createConnection(datadict):
     # datadict = get_env_vars()
-    token = _normalize_api_token(datadict.get("cvtoken"))
+    token = normalize_api_token(datadict.get("cvtoken"))
     callCreds = grpc.access_token_call_credentials(token)
 
     cert_path = datadict.get("cert")

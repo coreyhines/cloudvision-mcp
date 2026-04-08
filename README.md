@@ -34,6 +34,28 @@ Run
 
 The server will be running by default with Streamable HTTP on port 8000
 
+## Tools and data sources
+
+Responses for the newer tools use a common envelope: `device_id`, `collected_at`, `data_source`, `coverage`, `warnings`, and either `items` or `object`.
+
+| Tool | Purpose | Typical `data_source` |
+| --- | --- | --- |
+| `get_cvp_probe_arista_apis` | Installed `arista.*.v1` Python API bundles | local package introspection |
+| `get_cvp_device_config` | Config summary URIs + optional running-config body | `resource_api:configstatus.v1` (+ HTTPS URI fetch) |
+| `get_cvp_interfaces` | Interface admin/oper, speed, MTU, counters | `connector:device:Sysdb/interface` |
+| `get_cvp_vlans` | Switchport / VLAN hints | `connector:device:Sysdb/bridging` |
+| `get_cvp_ip_interfaces` | L3 addressing hints | `connector:device:Sysdb/ip` |
+| `get_cvp_events` | Structured CVP events (`GetAll` + filters) | `resource_api:event.v1` |
+| `search_cvp_events` | Substring search over normalized event fields | `resource_api:event.v1+client_search` |
+| `get_cvp_bgp_status` | BGP snapshot | `connector:device:Sysdb/routing/bgp` |
+| `get_cvp_routes` | RIB-like entries | `connector:device:Sysdb/routing` |
+| `get_cvp_features` | Feature-related Sysdb | `connector:device:Sysdb/feature` |
+| `get_cvp_evpn` | EVPN Sysdb | `connector:device:Sysdb/evpn` |
+| `get_cvp_vxlan` | VxLAN Sysdb | `connector:device:Sysdb/vxlan` |
+| `get_cvp_system_health` | Version / environment / platform | `connector:device:Sysdb/sys+environment` |
+
+Connector-based tools are best-effort: EOS paths differ by release, so `coverage` may be `partial` and `warnings` may explain empty results.
+
 ## Server Options
 
 The server can be configured with the following flags

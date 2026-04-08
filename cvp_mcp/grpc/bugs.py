@@ -1,12 +1,9 @@
-from arista.bugexposure.v1 import models
-from arista.bugexposure.v1 import services
-from .utils import RPC_TIMEOUT, createConnection, serialize_repeated_int32
-from .models import BugExposure
-import grpc
 import logging
-import os
-import json
-import sys
+
+from arista.bugexposure.v1 import models, services
+
+from .models import BugExposure
+from .utils import RPC_TIMEOUT, serialize_repeated_int32
 
 
 def grpc_all_bug_exposure(channel):
@@ -43,8 +40,6 @@ def grpc_all_bug_exposure(channel):
                         highest_cve = "None"
                     case _:
                         highest_cve = "Unspecified"
-                for id in bug.value.bug_ids.values:
-                    ids = int(id)
                 bug_exposure = BugExposure(
                     serial_number=bug.value.key.device_id.value,
                     bug_ids=serialize_repeated_int32(bug.value.bug_ids.values),

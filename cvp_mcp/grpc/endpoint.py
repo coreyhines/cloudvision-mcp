@@ -1,8 +1,9 @@
-from arista.endpointlocation.v1 import models
-from arista.endpointlocation.v1 import services
-from google.protobuf import wrappers_pb2 as wrappers
-from .utils import RPC_TIMEOUT, convert_response_to_endpoint_location
 import logging
+
+from arista.endpointlocation.v1 import models, services
+from google.protobuf import wrappers_pb2 as wrappers
+
+from .utils import RPC_TIMEOUT, convert_response_to_endpoint_location
 
 
 def _device_map_entries(endpoint_location):

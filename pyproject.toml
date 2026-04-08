@@ -2,11 +2,19 @@
 name = "cvp_mcp"
 version = "0.1.0"
 description = "CloudVision MCP Server"
+requires-python = ">=3.11"
 dependencies = [
     "cloudvision",
     "grpcio",
     "protobuf",
     "mcp[cli]"
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8",
+    "black>=24.0",
 ]
 
 [tool.uv.workspace]
@@ -20,8 +28,19 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["cvp_mcp"]
+packages = ["cvp_mcp", "cvp_mcp.grpc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+extend-ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "cvp_mcp/grpc/__init__.py" = ["F401"]
 
+[tool.black]
+line-length = 88
+target-version = ["py311"]

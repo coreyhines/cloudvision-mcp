@@ -139,6 +139,17 @@ async def get_inventory(
     return rows
 
 
+def _rfc3339_utc_from_ns(timestamp_ns: int) -> str:
+    """Format epoch nanoseconds as RFC3339 for Go/protobuf JSON timestamp parsing."""
+    ns = int(timestamp_ns)
+    sec, remainder = divmod(ns, 1_000_000_000)
+    dt = datetime.fromtimestamp(sec, tz=UTC)
+    if remainder == 0:
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    frac = f"{remainder:09d}".rstrip("0")
+    return f"{dt.strftime('%Y-%m-%dT%H:%M:%S')}.{frac}Z"
+
+
 async def get_config(
     session: aiohttp.ClientSession,
     url: str,
@@ -148,7 +159,7 @@ async def get_config(
     payload: dict[str, Any] = {
         "request": {
             "device_id": device,
-            "timestamp": str(timestamp),
+            "timestamp": _rfc3339_utc_from_ns(timestamp),
             "type": "RUNNING_CONFIG",
         }
     }

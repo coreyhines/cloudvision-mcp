@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 
 from cvp_mcp.grpc import config_async_flow as caf
-from cvp_mcp.grpc.config_async_flow import _decode_json_maybe_multi
+from cvp_mcp.grpc.config_async_flow import (
+    _decode_json_maybe_multi,
+    _rfc3339_utc_from_ns,
+)
 
 
 def test_decode_json_maybe_multi_single_document():
@@ -60,3 +63,8 @@ def test_get_config_single_payload_path():
     assert isinstance(cfg, str)
     assert "hostname x" in cfg
     assert sess.calls == 1
+
+
+def test_rfc3339_utc_from_ns():
+    assert _rfc3339_utc_from_ns(0) == "1970-01-01T00:00:00Z"
+    assert _rfc3339_utc_from_ns(1) == "1970-01-01T00:00:00.000000001Z"

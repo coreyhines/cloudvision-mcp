@@ -10,10 +10,13 @@ from arista.configstatus.v1 import models as cm
 from arista.configstatus.v1 import services as cs
 from google.protobuf import wrappers_pb2 as wrappers
 
+from cvp_mcp.grpc.config_connector import connector_fetch_running_config_text
 from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.inventory import grpc_one_inventory_serial
 from cvp_mcp.grpc.uri_fetch import fetch_uri_with_bearer
 from cvp_mcp.grpc.utils import RPC_TIMEOUT, serialize_arista_protobuf
+
+_MAX_RUNNING_CONFIG_CHARS = 1_500_000
 
 
 def grpc_get_device_config(
@@ -86,6 +89,7 @@ def grpc_get_device_config(
         warnings.append(f"configuration_uri_fetch_failed:{e}")
 
     running_config_text: str | None = None
+    running_config_source: str | None = None
     if include_running_config:
         uri = running_uri or summary_obj.get("running_config_uri", "")
         if isinstance(uri, dict):
@@ -93,12 +97,48 @@ def grpc_get_device_config(
         if uri and token:
             text, err = fetch_uri_with_bearer(str(uri), token, cafile=cafile)
             running_config_text = text
+            running_config_source = "resource_uri"
             if err:
                 warnings.append(f"running_config_body:{err}")
+                running_config_source = None
         elif not uri:
             warnings.append("no_running_config_uri")
         elif not token:
             warnings.append("no_token_for_uri_fetch")
+
+        if (
+            include_running_config
+            and (not running_config_text or not running_config_text.strip())
+            and datadict.get("cvtoken")
+        ):
+            fb_text, fb_tried, fb_warn = connector_fetch_running_config_text(
+                datadict, device_id
+            )
+            if fb_text:
+                if len(fb_text) > _MAX_RUNNING_CONFIG_CHARS:
+                    running_config_text = fb_text[:_MAX_RUNNING_CONFIG_CHARS]
+                    warnings.append(
+                        f"running_config_truncated_to_{_MAX_RUNNING_CONFIG_CHARS}_chars"
+                    )
+                else:
+                    running_config_text = fb_text
+                running_config_source = "connector"
+                obj_fb = {
+                    "connector_fallback_paths_tried": fb_tried,
+                }
+            else:
+                obj_fb = {"connector_fallback_paths_tried": fb_tried}
+            for w in fb_warn:
+                if w not in warnings:
+                    warnings.append(w)
+        else:
+            obj_fb = {}
+    else:
+        obj_fb = {}
+
+    data_source = "resource_api:configstatus.v1"
+    if include_running_config and running_config_source == "connector":
+        data_source += "+connector:sysdb_smash_analytics"
 
     obj = {
         "hostname": hostname,
@@ -106,9 +146,11 @@ def grpc_get_device_config(
         "config_summary": summary_obj,
         "designed_config_uri": designed_uri,
         "running_config_uri": running_uri,
+        **obj_fb,
     }
     if include_running_config:
         obj["running_config_text"] = running_config_text
+        obj["running_config_source"] = running_config_source
 
     coverage = "full"
     if warnings:
@@ -116,7 +158,7 @@ def grpc_get_device_config(
 
     return tool_envelope(
         device_id=device_id,
-        data_source="resource_api:configstatus.v1",
+        data_source=data_source,
         coverage=coverage,
         obj=obj,
         warnings=warnings,

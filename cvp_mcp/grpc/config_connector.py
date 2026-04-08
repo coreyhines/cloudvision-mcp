@@ -82,6 +82,22 @@ def _best_config_candidate(strings: list[str]) -> str | None:
     return max(strings, key=len)
 
 
+def _line_text(node: dict[str, Any]) -> str | None:
+    """Extract CLI line string from a ``lines`` map entry (plain or protobuf-style)."""
+    t = node.get("text")
+    if isinstance(t, str):
+        return t
+    if isinstance(t, dict):
+        v = t.get("value")
+        if isinstance(v, str):
+            return v
+        if v is not None:
+            return str(v)
+    if t is not None:
+        return str(t)
+    return None
+
+
 def _unwrap_link_ptr(val: Any) -> str | None:
     """Normalize CloudVision / protobuf-like link fields to a UUID string or None."""
     if val is None:
@@ -106,15 +122,22 @@ def _reconstruct_running_config_lines(raw: Any) -> str | None:
     Each key is a line id (e.g. UUID); each value is a Map with ``text``,
     ``next``, and ``previous`` forming a doubly linked list.
     """
-    if not isinstance(raw, dict) or len(raw) < 2:
+    if not isinstance(raw, dict):
+        return None
+    # Connector Get sometimes returns a single-key wrapper around the line-id map.
+    if len(raw) == 1:
+        sole = next(iter(raw.values()))
+        if isinstance(sole, dict):
+            raw = sole
+
+    if len(raw) < 2:
         return None
 
     nodes: dict[str, dict[str, Any]] = {}
     for k, v in raw.items():
         if not isinstance(v, dict) or "text" not in v:
             continue
-        text = v.get("text")
-        if not isinstance(text, str):
+        if _line_text(v) is None:
             continue
         nodes[str(k)] = v
 
@@ -144,8 +167,8 @@ def _reconstruct_running_config_lines(raw: Any) -> str | None:
     cur: str | None = start
     while cur and cur in nodes and cur not in seen:
         seen.add(cur)
-        t = nodes[cur].get("text")
-        if isinstance(t, str):
+        t = _line_text(nodes[cur])
+        if t is not None:
             lines.append(t)
         nxt = next_of(nodes[cur])
         if not nxt or nxt not in nodes:
@@ -195,6 +218,11 @@ def connector_fetch_running_config_text(
         (
             "device:Config/running/lines",
             [device_id, "Config", "running", "lines"],
+        ),
+        # Many CVP/EOS versions require a wildcard here so Get returns all line entries.
+        (
+            "device:Config/running/lines/*",
+            [device_id, "Config", "running", "lines", Wildcard()],
         ),
         ("device:Sysdb/config", [device_id, "Sysdb", "config", Wildcard()]),
         ("device:Sysdb/archive", [device_id, "Sysdb", "archive", Wildcard()]),

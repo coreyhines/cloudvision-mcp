@@ -45,10 +45,14 @@ def grpc_get_device_config(
     cfg_stub = cs.ConfigurationServiceStub(channel)
 
     hostname = ""
+    connector_device_id = device_id
     try:
         inv = grpc_one_inventory_serial(channel, device_id)
         if isinstance(inv, dict):
             hostname = str(inv.get("hostname") or "")
+            serial = str(inv.get("serial_number") or "").strip()
+            if serial:
+                connector_device_id = serial
     except Exception as e:
         logging.debug("inventory for hostname: %s", e)
 
@@ -112,7 +116,7 @@ def grpc_get_device_config(
             and datadict.get("cvtoken")
         ):
             fb_text, fb_tried, fb_warn = connector_fetch_running_config_text(
-                datadict, device_id
+                datadict, connector_device_id
             )
             if fb_text:
                 if len(fb_text) > _MAX_RUNNING_CONFIG_CHARS:

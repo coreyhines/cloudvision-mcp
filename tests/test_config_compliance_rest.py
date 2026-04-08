@@ -1,6 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+
 from cvp_mcp.grpc import config
+
+
+def test_run_async_in_sync_context_with_running_loop():
+    async def inner():
+        return 42
+
+    async def outer():
+        return config._run_async_in_sync_context(inner())
+
+    assert asyncio.run(outer()) == 42
 
 
 def test_cvp_https_base_normalizes_host_and_scheme():

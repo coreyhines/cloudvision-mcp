@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import re
-from typing import Any
+from collections.abc import Coroutine
+from typing import Any, TypeVar
 
 import aiohttp
 import grpc
@@ -31,7 +33,20 @@ from cvp_mcp.grpc.uri_fetch import (
 )
 from cvp_mcp.grpc.utils import RPC_TIMEOUT, serialize_arista_protobuf
 
+_T = TypeVar("_T")
+
 _MAX_RUNNING_CONFIG_CHARS = 1_500_000
+
+
+def _run_async_in_sync_context(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run ``coro`` from sync code when an event loop may already be running (e.g. MCP)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        fut = pool.submit(asyncio.run, coro)
+        return fut.result()
 
 
 def _cvp_https_base(cvp: str) -> str:
@@ -115,10 +130,7 @@ def _fetch_running_config_from_compliance_rest(
                     return text, None
             return None, "no_config_in_response"
 
-    try:
-        return asyncio.run(_run())
-    except RuntimeError:
-        return None, "event_loop_running"
+    return _run_async_in_sync_context(_run())
 
 
 def _inventory_lookup_device(
@@ -160,10 +172,7 @@ def _inventory_lookup_device(
                 None if facts else "not_found",
             )
 
-    try:
-        return asyncio.run(_run())
-    except RuntimeError:
-        return {}, "event_loop_running"
+    return _run_async_in_sync_context(_run())
 
 
 def grpc_get_device_config(

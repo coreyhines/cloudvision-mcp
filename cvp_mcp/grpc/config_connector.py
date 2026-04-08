@@ -82,6 +82,98 @@ def _best_config_candidate(strings: list[str]) -> str | None:
     return max(strings, key=len)
 
 
+def _unwrap_link_ptr(val: Any) -> str | None:
+    """Normalize CloudVision / protobuf-like link fields to a UUID string or None."""
+    if val is None:
+        return None
+    if isinstance(val, str):
+        return val.strip() or None
+    if isinstance(val, dict):
+        inner = val.get("value")
+        if inner is not None and isinstance(inner, str):
+            return inner.strip() or None
+        if inner is not None:
+            s = str(inner).strip()
+            return s or None
+    s = str(val).strip()
+    return s or None
+
+
+def _reconstruct_running_config_lines(raw: Any) -> str | None:
+    """
+    Rebuild running-config text from Telemetry-style ``Config/running/lines``.
+
+    Each key is a line id (e.g. UUID); each value is a Map with ``text``,
+    ``next``, and ``previous`` forming a doubly linked list.
+    """
+    if not isinstance(raw, dict) or len(raw) < 2:
+        return None
+
+    nodes: dict[str, dict[str, Any]] = {}
+    for k, v in raw.items():
+        if not isinstance(v, dict) or "text" not in v:
+            continue
+        text = v.get("text")
+        if not isinstance(text, str):
+            continue
+        nodes[str(k)] = v
+
+    if len(nodes) < 2:
+        return None
+
+    def prev_of(node: dict[str, Any]) -> str | None:
+        return _unwrap_link_ptr(node.get("previous"))
+
+    def next_of(node: dict[str, Any]) -> str | None:
+        return _unwrap_link_ptr(node.get("next"))
+
+    heads = [
+        kid for kid in nodes if (p := prev_of(nodes[kid])) is None or p not in nodes
+    ]
+    if not heads:
+        return None
+
+    start = heads[0]
+    if len(heads) > 1:
+        roots = [h for h in heads if prev_of(nodes[h]) is None]
+        if len(roots) == 1:
+            start = roots[0]
+
+    lines: list[str] = []
+    seen: set[str] = set()
+    cur: str | None = start
+    while cur and cur in nodes and cur not in seen:
+        seen.add(cur)
+        t = nodes[cur].get("text")
+        if isinstance(t, str):
+            lines.append(t)
+        nxt = next_of(nodes[cur])
+        if not nxt or nxt not in nodes:
+            break
+        cur = nxt
+
+    text = "\n".join(lines)
+    if len(text) < 40:
+        return None
+    return text
+
+
+def _process_raw_for_config(raw: Any, label: str) -> list[str]:
+    """Apply ``/Config/running/lines`` reconstruction, then legacy string heuristics."""
+    out: list[str] = []
+    if isinstance(raw, dict):
+        linked = _reconstruct_running_config_lines(raw)
+        if linked:
+            logging.debug(
+                "config fallback %s: linked running/lines (%s chars)",
+                label,
+                len(linked),
+            )
+            out.append(linked)
+    out.extend(_extract_config_strings(raw))
+    return out
+
+
 def connector_fetch_running_config_text(
     datadict: dict[str, Any],
     device_id: str,
@@ -99,6 +191,11 @@ def connector_fetch_running_config_text(
         return None, tried, ["missing_device_id"]
 
     device_paths: list[tuple[str, list]] = [
+        # Telemetry Browser: /Config/running/lines (linked list of line maps, not one string)
+        (
+            "device:Config/running/lines",
+            [device_id, "Config", "running", "lines"],
+        ),
         ("device:Sysdb/config", [device_id, "Sysdb", "config", Wildcard()]),
         ("device:Sysdb/archive", [device_id, "Sysdb", "archive", Wildcard()]),
         ("device:Sysdb/boot", [device_id, "Sysdb", "boot", Wildcard()]),
@@ -140,7 +237,7 @@ def connector_fetch_running_config_text(
                     raw = serialize_cloudvision_data(
                         get_device_path(client, device_id, path)
                     )
-                    found = _extract_config_strings(raw)
+                    found = _process_raw_for_config(raw, label)
                     if found:
                         collected.extend(found)
                         logging.debug(
@@ -155,7 +252,7 @@ def connector_fetch_running_config_text(
                     raw = serialize_cloudvision_data(
                         get(client, "analytics", path, dtype="device")
                     )
-                    found = _extract_config_strings(raw)
+                    found = _process_raw_for_config(raw, label)
                     if found:
                         collected.extend(found)
                         logging.debug(

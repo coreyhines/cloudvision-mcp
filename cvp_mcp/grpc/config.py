@@ -38,6 +38,21 @@ _T = TypeVar("_T")
 _MAX_RUNNING_CONFIG_CHARS = 1_500_000
 
 
+def _dedupe_device_keys(*candidates: str) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in candidates:
+        k = (raw or "").strip()
+        if not k:
+            continue
+        key_l = k.lower()
+        if key_l in seen:
+            continue
+        seen.add(key_l)
+        out.append(k)
+    return out
+
+
 def _run_async_in_sync_context(coro: Coroutine[Any, Any, _T]) -> _T:
     """Run ``coro`` from sync code when an event loop may already be running (e.g. MCP)."""
     try:
@@ -90,7 +105,7 @@ def _extract_running_config_text(obj: Any) -> str | None:
 
 
 def _fetch_running_config_from_compliance_rest(
-    datadict: dict[str, Any], serials: list[str]
+    datadict: dict[str, Any], device_keys: list[str]
 ) -> tuple[str | None, str | None]:
     token = (datadict.get("cvtoken") or "").strip()
     base = _cvp_https_base(str(datadict.get("cvp") or ""))
@@ -99,9 +114,9 @@ def _fetch_running_config_from_compliance_rest(
     if not base:
         return None, "missing_cvp"
     url = f"{base}/api/v3/services/compliancecheck.Compliance/GetConfig"
-    ids = [d.strip() for d in serials if d and d.strip()]
+    ids = _dedupe_device_keys(*device_keys)
     if not ids:
-        return None, "missing_serial"
+        return None, "missing_device_key"
     cafile = datadict.get("cert")
     headers = {
         "Authorization": f"Bearer {token}",
@@ -111,7 +126,7 @@ def _fetch_running_config_from_compliance_rest(
     timestamp = now_ns()
 
     async def _run() -> tuple[str | None, str | None]:
-        timeout = aiohttp.ClientTimeout(total=60.0)
+        timeout = aiohttp.ClientTimeout(total=180.0)
         ssl_ctx = None
         if cafile:
             import ssl
@@ -121,16 +136,21 @@ def _fetch_running_config_from_compliance_rest(
         async with aiohttp.ClientSession(
             headers=headers, timeout=timeout, connector=connector
         ) as session:
-            for serial in ids:
+            last_err: str | None = None
+            for device_key in ids:
                 try:
-                    text, err = await async_get_config(session, url, serial, timestamp)
+                    text, err = await async_get_config(
+                        session, url, device_key, timestamp
+                    )
                 except Exception as e:  # noqa: BLE001
-                    return None, str(e)
+                    last_err = str(e)
+                    continue
                 if text and _looks_like_eos_running_config(text):
                     return text, None
                 if err:
-                    return None, err
-            return None, "no_config_in_response"
+                    last_err = err
+                    continue
+            return None, last_err or "no_config_in_response"
 
     return _run_async_in_sync_context(_run())
 
@@ -299,7 +319,13 @@ def grpc_get_device_config(
             compliance_text, compliance_err = (
                 _fetch_running_config_from_compliance_rest(
                     datadict,
-                    [device_facts.get("serial_number", ""), connector_device_id],
+                    _dedupe_device_keys(
+                        device_facts.get("serial_number", ""),
+                        connector_device_id,
+                        hostname,
+                        device_facts.get("hostname", ""),
+                        device_id,
+                    ),
                 )
             )
             if compliance_text:

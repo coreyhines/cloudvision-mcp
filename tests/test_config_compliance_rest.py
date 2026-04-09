@@ -52,6 +52,31 @@ def test_fetch_running_config_from_compliance_rest(monkeypatch):
     assert seen["calls"] == 1
 
 
+def test_fetch_running_config_falls_back_to_next_device_key(monkeypatch):
+    text = "!\nhostname 720xp-48\nip routing\n" + ("y" * 60)
+    seen = []
+
+    async def fake_get_config(session, url, device, timestamp):
+        seen.append(device)
+        if device == "SERIAL_FAIL":
+            return None, "504:timeout"
+        assert device == "720xp-48"
+        return text, None
+
+    monkeypatch.setattr(config, "async_get_config", fake_get_config)
+    datadict = {"cvp": "cvp.example.com:443", "cvtoken": "token", "cert": None}
+    out, err = config._fetch_running_config_from_compliance_rest(
+        datadict, ["SERIAL_FAIL", "720xp-48"]
+    )
+    assert err is None
+    assert out == text
+    assert seen == ["SERIAL_FAIL", "720xp-48"]
+
+
+def test_dedupe_device_keys_preserves_order_case_insensitive():
+    assert config._dedupe_device_keys("A", "a", "B", "", "  B  ") == ["A", "B"]
+
+
 def test_inventory_lookup_device_by_hostname(monkeypatch):
     async def fake_resolve_device_facts(session, inventory_url, target):
         assert target == "720xp-48"

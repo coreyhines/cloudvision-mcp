@@ -35,11 +35,12 @@ def grpc_one_device_by_hostname(channel, hostname: str) -> SwitchInfo | None:
     return None
 
 
-def grpc_all_inventory(channel):
+def grpc_all_inventory(channel, *, exclude_access_points: bool = True):
     """
-    Prints the hostname of all devices known to the system.
-    Optionally filters based on the only_active and only_inactive arguments.
-    When filtering, only_active takes priority to only_inactive if both are set.
+    Stream all active + inactive streaming devices.
+
+    ``exclude_access_points``: WiFi APs (C-* wireless) do not expose EOS running
+    config; omitting them keeps bulk operations fast.
     """
     logging.info("CVP Get all Tool")
     all_active = []
@@ -65,6 +66,11 @@ def grpc_all_inventory(channel):
             # Check to make sure the device has a valid System MAC
             if device.value.system_mac_address.value:
                 switch = convert_response_to_switch(device)
+                if (
+                    exclude_access_points
+                    and switch.get("device_type") == "Access Point"
+                ):
+                    continue
                 match switch["streaming_status"]:
                     case "Active":
                         logging.debug(f"Active: {switch['hostname']}")

@@ -26,14 +26,13 @@ from cvp_mcp.grpc.config_connector import (
     _looks_like_eos_running_config,
     connector_fetch_running_config_text,
 )
+from cvp_mcp.grpc.device_capabilities import device_type_supports_running_config
 from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.inventory import (
     grpc_one_device_by_hostname,
     grpc_one_inventory_serial,
 )
-from cvp_mcp.grpc.uri_fetch import (
-    fetch_uri_with_bearer,
-)
+from cvp_mcp.grpc.uri_fetch import fetch_uri_with_bearer
 from cvp_mcp.grpc.utils import RPC_TIMEOUT, serialize_arista_protobuf
 
 _T = TypeVar("_T")
@@ -48,10 +47,10 @@ def _dedupe_device_keys(*candidates: str) -> list[str]:
         k = (raw or "").strip()
         if not k:
             continue
-        key_l = k.lower()
-        if key_l in seen:
+        kl = k.lower()
+        if kl in seen:
             continue
-        seen.add(key_l)
+        seen.add(kl)
         out.append(k)
     return out
 
@@ -63,8 +62,7 @@ def _run_async_in_sync_context(coro: Coroutine[Any, Any, _T]) -> _T:
     except RuntimeError:
         return asyncio.run(coro)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        fut = pool.submit(asyncio.run, coro)
-        return fut.result()
+        return pool.submit(asyncio.run, coro).result()
 
 
 def _cvp_https_base(cvp: str) -> str:
@@ -74,6 +72,20 @@ def _cvp_https_base(cvp: str) -> str:
     if host.endswith(":443"):
         host = host[:-4]
     return f"https://{host}" if host else ""
+
+
+def _merge_switchinfo_into_facts(switch: dict | None, facts: dict[str, str]) -> None:
+    """Copy hostname, serial, device_type, system_mac from inventory GetOne/GetAll result."""
+    if not isinstance(switch, dict):
+        return
+    if switch.get("hostname"):
+        facts["hostname"] = str(switch["hostname"]).strip()
+    if str(switch.get("serial_number") or "").strip():
+        facts["serial_number"] = str(switch["serial_number"]).strip()
+    if str(switch.get("device_type") or "").strip():
+        facts["device_type"] = str(switch["device_type"]).strip()
+    if str(switch.get("system_mac") or "").strip():
+        facts["system_mac"] = str(switch["system_mac"]).strip()
 
 
 def _extract_running_config_text(obj: Any) -> str | None:
@@ -161,7 +173,7 @@ def _fetch_running_config_from_compliance_rest(
 def _inventory_lookup_device(
     datadict: dict[str, Any], target: str
 ) -> tuple[dict[str, str], str | None]:
-    """Resolve target to reusable device facts via inventory REST."""
+    """Resolve target to device facts via inventory REST (optional serial/hostname)."""
     token = (datadict.get("cvtoken") or "").strip()
     base = _cvp_https_base(str(datadict.get("cvp") or ""))
     if not token:
@@ -221,13 +233,13 @@ def grpc_get_device_config(
 
     token = (datadict.get("cvtoken") or "").strip()
     cafile = datadict.get("cert")
-
     summary_stub = cs.SummaryServiceStub(channel)
     cfg_stub = cs.ConfigurationServiceStub(channel)
 
     device_facts: dict[str, str] = {"device_id_input": device_id}
     hostname = ""
     connector_device_id = device_id
+
     inv_rest_facts, inv_rest_err = _inventory_lookup_device(datadict, device_id)
     if inv_rest_facts:
         device_facts.update(inv_rest_facts)
@@ -238,98 +250,91 @@ def grpc_get_device_config(
 
     try:
         inv = grpc_one_inventory_serial(channel, device_id)
+        _merge_switchinfo_into_facts(
+            inv if isinstance(inv, dict) else None, device_facts
+        )
+        hostname = device_facts.get("hostname", "") or hostname
+        if device_facts.get("serial_number"):
+            connector_device_id = device_facts["serial_number"]
+        # REST-only fields (if ever present on dict)
         if isinstance(inv, dict):
-            hostname = str(inv.get("hostname") or "") or hostname
-            if hostname:
-                device_facts["hostname"] = hostname
-            serial = str(inv.get("serial_number") or "").strip()
-            if serial:
-                connector_device_id = serial
-                device_facts["serial_number"] = serial
-            mgmt_ip = str(
-                inv.get("management_ip")
-                or inv.get("primary_management_ip")
-                or inv.get("ip_address")
-                or ""
-            ).strip()
-            if mgmt_ip:
-                device_facts["management_ip"] = mgmt_ip
-            system_mac = str(
-                inv.get("system_mac") or inv.get("system_mac_address") or ""
-            ).strip()
-            if system_mac:
-                device_facts["system_mac"] = system_mac
+            for ip_key in ("management_ip", "primary_management_ip", "ip_address"):
+                ip_val = str(inv.get(ip_key) or "").strip()
+                if ip_val:
+                    device_facts["management_ip"] = ip_val
+                    break
     except Exception as e:
-        logging.debug("inventory for hostname: %s", e)
+        logging.debug("grpc inventory GetOne: %s", e)
 
     if not (device_facts.get("serial_number") or "").strip():
-        h_lookup = (hostname or device_id or "").strip()
-        if h_lookup:
+        h_key = (hostname or device_id).strip()
+        if h_key:
             try:
-                inv_h = grpc_one_device_by_hostname(channel, h_lookup)
-                if isinstance(inv_h, dict) and inv_h.get("serial_number"):
-                    serial = str(inv_h.get("serial_number") or "").strip()
-                    if serial:
-                        connector_device_id = serial
-                        device_facts["serial_number"] = serial
-                    hostname = str(inv_h.get("hostname") or "") or hostname
-                    if hostname:
-                        device_facts["hostname"] = hostname
-                    mgmt_ip = str(
-                        inv_h.get("management_ip")
-                        or inv_h.get("primary_management_ip")
-                        or inv_h.get("ip_address")
-                        or ""
-                    ).strip()
-                    if mgmt_ip:
-                        device_facts["management_ip"] = mgmt_ip
-                    system_mac = str(
-                        inv_h.get("system_mac") or inv_h.get("system_mac_address") or ""
-                    ).strip()
-                    if system_mac:
-                        device_facts["system_mac"] = system_mac
+                inv_h = grpc_one_device_by_hostname(channel, h_key)
+                _merge_switchinfo_into_facts(
+                    inv_h if isinstance(inv_h, dict) else None, device_facts
+                )
+                hostname = device_facts.get("hostname", "") or hostname
+                if device_facts.get("serial_number"):
+                    connector_device_id = device_facts["serial_number"]
+                if isinstance(inv_h, dict):
+                    for ip_key in (
+                        "management_ip",
+                        "primary_management_ip",
+                        "ip_address",
+                    ):
+                        ip_val = str(inv_h.get(ip_key) or "").strip()
+                        if ip_val:
+                            device_facts["management_ip"] = ip_val
+                            break
             except Exception as e:
-                logging.debug("inventory by hostname (serial resolution): %s", e)
+                logging.debug("grpc inventory by hostname: %s", e)
+
+    dev_type = device_facts.get("device_type")
+    query_configstatus = device_type_supports_running_config(dev_type)
 
     summary_obj: dict[str, Any] = {}
-    try:
-        sreq = cs.SummaryRequest(
-            key=cm.SummaryKey(device_id=wrappers.StringValue(value=device_id))
-        )
-        sresp = summary_stub.GetOne(sreq, timeout=RPC_TIMEOUT)
-        if sresp and sresp.HasField("value"):
-            summary_obj = serialize_arista_protobuf(sresp.value.summary)
-    except Exception as e:
-        logging.error("configsummary GetOne: %s", e)
-        warnings.append(f"summary_fetch_failed:{e}")
+    designed_uri, running_uri = "", ""
 
-    designed_uri = ""
-    running_uri = ""
-    try:
-        for cfg_type, attr in (
-            (cm.CONFIG_TYPE_DESIGNED_CONFIG, "designed"),
-            (cm.CONFIG_TYPE_RUNNING_CONFIG, "running"),
-        ):
-            creq = cs.ConfigurationRequest(
-                key=cm.ConfigKey(
-                    device_id=wrappers.StringValue(value=device_id),
-                    type=cfg_type,
-                )
+    if query_configstatus:
+        try:
+            sreq = cs.SummaryRequest(
+                key=cm.SummaryKey(device_id=wrappers.StringValue(value=device_id))
             )
-            cresp = cfg_stub.GetOne(creq, timeout=RPC_TIMEOUT)
-            if cresp and cresp.HasField("value") and cresp.value.HasField("uri"):
-                u = cresp.value.uri.value
-                if attr == "designed":
-                    designed_uri = u
-                else:
-                    running_uri = u
-    except Exception as e:
-        logging.error("configuration GetOne: %s", e)
-        warnings.append(f"configuration_uri_fetch_failed:{e}")
+            sresp = summary_stub.GetOne(sreq, timeout=RPC_TIMEOUT)
+            if sresp and sresp.HasField("value"):
+                summary_obj = serialize_arista_protobuf(sresp.value.summary)
+        except Exception as e:
+            logging.error("configsummary GetOne: %s", e)
+            warnings.append(f"summary_fetch_failed:{e}")
+
+        try:
+            for cfg_type, attr in (
+                (cm.CONFIG_TYPE_DESIGNED_CONFIG, "designed"),
+                (cm.CONFIG_TYPE_RUNNING_CONFIG, "running"),
+            ):
+                creq = cs.ConfigurationRequest(
+                    key=cm.ConfigKey(
+                        device_id=wrappers.StringValue(value=device_id),
+                        type=cfg_type,
+                    )
+                )
+                cresp = cfg_stub.GetOne(creq, timeout=RPC_TIMEOUT)
+                if cresp and cresp.HasField("value") and cresp.value.HasField("uri"):
+                    u = cresp.value.uri.value
+                    if attr == "designed":
+                        designed_uri = u
+                    else:
+                        running_uri = u
+        except Exception as e:
+            logging.error("configuration GetOne: %s", e)
+            warnings.append(f"configuration_uri_fetch_failed:{e}")
 
     running_config_text: str | None = None
     running_config_source: str | None = None
-    if include_running_config:
+    obj_fb: dict[str, Any] = {}
+
+    if include_running_config and query_configstatus:
         uri = running_uri or summary_obj.get("running_config_uri", "")
         if isinstance(uri, dict):
             uri = uri.get("value", "")
@@ -345,9 +350,7 @@ def grpc_get_device_config(
         elif not token:
             warnings.append("no_token_for_uri_fetch")
 
-        if include_running_config and (
-            not running_config_text or not running_config_text.strip()
-        ):
+        if not running_config_text or not running_config_text.strip():
             compliance_text, compliance_err = (
                 _fetch_running_config_from_compliance_rest(
                     datadict,
@@ -367,10 +370,8 @@ def grpc_get_device_config(
                 warnings.append(f"compliance_get_config:{compliance_err}")
 
         if (
-            include_running_config
-            and (not running_config_text or not running_config_text.strip())
-            and datadict.get("cvtoken")
-        ):
+            not running_config_text or not running_config_text.strip()
+        ) and datadict.get("cvtoken"):
             fb_text, fb_tried, fb_warn = connector_fetch_running_config_text(
                 datadict, connector_device_id
             )
@@ -383,21 +384,17 @@ def grpc_get_device_config(
                 else:
                     running_config_text = fb_text
                 running_config_source = "connector"
-                obj_fb = {
-                    "connector_fallback_paths_tried": fb_tried,
-                }
+                obj_fb["connector_fallback_paths_tried"] = fb_tried
             else:
-                obj_fb = {"connector_fallback_paths_tried": fb_tried}
+                obj_fb["connector_fallback_paths_tried"] = fb_tried
             for w in fb_warn:
                 if w not in warnings:
                     warnings.append(w)
-        else:
-            obj_fb = {}
-    else:
-        obj_fb = {}
+    elif include_running_config and not query_configstatus:
+        warnings.append("running_config_skipped:access_point")
 
     attempted_sources: list[str] = []
-    if (
+    if query_configstatus and (
         summary_obj
         or designed_uri
         or running_uri
@@ -408,12 +405,11 @@ def grpc_get_device_config(
         )
     ):
         attempted_sources.append("resource_api:configstatus.v1")
-    if include_running_config:
+    if include_running_config and query_configstatus:
         attempted_sources.append("service_api:compliancecheck.getconfig")
         if running_config_source == "connector":
             attempted_sources.append("connector:sysdb_smash_analytics")
 
-    # Prefer actual winning source; otherwise report attempted path(s) explicitly.
     if running_config_source == "resource_uri":
         data_source = "resource_api:configstatus.v1"
     elif running_config_source == "compliance_rest":
@@ -436,10 +432,7 @@ def grpc_get_device_config(
         obj["running_config_text"] = running_config_text
         obj["running_config_source"] = running_config_source
 
-    coverage = "full"
-    if warnings:
-        coverage = "partial"
-
+    coverage = "partial" if warnings else "full"
     return tool_envelope(
         device_id=device_id,
         data_source=data_source,

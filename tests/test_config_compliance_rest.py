@@ -1,6 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+
 from cvp_mcp.grpc import config
+
+
+def test_run_async_in_sync_context_with_running_loop():
+    async def inner():
+        return 42
+
+    async def outer():
+        return config._run_async_in_sync_context(inner())
+
+    assert asyncio.run(outer()) == 42
 
 
 def test_cvp_https_base_normalizes_host_and_scheme():
@@ -22,56 +34,70 @@ def test_extract_running_config_text_finds_nested_value():
 
 def test_fetch_running_config_from_compliance_rest(monkeypatch):
     text = "!\nhostname 720xp-48\nip routing\n" + ("y" * 60)
+    seen = {"calls": 0}
 
-    async def fake_post_many(uri, payloads, bearer_token, **kwargs):
-        return [{"result": {"runningConfig": text}}], None
+    async def fake_get_config(session, url, device, timestamp):
+        seen["calls"] += 1
+        assert device == "HBG254804R6"
+        assert isinstance(timestamp, int)
+        return text, None
 
-    monkeypatch.setattr(config, "post_json_many_with_bearer_async", fake_post_many)
+    monkeypatch.setattr(config, "async_get_config", fake_get_config)
     datadict = {"cvp": "cvp.example.com:443", "cvtoken": "token", "cert": None}
     out, err = config._fetch_running_config_from_compliance_rest(
         datadict, ["HBG254804R6"]
     )
     assert err is None
     assert out == text
+    assert seen["calls"] == 1
+
+
+def test_fetch_running_config_falls_back_to_next_device_key(monkeypatch):
+    text = "!\nhostname 720xp-48\nip routing\n" + ("y" * 60)
+    seen = []
+
+    async def fake_get_config(session, url, device, timestamp):
+        seen.append(device)
+        if device == "SERIAL_FAIL":
+            return None, "504:timeout"
+        assert device == "720xp-48"
+        return text, None
+
+    monkeypatch.setattr(config, "async_get_config", fake_get_config)
+    datadict = {"cvp": "cvp.example.com:443", "cvtoken": "token", "cert": None}
+    out, err = config._fetch_running_config_from_compliance_rest(
+        datadict, ["SERIAL_FAIL", "720xp-48"]
+    )
+    assert err is None
+    assert out == text
+    assert seen == ["SERIAL_FAIL", "720xp-48"]
+
+
+def test_dedupe_device_keys_preserves_order_case_insensitive():
+    assert config._dedupe_device_keys("A", "a", "B", "", "  B  ") == ["A", "B"]
 
 
 def test_inventory_lookup_device_by_hostname(monkeypatch):
-    payload = {
-        "value": [
-            {
-                "key": {"device_id": {"value": "HBG254804R6"}},
-                "hostname": {"value": "720xp-48"},
-            }
-        ]
-    }
+    async def fake_resolve_device_facts(session, inventory_url, target):
+        assert target == "720xp-48"
+        return {"serial_number": "HBG254804R6", "hostname": "720xp-48"}
 
-    def fake_get_json(uri, bearer_token, **kwargs):
-        return payload, None
-
-    monkeypatch.setattr(config, "get_json_with_bearer", fake_get_json)
+    monkeypatch.setattr(config, "resolve_device_facts", fake_resolve_device_facts)
     datadict = {"cvp": "cvp.example.com:443", "cvtoken": "token", "cert": None}
-    serial, hostname, err = config._inventory_lookup_device(datadict, "720xp-48")
+    facts, err = config._inventory_lookup_device(datadict, "720xp-48")
     assert err is None
-    assert serial == "HBG254804R6"
-    assert hostname == "720xp-48"
+    assert facts["serial_number"] == "HBG254804R6"
+    assert facts["hostname"] == "720xp-48"
 
 
 def test_inventory_lookup_device_by_serial(monkeypatch):
-    payload = {
-        "value": [
-            {
-                "device_id": "HBG254804R6",
-                "hostname": "720xp-48",
-            }
-        ]
-    }
+    async def fake_resolve_device_facts(session, inventory_url, target):
+        assert target == "HBG254804R6"
+        return {"serial_number": "HBG254804R6", "hostname": "720xp-48"}
 
-    def fake_get_json(uri, bearer_token, **kwargs):
-        return payload, None
-
-    monkeypatch.setattr(config, "get_json_with_bearer", fake_get_json)
+    monkeypatch.setattr(config, "resolve_device_facts", fake_resolve_device_facts)
     datadict = {"cvp": "cvp.example.com:443", "cvtoken": "token", "cert": None}
-    serial, hostname, err = config._inventory_lookup_device(datadict, "HBG254804R6")
+    facts, err = config._inventory_lookup_device(datadict, "HBG254804R6")
     assert err is None
-    assert serial == "HBG254804R6"
-    assert hostname == "720xp-48"
+    assert facts["serial_number"] == "HBG254804R6"
+    assert facts["hostname"] == "720xp-48"

@@ -8,11 +8,39 @@ from .models import SwitchInfo
 from .utils import RPC_TIMEOUT, convert_response_to_switch
 
 
-def grpc_all_inventory(channel):
+def grpc_one_device_by_hostname(channel, hostname: str) -> SwitchInfo | None:
     """
-    Prints the hostname of all devices known to the system.
-    Optionally filters based on the only_active and only_inactive arguments.
-    When filtering, only_active takes priority to only_inactive if both are set.
+    Resolve a device by hostname when GetOne(device_id) cannot (e.g. user passed hostname).
+
+    Uses DeviceStreamRequest with a hostname partial_eq_filter and returns the same shape
+    as grpc_one_inventory_serial / convert_response_to_switch.
+    """
+    h = (hostname or "").strip()
+    if not h:
+        return None
+    stub = services.DeviceServiceStub(channel)
+    get_all_req = services.DeviceStreamRequest()
+    get_all_req.partial_eq_filter.append(
+        models.Device(hostname=wrappers.StringValue(value=h))
+    )
+    try:
+        for device in stub.GetAll(get_all_req, timeout=RPC_TIMEOUT):
+            try:
+                if device.value.system_mac_address.value:
+                    return convert_response_to_switch(device)
+            except Exception as e:
+                logging.debug("inventory by hostname skip device: %s", e)
+    except Exception as e:
+        logging.debug("inventory GetAll by hostname: %s", e)
+    return None
+
+
+def grpc_all_inventory(channel, *, exclude_access_points: bool = True):
+    """
+    Stream all active + inactive streaming devices.
+
+    ``exclude_access_points``: WiFi APs (C-* wireless) do not expose EOS running
+    config; omitting them keeps bulk operations fast.
     """
     logging.info("CVP Get all Tool")
     all_active = []
@@ -38,6 +66,11 @@ def grpc_all_inventory(channel):
             # Check to make sure the device has a valid System MAC
             if device.value.system_mac_address.value:
                 switch = convert_response_to_switch(device)
+                if (
+                    exclude_access_points
+                    and switch.get("device_type") == "Access Point"
+                ):
+                    continue
                 match switch["streaming_status"]:
                     case "Active":
                         logging.debug(f"Active: {switch['hostname']}")

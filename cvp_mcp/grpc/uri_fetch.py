@@ -76,10 +76,27 @@ def get_json_with_bearer(
         return None, err
     if not text:
         return None, "empty_response"
+    text = text.strip()
+    if text.startswith(")]}'"):
+        nl = text.find("\n")
+        if nl != -1:
+            text = text[nl + 1 :].strip()
     try:
         obj = json.loads(text)
     except Exception:
-        return None, "invalid_json_response"
+        # Some endpoints can return JSON lines; parse first valid object line.
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                break
+            except Exception:
+                continue
+        else:
+            preview = text[:200].replace("\n", "\\n")
+            return None, f"invalid_json_response:{preview}"
     if not isinstance(obj, (dict, list)):
         return None, "unexpected_json_type"
     return obj, None
@@ -116,7 +133,15 @@ def post_json_with_bearer(
         with urllib.request.urlopen(req, context=ctx, timeout=timeout_sec) as resp:
             raw = resp.read(max_bytes + 1)
     except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        preview = body[:200].replace("\n", "\\n")
         logging.error("POST HTTP error: %s %s", e.code, uri)
+        if preview:
+            return None, f"http_error:{e.code}:{preview}"
         return None, f"http_error:{e.code}"
     except Exception as e:
         logging.error("POST error: %s %s", uri, e)
@@ -133,9 +158,57 @@ def post_json_with_bearer(
     return obj, None
 
 
+def post_raw_with_bearer(
+    uri: str,
+    body: str,
+    bearer_token: str,
+    *,
+    cafile: str | None = None,
+    content_type: str = "application/json",
+    max_bytes: int = 2_000_000,
+    timeout_sec: float = 60.0,
+) -> tuple[str | None, str | None]:
+    """POST raw text body with bearer auth."""
+    if not uri or not uri.strip():
+        return None, "empty_uri"
+    if not bearer_token:
+        return None, "missing_token"
+
+    req = urllib.request.Request(
+        uri.strip(),
+        data=body.encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {bearer_token}",
+            "Content-Type": content_type,
+            "Accept": "application/json, text/plain, */*",
+        },
+        method="POST",
+    )
+    ctx = ssl.create_default_context(cafile=cafile if cafile else None)
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=timeout_sec) as resp:
+            raw = resp.read(max_bytes + 1)
+    except urllib.error.HTTPError as e:
+        msg = ""
+        try:
+            msg = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            msg = ""
+        preview = msg[:200].replace("\n", "\\n")
+        if preview:
+            return None, f"http_error:{e.code}:{preview}"
+        return None, f"http_error:{e.code}"
+    except Exception as e:
+        return None, str(e)
+
+    if len(raw) > max_bytes:
+        raw = raw[:max_bytes]
+    return raw.decode("utf-8", errors="replace"), None
+
+
 async def post_json_many_with_bearer_async(
     uri: str,
-    payloads: list[dict[str, Any]],
+    payloads: list[Any],
     bearer_token: str,
     *,
     cafile: str | None = None,
@@ -158,11 +231,14 @@ async def post_json_many_with_bearer_async(
         "Accept": "application/json",
     }
     results: list[dict | list | None] = [None] * len(payloads)
+    errors: list[str] = []
 
-    async def _one(session: aiohttp.ClientSession, idx: int, payload: dict[str, Any]):
+    async def _one(session: aiohttp.ClientSession, idx: int, payload: Any):
         try:
             async with session.post(uri.strip(), json=payload, ssl=ssl_ctx) as resp:
                 if resp.status >= 400:
+                    body = (await resp.text())[:200].replace("\n", "\\n")
+                    errors.append(f"http_error:{resp.status}:{body}")
                     return idx, None
                 text = await resp.text()
                 if len(text.encode("utf-8", errors="ignore")) > max_bytes:
@@ -180,6 +256,8 @@ async def post_json_many_with_bearer_async(
             done = await asyncio.gather(*tasks, return_exceptions=False)
             for idx, obj in done:
                 results[idx] = obj
+            if errors:
+                return results, errors[-1]
             return results, None
     except Exception as e:
         logging.error("POST async error: %s %s", uri, e)

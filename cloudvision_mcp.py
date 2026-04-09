@@ -100,10 +100,13 @@ def get_cvp_one_device(device_id) -> str:
 @mcp.tool()
 def get_cvp_all_inventory() -> dict:
     """
-    Grabs all switches and devices from CloudVision (CVP)
-    For all devices it gets the serial number, system mac address,
-    hostname, EOS version, streaming status, device type, hardware revision,
-    FQDN, domain name, and model
+    Grabs switches and devices from CloudVision (CVP).
+
+    WiFi access points (device_type Access Point) are omitted — they are not
+    EOS switches and bulk config tooling does not apply.
+
+    Per device: serial, system MAC, hostname, EOS version, streaming status,
+    device type, hardware revision, FQDN, domain name, model.
     """
     datadict = get_env_vars()
     all_devices = {}
@@ -112,7 +115,9 @@ def get_cvp_all_inventory() -> dict:
         case "grpc":
             connCreds = createConnection(datadict)
             with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                all_active, all_inactive = grpc_all_inventory(channel)
+                all_active, all_inactive = grpc_all_inventory(
+                    channel, exclude_access_points=True
+                )
                 all_devices["streaming_active"] = all_active
                 all_devices["streaming_inactive"] = all_inactive
         case "http":

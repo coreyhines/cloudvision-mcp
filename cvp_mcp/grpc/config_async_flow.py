@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +19,36 @@ def _as_str(value: Any) -> str:
         if isinstance(inner, str):
             return inner
     return ""
+
+
+def _serial_from_inventory_node(node: dict[str, Any]) -> str:
+    """Best-effort serial / device_id from REST inventory shapes (snake_case + camelCase + nested key)."""
+    direct = (
+        _as_str(node.get("device_id"))
+        or _as_str(node.get("serial_number"))
+        or _as_str(node.get("serialNumber"))
+        or _as_str(node.get("deviceId"))
+    )
+    if direct:
+        return direct
+    key = node.get("key")
+    if isinstance(key, dict):
+        return (
+            _as_str(key.get("device_id"))
+            or _as_str(key.get("deviceId"))
+            or _as_str(key.get("serial_number"))
+        )
+    return ""
+
+
+def _hostname_from_inventory_node(node: dict[str, Any]) -> str:
+    h = _as_str(node.get("hostname")) or _as_str(node.get("hostName"))
+    if h:
+        return h
+    fqdn = _as_str(node.get("fqdn"))
+    if not fqdn:
+        return ""
+    return fqdn.split(".")[0] if "." in fqdn else fqdn
 
 
 def _iter_dicts(obj: Any):
@@ -117,8 +148,10 @@ async def get_inventory(
 
     rows: list[dict[str, Any]] = []
     for node in _iter_dicts(data):
-        serial = _as_str(node.get("device_id") or node.get("serial_number"))
-        hostname = _as_str(node.get("hostname"))
+        if not isinstance(node, dict):
+            continue
+        serial = _serial_from_inventory_node(node)
+        hostname = _hostname_from_inventory_node(node)
         if not serial and not hostname:
             continue
         rows.append(
@@ -126,7 +159,9 @@ async def get_inventory(
                 "serial_number": serial,
                 "hostname": hostname,
                 "system_mac": _as_str(
-                    node.get("system_mac") or node.get("system_mac_address")
+                    node.get("system_mac")
+                    or node.get("system_mac_address")
+                    or node.get("systemMacAddress")
                 ),
                 "management_ip": _as_str(
                     node.get("ip_address")
@@ -150,33 +185,54 @@ def _rfc3339_utc_from_ns(timestamp_ns: int) -> str:
     return f"{dt.strftime('%Y-%m-%dT%H:%M:%S')}.{frac}Z"
 
 
+_GET_CONFIG_RETRY_STATUSES = frozenset({502, 503, 504})
+_GET_CONFIG_MAX_ATTEMPTS = 3
+
+
 async def get_config(
     session: aiohttp.ClientSession,
     url: str,
     device: str,
     timestamp: int,
 ) -> tuple[str | None, str | None]:
-    payload: dict[str, Any] = {
-        "request": {
-            "device_id": device,
-            "timestamp": _rfc3339_utc_from_ns(timestamp),
-            "type": "RUNNING_CONFIG",
+    """POST GetConfig; retries on gateway overload / upstream timeouts (502/503/504)."""
+    last_err: str | None = None
+    for attempt in range(_GET_CONFIG_MAX_ATTEMPTS):
+        ts = now_ns() if attempt else timestamp
+        payload: dict[str, Any] = {
+            "request": {
+                "device_id": device,
+                "timestamp": _rfc3339_utc_from_ns(ts),
+                "type": "RUNNING_CONFIG",
+            }
         }
-    }
-    try:
-        timeout = aiohttp.ClientTimeout(total=180.0)
-        async with session.post(url, json=payload, timeout=timeout) as resp:
-            raw = await resp.text()
-            if resp.status >= 400:
-                preview = (raw or "")[:240].replace("\n", "\\n")
-                return None, f"{resp.status}:{preview}" if preview else str(resp.status)
-            data = _decode_json_maybe_multi(raw)
-            cfg = _extract_config_from_response(data)
-            if cfg:
-                return cfg, None
-            return None, "no_config_in_response"
-    except Exception as e:  # noqa: BLE001
-        return None, str(e)
+        try:
+            timeout = aiohttp.ClientTimeout(total=180.0)
+            async with session.post(url, json=payload, timeout=timeout) as resp:
+                raw = await resp.text()
+                if resp.status >= 400:
+                    preview = (raw or "")[:240].replace("\n", "\\n")
+                    err = f"{resp.status}:{preview}" if preview else str(resp.status)
+                    last_err = err
+                    if (
+                        resp.status in _GET_CONFIG_RETRY_STATUSES
+                        and attempt < _GET_CONFIG_MAX_ATTEMPTS - 1
+                    ):
+                        await asyncio.sleep(2**attempt)
+                        continue
+                    return None, err
+                data = _decode_json_maybe_multi(raw)
+                cfg = _extract_config_from_response(data)
+                if cfg:
+                    return cfg, None
+                return None, "no_config_in_response"
+        except Exception as e:  # noqa: BLE001
+            last_err = str(e)
+            if attempt < _GET_CONFIG_MAX_ATTEMPTS - 1:
+                await asyncio.sleep(2**attempt)
+                continue
+            return None, last_err
+    return None, last_err or "no_config_in_response"
 
 
 async def save_config(
@@ -196,6 +252,18 @@ async def save_config(
     return str(path)
 
 
+def _inventory_target_matches(target_l: str, serial: str, hostname: str) -> bool:
+    if not target_l:
+        return False
+    s = (serial or "").strip().lower()
+    h = (hostname or "").strip().lower()
+    if target_l == s or target_l == h:
+        return True
+    if h and (h == target_l or h.startswith(f"{target_l}.")):
+        return True
+    return False
+
+
 async def resolve_device_facts(
     session: aiohttp.ClientSession, inventory_url: str, target: str
 ) -> dict[str, str]:
@@ -204,9 +272,9 @@ async def resolve_device_facts(
         return {}
     rows = await get_inventory(session, inventory_url)
     for row in rows:
-        serial = (row.get("serial_number") or "").lower()
-        hostname = (row.get("hostname") or "").lower()
-        if target_l in {serial, hostname}:
+        serial = row.get("serial_number") or ""
+        hostname = row.get("hostname") or ""
+        if _inventory_target_matches(target_l, serial, hostname):
             return {k: v for k, v in row.items() if v}
     return {}
 

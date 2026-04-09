@@ -68,3 +68,13 @@ def test_get_config_single_payload_path():
 def test_rfc3339_utc_from_ns():
     assert _rfc3339_utc_from_ns(0) == "1970-01-01T00:00:00Z"
     assert _rfc3339_utc_from_ns(1) == "1970-01-01T00:00:00.000000001Z"
+
+
+def test_serial_from_inventory_node_camel_case_and_nested_key():
+    assert caf._serial_from_inventory_node({"serialNumber": "ABC123"}) == "ABC123"
+    assert caf._serial_from_inventory_node({"key": {"device_id": "XYZ789"}}) == "XYZ789"
+
+
+def test_inventory_target_matches_fqdn_short_hostname():
+    assert caf._inventory_target_matches("720xp-48", "", "720xp-48.lab.example.com")
+    assert caf._inventory_target_matches("abc", "ABC", "")

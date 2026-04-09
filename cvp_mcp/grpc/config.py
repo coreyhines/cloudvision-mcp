@@ -27,7 +27,10 @@ from cvp_mcp.grpc.config_connector import (
     connector_fetch_running_config_text,
 )
 from cvp_mcp.grpc.envelope import tool_envelope
-from cvp_mcp.grpc.inventory import grpc_one_inventory_serial
+from cvp_mcp.grpc.inventory import (
+    grpc_one_device_by_hostname,
+    grpc_one_inventory_serial,
+)
 from cvp_mcp.grpc.uri_fetch import (
     fetch_uri_with_bearer,
 )
@@ -258,6 +261,35 @@ def grpc_get_device_config(
                 device_facts["system_mac"] = system_mac
     except Exception as e:
         logging.debug("inventory for hostname: %s", e)
+
+    if not (device_facts.get("serial_number") or "").strip():
+        h_lookup = (hostname or device_id or "").strip()
+        if h_lookup:
+            try:
+                inv_h = grpc_one_device_by_hostname(channel, h_lookup)
+                if isinstance(inv_h, dict) and inv_h.get("serial_number"):
+                    serial = str(inv_h.get("serial_number") or "").strip()
+                    if serial:
+                        connector_device_id = serial
+                        device_facts["serial_number"] = serial
+                    hostname = str(inv_h.get("hostname") or "") or hostname
+                    if hostname:
+                        device_facts["hostname"] = hostname
+                    mgmt_ip = str(
+                        inv_h.get("management_ip")
+                        or inv_h.get("primary_management_ip")
+                        or inv_h.get("ip_address")
+                        or ""
+                    ).strip()
+                    if mgmt_ip:
+                        device_facts["management_ip"] = mgmt_ip
+                    system_mac = str(
+                        inv_h.get("system_mac") or inv_h.get("system_mac_address") or ""
+                    ).strip()
+                    if system_mac:
+                        device_facts["system_mac"] = system_mac
+            except Exception as e:
+                logging.debug("inventory by hostname (serial resolution): %s", e)
 
     summary_obj: dict[str, Any] = {}
     try:

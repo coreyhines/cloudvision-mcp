@@ -1,0 +1,9 @@
+{
+  "Ethernet1": {
+    "00:11:22:33:44:55": {
+      "systemName": "remote-switch.example.com",
+      "portId": "Ethernet49",
+      "chassisId": "00:11:22:33:44:55"
+    }
+  }
+}

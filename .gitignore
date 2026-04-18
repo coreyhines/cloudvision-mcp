@@ -10,3 +10,6 @@ cvaas-mcp.env
 environment
 Caddyfile
 CODE_REVIEW.md
+
+# Local superpowers implementation plans (not shipped)
+docs/superpowers/

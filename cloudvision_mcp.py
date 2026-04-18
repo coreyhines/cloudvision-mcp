@@ -28,6 +28,7 @@ from cvp_mcp.grpc.interfaces import (
 )
 from cvp_mcp.grpc.inventory import grpc_all_inventory, grpc_one_inventory_serial
 from cvp_mcp.grpc.lifecycle import grpc_all_device_lifecycle
+from cvp_mcp.grpc.lldp import grpc_get_lldp_neighbors
 from cvp_mcp.grpc.monitor import grpc_all_probe_status, grpc_one_probe_status
 from cvp_mcp.grpc.overlay import (
     grpc_get_evpn,
@@ -617,6 +618,21 @@ def get_cvp_routes(device_id: str, vrf: str = "default") -> dict:
                 return {"error": "grpc_only"}
     except Exception as e:
         logging.error("get_cvp_routes: %s", e)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_cvp_lldp_neighbors(device_id: str) -> dict:
+    """LLDP neighbor table from EOS Sysdb via Connector (best-effort; requires LLDP enabled on device)."""
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                return grpc_get_lldp_neighbors(datadict, device_id)
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("get_cvp_lldp_neighbors: %s", e)
         return {"error": str(e)}
 
 

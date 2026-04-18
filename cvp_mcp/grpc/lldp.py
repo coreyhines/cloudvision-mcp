@@ -33,11 +33,20 @@ def _get_path(
 
 def _unwrap_lldp_container(flat: dict[str, Any]) -> dict[str, Any]:
     """If the snapshot is wrapped (neighborStatus / neighborTable / …), return inner map."""
-    for key in ("neighborStatus", "neighborTable", "neighbors", "status"):
-        inner = flat.get(key)
-        if isinstance(inner, dict) and inner:
-            return inner
-    return flat
+    current = flat
+    while isinstance(current, dict) and current:
+        unwrapped = False
+        for key in ("neighborStatus", "neighborTable", "neighbors", "status"):
+            inner = current.get(key)
+            if isinstance(inner, dict) and inner:
+                if inner is current:
+                    return current
+                current = inner
+                unwrapped = True
+                break
+        if not unwrapped:
+            break
+    return current
 
 
 def _neighbor_row(

@@ -36,6 +36,24 @@ def test_parse_lldp_neighbor_status_wrapper():
     assert items[0]["local_interface"] == "Ethernet2"
 
 
+def test_parse_lldp_neighbor_status_nested_wrapper():
+    wrapped = {
+        "status": {
+            "neighborStatus": {
+                "Ethernet3": {
+                    "11:22:33:44:55:66": {
+                        "systemName": "nested.example.com",
+                    }
+                }
+            }
+        }
+    }
+    items = parse_lldp_flat_to_items(wrapped)
+    assert len(items) == 1
+    assert items[0]["local_interface"] == "Ethernet3"
+    assert items[0].get("system_name") == "nested.example.com"
+
+
 def test_grpc_get_lldp_neighbors_missing_id():
     out = grpc_get_lldp_neighbors({"cvp": "x:443", "cvtoken": "t"}, "")
     assert out["coverage"] == "none"

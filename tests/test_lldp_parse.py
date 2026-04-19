@@ -8,6 +8,7 @@ from pathlib import Path
 from cvp_mcp.grpc.lldp import (
     _lldp_l2discovery_literal_local_paths,
     _lldp_paths_for_port_name,
+    _lldp_paths_sysdb_first_no_serial,
     grpc_get_lldp_neighbors,
     parse_lldp_flat_to_items,
 )
@@ -23,6 +24,29 @@ def test_parse_remote_leaf_ethaddr_and_index():
     items = parse_lldp_flat_to_items(raw)
     assert len(items) == 1
     assert items[0]["eth_addr"] == "dc:a6:32:02:73:43"
+
+
+def test_sysdb_first_paths_match_telemetry_shape_no_serial():
+    paths = _lldp_paths_sysdb_first_no_serial()
+    assert paths, "expected at least one candidate path"
+    assert paths[0][0] == "Sysdb"
+    eth6_remote1 = next(
+        p
+        for p in paths
+        if "portStatus" in p
+        and p[p.index("portStatus") + 1] == "Ethernet6"
+        and p[-2:] == ["remoteSystem", "1"]
+    )
+    assert eth6_remote1[:8] == [
+        "Sysdb",
+        "l2discovery",
+        "lldp",
+        "status",
+        "local",
+        "1",
+        "portStatus",
+        "Ethernet6",
+    ]
 
 
 def test_l2discovery_literal_local_paths_use_instance_one_and_zero():

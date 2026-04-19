@@ -17,6 +17,18 @@ from cvp_mcp.grpc.sysdb_parse import eos_name, flatten_nested_device_map
 # Aeris shows fixed instance ids, e.g. …/local/1/portStatus/Ethernet6/remoteSystem/1/
 LLDP_DATA_SOURCE = "connector:device:Sysdb/l2discovery/lldp"
 
+# Default interface names for broad discovery when no ``port_name`` is given.
+_LLDP_DEFAULT_PROBE_PORTS: tuple[str, ...] = (
+    "Ethernet6",
+    "Ethernet1",
+    "Ethernet2",
+    "Ethernet3",
+    "Ethernet4",
+    "Ethernet5",
+    "Ethernet7",
+    "Ethernet8",
+)
+
 
 def _lldp_l2discovery_literal_local_paths(device_id: str) -> tuple[list[Any], ...]:
     """
@@ -69,7 +81,61 @@ def _lldp_l2discovery_literal_local_paths(device_id: str) -> tuple[list[Any], ..
     return tuple(out)
 
 
-def _lldp_paths_sysdb_first_no_serial() -> tuple[list[Any], ...]:
+def _lldp_l2discovery_literal_single_port(
+    device_id: str, port_name: str
+) -> tuple[list[Any], ...]:
+    """Like ``_lldp_l2discovery_literal_local_paths`` but fixed ``portStatus/<port>``."""
+    out: list[list[Any]] = []
+    for lid in ("1", "0"):
+        out.extend(
+            (
+                [
+                    device_id,
+                    "Sysdb",
+                    "l2discovery",
+                    "lldp",
+                    "status",
+                    "local",
+                    lid,
+                    "portStatus",
+                    port_name,
+                ],
+                [
+                    device_id,
+                    "Sysdb",
+                    "l2discovery",
+                    "lldp",
+                    "status",
+                    "local",
+                    lid,
+                    "portStatus",
+                    port_name,
+                    "remoteSystem",
+                    Wildcard(),
+                ],
+                [
+                    device_id,
+                    "Sysdb",
+                    "l2discovery",
+                    "lldp",
+                    "status",
+                    "local",
+                    lid,
+                    "portStatus",
+                    port_name,
+                    "remoteSystemByMsap",
+                    Wildcard(),
+                ],
+            )
+        )
+    return tuple(out)
+
+
+def _lldp_paths_sysdb_first_no_serial(
+    *,
+    ports: tuple[str, ...] | None = None,
+    include_wildcard_portstatus: bool = True,
+) -> tuple[list[Any], ...]:
     """
     Paths starting at ``Sysdb`` with no leading serial in ``pathElts``.
 
@@ -79,16 +145,8 @@ def _lldp_paths_sysdb_first_no_serial() -> tuple[list[Any], ...]:
     try these before the serial-prefixed variants.
     """
     out: list[list[Any]] = []
-    for port in (
-        "Ethernet6",
-        "Ethernet1",
-        "Ethernet2",
-        "Ethernet3",
-        "Ethernet4",
-        "Ethernet5",
-        "Ethernet7",
-        "Ethernet8",
-    ):
+    port_list = ports if ports is not None else _LLDP_DEFAULT_PROBE_PORTS
+    for port in port_list:
         for lid in ("1", "0"):
             base = [
                 "Sysdb",
@@ -107,39 +165,35 @@ def _lldp_paths_sysdb_first_no_serial() -> tuple[list[Any], ...]:
                     base + ["remoteSystemByMsap", Wildcard()],
                 )
             )
-    out.append(
-        [
-            "Sysdb",
-            "l2discovery",
-            "lldp",
-            "status",
-            "local",
-            Wildcard(),
-            "portStatus",
-            Wildcard(),
-        ]
-    )
+    if include_wildcard_portstatus:
+        out.append(
+            [
+                "Sysdb",
+                "l2discovery",
+                "lldp",
+                "status",
+                "local",
+                Wildcard(),
+                "portStatus",
+                Wildcard(),
+            ]
+        )
     return tuple(out)
 
 
-def _lldp_telemetry_browser_leaf_paths(device_id: str) -> tuple[list[Any], ...]:
+def _lldp_telemetry_browser_leaf_paths(
+    device_id: str,
+    *,
+    ports: tuple[str, ...] | None = None,
+) -> tuple[list[Any], ...]:
     """
     Telemetry Browser uses concrete ``portStatus/<intf>/…`` segments. Connector
     ``Get`` may return no keys for ``portStatus/*`` while literal interface names work
     (see Aeris path …/portStatus/Ethernet6/remoteSystem/1/).
     """
     out: list[list[Any]] = []
-    # Ethernet6 first: common for lab uplinks; matches Telemetry Browser examples.
-    for port in (
-        "Ethernet6",
-        "Ethernet1",
-        "Ethernet2",
-        "Ethernet3",
-        "Ethernet4",
-        "Ethernet5",
-        "Ethernet7",
-        "Ethernet8",
-    ):
+    port_list = ports if ports is not None else _LLDP_DEFAULT_PROBE_PORTS
+    for port in port_list:
         for lid in ("1", "0"):
             base = [
                 device_id,
@@ -427,65 +481,79 @@ def grpc_get_lldp_neighbors(
             warnings=["missing_device_id"],
         )
     explicit = _lldp_paths_for_port_name(device_id, port_name, remote_neighbor_key)
-    candidate_paths: tuple[list[Any], ...] = (
-        *explicit,
-        *_lldp_paths_sysdb_first_no_serial(),
-        *_lldp_telemetry_browser_leaf_paths(device_id),
-        *_lldp_l2discovery_literal_local_paths(device_id),
-        # Full per-port blob (remoteSystem + remoteSystemByMsap, e.g. Ethernet6 / rpi4-0 MAC)
-        [
-            device_id,
-            "Sysdb",
-            "l2discovery",
-            "lldp",
-            "status",
-            "local",
-            Wildcard(),
-            "portStatus",
-            Wildcard(),
-        ],
-        [
-            device_id,
-            "Sysdb",
-            "l2discovery",
-            "lldp",
-            "status",
-            "local",
-            Wildcard(),
-            "portStatus",
-            Wildcard(),
-            "remoteSystemByMsap",
-            Wildcard(),
-        ],
-        [
-            device_id,
-            "Sysdb",
-            "l2discovery",
-            "lldp",
-            "status",
-            "local",
-            Wildcard(),
-            "portStatus",
-            Wildcard(),
-            "remoteSystem",
-            Wildcard(),
-        ],
-        [
-            device_id,
-            "Sysdb",
-            "l2discovery",
-            "lldp",
-            "status",
-            Wildcard(),
-        ],
-        [device_id, "Sysdb", "l2discovery", "lldp", Wildcard()],
-        [device_id, "Sysdb", "lldp", "status", "neighborStatus", Wildcard()],
-        [device_id, "Sysdb", "lldp", "status", "neighborTable", Wildcard()],
-        [device_id, "Sysdb", "lldp", "status", Wildcard()],
-        [device_id, "Sysdb", "lldp", Wildcard()],
-        [device_id, "Sysdb", "lldp", "config", Wildcard()],
-        [device_id, "Smash", "lldp", Wildcard()],
-    )
+    port_filter = (port_name or "").strip()
+    # When ``port_name`` is set, do not fall through to other ports' probe paths or
+    # ``portStatus/*`` wildcards — otherwise the first non-empty snapshot (often
+    # Ethernet6) wins and every per-port query looks identical.
+    if port_filter:
+        candidate_paths = (
+            *explicit,
+            *_lldp_paths_sysdb_first_no_serial(
+                ports=(port_filter,), include_wildcard_portstatus=False
+            ),
+            *_lldp_telemetry_browser_leaf_paths(device_id, ports=(port_filter,)),
+            *_lldp_l2discovery_literal_single_port(device_id, port_filter),
+        )
+    else:
+        candidate_paths = (
+            *explicit,
+            *_lldp_paths_sysdb_first_no_serial(),
+            *_lldp_telemetry_browser_leaf_paths(device_id),
+            *_lldp_l2discovery_literal_local_paths(device_id),
+            # Full per-port blob (remoteSystem + remoteSystemByMsap, e.g. Ethernet6 / rpi4-0 MAC)
+            [
+                device_id,
+                "Sysdb",
+                "l2discovery",
+                "lldp",
+                "status",
+                "local",
+                Wildcard(),
+                "portStatus",
+                Wildcard(),
+            ],
+            [
+                device_id,
+                "Sysdb",
+                "l2discovery",
+                "lldp",
+                "status",
+                "local",
+                Wildcard(),
+                "portStatus",
+                Wildcard(),
+                "remoteSystemByMsap",
+                Wildcard(),
+            ],
+            [
+                device_id,
+                "Sysdb",
+                "l2discovery",
+                "lldp",
+                "status",
+                "local",
+                Wildcard(),
+                "portStatus",
+                Wildcard(),
+                "remoteSystem",
+                Wildcard(),
+            ],
+            [
+                device_id,
+                "Sysdb",
+                "l2discovery",
+                "lldp",
+                "status",
+                Wildcard(),
+            ],
+            [device_id, "Sysdb", "l2discovery", "lldp", Wildcard()],
+            [device_id, "Sysdb", "lldp", "status", "neighborStatus", Wildcard()],
+            [device_id, "Sysdb", "lldp", "status", "neighborTable", Wildcard()],
+            [device_id, "Sysdb", "lldp", "status", Wildcard()],
+            [device_id, "Sysdb", "lldp", Wildcard()],
+            [device_id, "Sysdb", "lldp", "config", Wildcard()],
+            [device_id, "Smash", "lldp", Wildcard()],
+        )
     flat: dict[str, Any] = {}
     path_used = ""
     for p in candidate_paths:

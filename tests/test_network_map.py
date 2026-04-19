@@ -99,6 +99,7 @@ def test_containerlab_yaml_roundtrip():
             "devices_scanned": 0,
             "port_probes": 0,
             "edges_found": 0,
+            "extra_neighbor_index_probes": 0,
             "inventory_warnings": [],
         },
     ),
@@ -113,6 +114,42 @@ def test_grpc_map_network_topology_invalid_format_falls_back(
     )
     assert out["output_format"] == "json"
     assert out["warnings"]
+
+
+def test_build_topology_connected_scope_excludes_orphan_inventory():
+    inv = [
+        {
+            "hostname": "lonely",
+            "serial_number": "SN99",
+            "system_mac": "aa:aa:aa:aa:aa:aa",
+            "model": "m",
+            "device_type": "EOS",
+        },
+        {
+            "hostname": "core",
+            "serial_number": "SN1",
+            "system_mac": "bb:bb:bb:bb:bb:bb",
+            "model": "m",
+            "device_type": "EOS",
+        },
+    ]
+    edges = [
+        {
+            "local_serial": "SN1",
+            "local_hostname": "core",
+            "local_model": "",
+            "local_port": "Ethernet1",
+            "remote_system_name": "other",
+            "remote_chassis_id": "",
+            "remote_eth_addr": "cc:cc:cc:cc:cc:cc",
+            "remote_port_id": "e1",
+            "neighbor_source": "",
+        }
+    ]
+    nodes, _ = build_topology_nodes_and_links(edges, inv, node_scope="connected")
+    ids = {n["id"] for n in nodes}
+    assert "SN99" not in ids
+    assert "SN1" in ids
 
 
 def test_build_topology_matches_inventory_mac():

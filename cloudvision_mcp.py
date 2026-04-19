@@ -657,6 +657,7 @@ def map_cvp_network_topology(
     max_ethernet_ports: int | None = None,
     device_serial_allowlist: str = "",
     topology_name: str = "cvp-lldp",
+    topology_node_scope: str = "full_inventory",
 ) -> dict:
     """
     Discover LLDP adjacencies across CVP inventory (per-device Ethernet sweep) and export topology.
@@ -666,6 +667,7 @@ def map_cvp_network_topology(
 
     ``device_serial_allowlist``: comma-separated serials to scan (empty = all inventory devices).
     ``max_ethernet_ports``: cap ports per device (default: inferred from model).
+    ``topology_node_scope``: ``full_inventory`` (every CVP device as a node) or ``connected`` (only devices with LLDP edges).
     """
     datadict = get_env_vars()
     try:
@@ -685,6 +687,7 @@ def map_cvp_network_topology(
                     max_ethernet_ports=max_ethernet_ports,
                     device_serial_allowlist=device_serial_allowlist,
                     topology_name=topology_name,
+                    topology_node_scope=topology_node_scope,
                 )
             case "http":
                 return {"error": "grpc_only"}

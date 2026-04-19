@@ -78,6 +78,16 @@ def _device_port_cap(
     return n
 
 
+def _remote_row_signature(row: dict[str, Any]) -> str:
+    """Stable key to dedupe multiple LLDP indices on the same port."""
+    mac = _norm_mac(row.get("eth_addr") or row.get("remote_chassis_id") or "")
+    if mac:
+        return f"mac:{mac}"
+    name = (row.get("system_name") or "").strip().lower()
+    rport = (row.get("remote_port_id") or "").strip()
+    return f"name:{name}|rp:{rport}"
+
+
 def _lldp_row_to_edges(
     local: dict[str, Any],
     port_name: str,
@@ -105,6 +115,31 @@ def _lldp_row_to_edges(
     ]
 
 
+def _append_rows_from_lldp_response(
+    local: dict[str, Any],
+    port_name: str,
+    out: dict[str, Any],
+    *,
+    edges: list[dict[str, Any]],
+    seen_remote: set[str],
+    stats: dict[str, Any],
+) -> None:
+    """Parse ``items`` from ``grpc_get_lldp_neighbors`` and append new edges."""
+    items = out.get("items") if isinstance(out, dict) else None
+    if not items:
+        return
+    for row in items:
+        if not isinstance(row, dict):
+            continue
+        sig = _remote_row_signature(row)
+        if sig in seen_remote:
+            continue
+        for e in _lldp_row_to_edges(local, port_name, row):
+            seen_remote.add(sig)
+            edges.append(e)
+            stats["edges_found"] += 1
+
+
 def scan_lldp_topology_edges(
     datadict: dict[str, Any],
     *,
@@ -129,6 +164,7 @@ def scan_lldp_topology_edges(
         "devices_scanned": 0,
         "port_probes": 0,
         "edges_found": 0,
+        "extra_neighbor_index_probes": 0,
         "inventory_warnings": inv_warnings,
     }
 
@@ -150,6 +186,7 @@ def scan_lldp_topology_edges(
         for i in range(1, cap + 1):
             port_name = f"Ethernet{i}"
             stats["port_probes"] += 1
+            seen_remote: set[str] = set()
             try:
                 out = grpc_get_lldp_neighbors(
                     datadict,
@@ -162,15 +199,37 @@ def scan_lldp_topology_edges(
                     "topology scan LLDP failed %s %s: %s", serial, port_name, e
                 )
                 continue
-            items = out.get("items") if isinstance(out, dict) else None
-            if not items:
-                continue
-            for row in items:
-                if not isinstance(row, dict):
-                    continue
-                for e in _lldp_row_to_edges(dev, port_name, row):
-                    edges.append(e)
-                    stats["edges_found"] += 1
+            _append_rows_from_lldp_response(
+                dev, port_name, out, edges=edges, seen_remote=seen_remote, stats=stats
+            )
+            # Additional ``remoteSystem/<n>`` indices when the first snapshot lists only one row.
+            if isinstance(out, dict) and out.get("items"):
+                for idx in ("2", "3"):
+                    stats["extra_neighbor_index_probes"] += 1
+                    try:
+                        out_n = grpc_get_lldp_neighbors(
+                            datadict,
+                            serial,
+                            port_name=port_name,
+                            remote_neighbor_key=idx,
+                        )
+                    except Exception as e:
+                        logging.debug(
+                            "topology scan LLDP idx %s %s %s: %s",
+                            serial,
+                            port_name,
+                            idx,
+                            e,
+                        )
+                        continue
+                    _append_rows_from_lldp_response(
+                        dev,
+                        port_name,
+                        out_n,
+                        edges=edges,
+                        seen_remote=seen_remote,
+                        stats=stats,
+                    )
 
     return edges, stats
 
@@ -205,11 +264,15 @@ def _match_remote_to_inventory(
 def build_topology_nodes_and_links(
     edges: list[dict[str, Any]],
     inventory: list[dict[str, Any]],
+    *,
+    node_scope: str = "full_inventory",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Build abstract ``nodes`` and ``links`` for JSON / Containerlab / Mermaid.
 
-    Inventory maps by normalized system MAC for remote resolution.
+    ``node_scope``: ``full_inventory`` preloads every CVP inventory row (orphan switches
+    appear with no links). ``connected`` keeps only devices that participate in at least
+    one edge — clearer diagrams when the scan is partial or filtered.
     """
     by_mac: dict[str, dict[str, Any]] = {}
     for d in inventory:
@@ -218,17 +281,18 @@ def build_topology_nodes_and_links(
             by_mac[sm] = d
 
     node_map: dict[str, dict[str, Any]] = {}
-    for d in inventory:
-        k = _node_key_for_local(d)
-        node_map[k] = {
-            "id": k,
-            "label": d.get("hostname") or k,
-            "kind": "inventory",
-            "device_type": d.get("device_type") or "",
-            "model": d.get("model") or "",
-            "serial_number": d.get("serial_number") or "",
-            "system_mac": d.get("system_mac") or "",
-        }
+    if node_scope == "full_inventory":
+        for d in inventory:
+            k = _node_key_for_local(d)
+            node_map[k] = {
+                "id": k,
+                "label": d.get("hostname") or k,
+                "kind": "inventory",
+                "device_type": d.get("device_type") or "",
+                "model": d.get("model") or "",
+                "serial_number": d.get("serial_number") or "",
+                "system_mac": d.get("system_mac") or "",
+            }
 
     links: list[dict[str, Any]] = []
 
@@ -442,6 +506,7 @@ def grpc_map_network_topology(
     max_ethernet_ports: int | None = None,
     device_serial_allowlist: str = "",
     topology_name: str = "cvp-lldp",
+    topology_node_scope: str = "full_inventory",
 ) -> dict[str, Any]:
     """
     Discover LLDP adjacencies across CVP inventory and render the chosen format.
@@ -470,10 +535,17 @@ def grpc_map_network_topology(
     inventory, _ = _collect_inventory(
         datadict, include_inactive=include_inactive_devices
     )
-    nodes, links = build_topology_nodes_and_links(edges, inventory)
+    scope = (topology_node_scope or "full_inventory").strip().lower()
+    if scope not in ("full_inventory", "connected"):
+        warnings.append(
+            f"unknown_topology_node_scope:{topology_node_scope!r}; using full_inventory"
+        )
+        scope = "full_inventory"
+    nodes, links = build_topology_nodes_and_links(edges, inventory, node_scope=scope)
 
     topology: dict[str, Any] = {
         "data_source": NETWORK_MAP_DATA_SOURCE,
+        "topology_node_scope": scope,
         "nodes": nodes,
         "links": links,
         "edges": edges,

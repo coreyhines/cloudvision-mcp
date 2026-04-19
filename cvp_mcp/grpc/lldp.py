@@ -13,7 +13,7 @@ from cvp_mcp.grpc.connector import get_device_path, serialize_cloudvision_data
 from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.sysdb_parse import eos_name, flatten_nested_device_map
 
-# Primary tree on modern EOS: Sysdb/l2discovery/lldp/status/local/…/portStatus/…/remoteSystem/…
+# Primary tree: Sysdb/l2discovery/lldp/status/local/…/portStatus/<intf>/{remoteSystem,remoteSystemByMsap}/…
 LLDP_DATA_SOURCE = "connector:device:Sysdb/l2discovery/lldp"
 
 
@@ -89,12 +89,17 @@ def _msap_fields(nb: dict[str, Any]) -> dict[str, str]:
 
 
 def _l2_remote_row(
-    local_interface: str, neighbor_key: str, nb: dict[str, Any]
+    local_interface: str,
+    neighbor_key: str,
+    nb: dict[str, Any],
+    *,
+    neighbor_source: str,
 ) -> dict[str, Any]:
-    """One row from Sysdb/l2discovery/lldp/…/remoteSystem/* (Aeris / EOS 4.35+ style)."""
+    """One row from l2discovery LLDP remoteSystem* buckets (Aeris / EOS 4.35+ style)."""
     row: dict[str, Any] = {
         "local_interface": local_interface,
         "neighbor_key": neighbor_key,
+        "neighbor_source": neighbor_source,
     }
     name = _tlv_string(nb.get("sysName"))
     if name:
@@ -113,7 +118,7 @@ def _l2_remote_row(
 
 
 def _collect_l2discovery_port_status(obj: Any, items: list[dict[str, Any]]) -> None:
-    """Recurse and harvest portStatus/*/remoteSystem/* leaves."""
+    """Recurse and harvest portStatus/*/remoteSystem*/* leaves."""
     if not isinstance(obj, dict):
         return
     ps = obj.get("portStatus")
@@ -121,12 +126,23 @@ def _collect_l2discovery_port_status(obj: Any, items: list[dict[str, Any]]) -> N
         for intf_name, pnode in ps.items():
             if not isinstance(pnode, dict):
                 continue
-            rs = pnode.get("remoteSystem")
-            if not isinstance(rs, dict):
-                continue
-            for ridx, rnode in rs.items():
-                if isinstance(rnode, dict):
-                    items.append(_l2_remote_row(str(intf_name), str(ridx), rnode))
+            for bucket, label in (
+                ("remoteSystem", "remoteSystem"),
+                ("remoteSystemByMsap", "remoteSystemByMsap"),
+            ):
+                rs = pnode.get(bucket)
+                if not isinstance(rs, dict):
+                    continue
+                for ridx, rnode in rs.items():
+                    if isinstance(rnode, dict):
+                        items.append(
+                            _l2_remote_row(
+                                str(intf_name),
+                                str(ridx),
+                                rnode,
+                                neighbor_source=label,
+                            )
+                        )
         return
     for v in obj.values():
         _collect_l2discovery_port_status(v, items)
@@ -173,7 +189,7 @@ def _parse_l2discovery_remote_leaf(flat: dict[str, Any]) -> list[dict[str, Any]]
         return []
     if flat.get("msap") is not None or isinstance(flat.get("sysName"), dict):
         idx = str(flat.get("index", flat.get("name", "0")))
-        return [_l2_remote_row("", idx, flat)]
+        return [_l2_remote_row("", idx, flat, neighbor_source="remoteLeaf")]
     return []
 
 
@@ -217,6 +233,31 @@ def grpc_get_lldp_neighbors(datadict: dict[str, Any], device_id: str) -> dict[st
             warnings=["missing_device_id"],
         )
     candidate_paths: tuple[list[Any], ...] = (
+        # Full per-port blob (remoteSystem + remoteSystemByMsap, e.g. Ethernet6 / rpi4-0 MAC)
+        [
+            device_id,
+            "Sysdb",
+            "l2discovery",
+            "lldp",
+            "status",
+            "local",
+            Wildcard(),
+            "portStatus",
+            Wildcard(),
+        ],
+        [
+            device_id,
+            "Sysdb",
+            "l2discovery",
+            "lldp",
+            "status",
+            "local",
+            Wildcard(),
+            "portStatus",
+            Wildcard(),
+            "remoteSystemByMsap",
+            Wildcard(),
+        ],
         [
             device_id,
             "Sysdb",

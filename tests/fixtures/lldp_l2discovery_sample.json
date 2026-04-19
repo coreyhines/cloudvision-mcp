@@ -24,6 +24,19 @@
               "ttl": 120
             }
           }
+        },
+        "Ethernet6": {
+          "remoteSystemByMsap": {
+            "cidMacAddress/aa:bb:cc:dd:ee:ff/pidInterfaceName/eth0": {
+              "sysName": {
+                "isSet": true,
+                "value": { "value": "rpi4-0" },
+                "valueStr": { "value": "rpi4-0" }
+              },
+              "ethAddr": "aa:bb:cc:dd:ee:ff",
+              "ttl": 120
+            }
+          }
         }
       }
     }

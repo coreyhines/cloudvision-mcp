@@ -62,14 +62,19 @@ def test_parse_l2discovery_lldp_fixture():
         .read_text()
     )
     items = parse_lldp_flat_to_items(raw)
-    assert len(items) == 1
-    row = items[0]
-    assert row["local_interface"] == "Ethernet5"
-    assert row["neighbor_key"] == "1"
-    assert row["system_name"] == "ztx-7230.freeblizz.com"
-    assert row["remote_chassis_id"] == "ec:8a:48:04:30:c0"
-    assert row["remote_port_id"] == "Management1/1"
-    assert row["ttl_sec"] == 120
+    assert len(items) == 2
+    by_intf = {r["local_interface"]: r for r in items}
+    row5 = by_intf["Ethernet5"]
+    assert row5["neighbor_key"] == "1"
+    assert row5["neighbor_source"] == "remoteSystem"
+    assert row5["system_name"] == "ztx-7230.freeblizz.com"
+    assert row5["remote_chassis_id"] == "ec:8a:48:04:30:c0"
+    assert row5["remote_port_id"] == "Management1/1"
+    assert row5["ttl_sec"] == 120
+    row6 = by_intf["Ethernet6"]
+    assert row6["neighbor_source"] == "remoteSystemByMsap"
+    assert row6["system_name"] == "rpi4-0"
+    assert row6["eth_addr"] == "aa:bb:cc:dd:ee:ff"
 
 
 def test_parse_l2discovery_remote_leaf_only():
@@ -88,6 +93,7 @@ def test_parse_l2discovery_remote_leaf_only():
     assert len(items) == 1
     assert items[0]["system_name"] == "leaf-only.example.com"
     assert items[0]["local_interface"] == ""
+    assert items[0]["neighbor_source"] == "remoteLeaf"
 
 
 def test_grpc_get_lldp_neighbors_missing_id():

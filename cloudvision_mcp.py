@@ -622,13 +622,26 @@ def get_cvp_routes(device_id: str, vrf: str = "default") -> dict:
 
 
 @mcp.tool()
-def get_cvp_lldp_neighbors(device_id: str) -> dict:
-    """LLDP neighbor table from EOS Sysdb via Connector (best-effort; requires LLDP enabled on device)."""
+def get_cvp_lldp_neighbors(
+    device_id: str,
+    port_name: str = "",
+    remote_neighbor_key: str = "",
+) -> dict:
+    """LLDP neighbor table from EOS Sysdb via Connector (best-effort; requires LLDP enabled on device).
+
+    If Telemetry Browser shows a path like ``…/portStatus/Ethernet6/remoteSystem/1`` but wildcard
+    queries return nothing, pass ``port_name`` (e.g. ``Ethernet6``) and optionally ``remote_neighbor_key`` (e.g. ``1``).
+    """
     datadict = get_env_vars()
     try:
         match CVP_TRANSPORT:
             case "grpc":
-                return grpc_get_lldp_neighbors(datadict, device_id)
+                return grpc_get_lldp_neighbors(
+                    datadict,
+                    device_id,
+                    port_name=port_name,
+                    remote_neighbor_key=remote_neighbor_key,
+                )
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:

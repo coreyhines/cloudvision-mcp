@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import grpc
 from cloudvision.Connector.codec import Wildcard
 from cloudvision.Connector.grpc_client import GRPCClient
 
@@ -270,6 +271,22 @@ def _get_path(
 def _path_for_log(path: list[Any]) -> str:
     """Human-readable path for logs (wildcards shown as ``*``)."""
     return "/".join("*" if isinstance(x, Wildcard) else str(x) for x in path)
+
+
+def _is_expected_probe_not_found(error: Exception) -> bool:
+    """
+    True when a candidate Connector path miss is the normal gRPC NOT_FOUND case.
+
+    LLDP probing intentionally tries several path variants; on many devices most
+    variants return NOT_FOUND and should not be warning-level noise.
+    """
+    if isinstance(error, grpc.RpcError):
+        try:
+            return error.code() == grpc.StatusCode.NOT_FOUND
+        except Exception:
+            pass
+    msg = str(error).lower()
+    return "statuscode.not_found" in msg or "grpc_status:5" in msg
 
 
 def _unwrap_lldp_container(flat: dict[str, Any]) -> dict[str, Any]:
@@ -591,12 +608,19 @@ def grpc_get_lldp_neighbors(
                 path_used = path_line
                 break
         except Exception as e:
-            logging.warning(
-                "lldp connector: device=%s path=%s failed: %s",
-                device_id,
-                path_line,
-                e,
-            )
+            if _is_expected_probe_not_found(e):
+                logging.debug(
+                    "lldp connector probe miss: device=%s path=%s (not found)",
+                    device_id,
+                    path_line,
+                )
+            else:
+                logging.warning(
+                    "lldp connector: device=%s path=%s failed: %s",
+                    device_id,
+                    path_line,
+                    e,
+                )
     items = parse_lldp_flat_to_items(flat)
     if flat and not items:
         warnings.append("lldp_data_unparsed")

@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
+from unittest.mock import patch
+
+import grpc
 
 from cvp_mcp.grpc.lldp import (
+    _is_expected_probe_not_found,
     _lldp_l2discovery_literal_local_paths,
     _lldp_paths_for_port_name,
     _lldp_paths_sysdb_first_no_serial,
@@ -169,3 +174,41 @@ def test_grpc_get_lldp_neighbors_missing_server_credentials():
     assert "missing_CVPTOKEN" in out["warnings"]
     assert "mcp_server_missing_cloudvision_credentials" in out["warnings"]
     assert out.get("object", {}).get("hint", "")
+
+
+class _FakeNotFound(grpc.RpcError):
+    def code(self) -> grpc.StatusCode:
+        return grpc.StatusCode.NOT_FOUND
+
+
+def test_expected_probe_not_found_detects_grpc_code():
+    assert _is_expected_probe_not_found(_FakeNotFound())
+
+
+@patch("cvp_mcp.grpc.lldp._get_path")
+def test_grpc_get_lldp_neighbors_not_found_logs_debug_not_warning(
+    mock_get_path: object, caplog: object
+) -> None:
+    mock_get_path.side_effect = _FakeNotFound()
+    with caplog.at_level(logging.DEBUG):
+        out = grpc_get_lldp_neighbors({"cvp": "x:443", "cvtoken": "t"}, "SN1")
+    assert out["coverage"] == "none"
+    assert "no_lldp_data_at_known_paths" in out["warnings"]
+    assert any("probe miss" in rec.message for rec in caplog.records)
+    assert not any(
+        rec.levelno >= logging.WARNING and "lldp connector:" in rec.message
+        for rec in caplog.records
+    )
+
+
+@patch("cvp_mcp.grpc.lldp._get_path")
+def test_grpc_get_lldp_neighbors_unexpected_error_still_warns(
+    mock_get_path: object, caplog: object
+) -> None:
+    mock_get_path.side_effect = RuntimeError("boom")
+    with caplog.at_level(logging.WARNING):
+        grpc_get_lldp_neighbors({"cvp": "x:443", "cvtoken": "t"}, "SN1")
+    assert any(
+        rec.levelno >= logging.WARNING and "lldp connector:" in rec.message
+        for rec in caplog.records
+    )

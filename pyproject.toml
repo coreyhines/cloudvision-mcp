@@ -8,7 +8,8 @@ dependencies = [
     "aiohttp",
     "grpcio",
     "protobuf",
-    "mcp[cli]"
+    "mcp[cli]",
+    "pyyaml>=6.0",
 ]
 
 [dependency-groups]

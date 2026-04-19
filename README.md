@@ -44,6 +44,7 @@ Responses for the newer tools use a common envelope: `device_id`, `collected_at`
 | `get_cvp_device_config` | Config summary URIs + optional running-config body | `resource_api:configstatus.v1`; if URIs/APIs are missing, **Connector fallback** scans Sysdb/Smash + analytics `Devices/...` paths for a running-config-like blob |
 | `get_cvp_interfaces` | Interface admin/oper, speed, MTU, counters | `connector:device:Sysdb/interface` |
 | `get_cvp_lldp_neighbors` | LLDP neighbor rows (`remoteSystem` and `remoteSystemByMsap` per port; `neighbor_source` on each row). Tries **literal** `portStatus/Ethernet*` paths (Telemetry Browser style) before wildcards; optional args `port_name`, `remote_neighbor_key` when Aeris shows a fixed path. | `connector:device:Sysdb/l2discovery/lldp` (falls back to legacy `Sysdb/lldp` paths) |
+| `map_cvp_network_topology` | Full-fabric LLDP sweep over CVP inventory: probes `Ethernet1..N` per device (N from model or `max_ethernet_ports`). Returns `topology` (nodes, links, edges, stats) plus `text` in `output_format` **json**, **mermaid**, **table** (markdown), or **containerlab** (YAML lab sketch — **images are placeholders**). Optional `device_serial_allowlist`, `include_inactive_devices`, `topology_name`. | `inventory+connector:lldp_topology_scan` |
 | `get_cvp_vlans` | Switchport / VLAN hints | `connector:device:Sysdb/bridging` |
 | `get_cvp_ip_interfaces` | L3 addressing hints | `connector:device:Sysdb/ip` |
 | `get_cvp_events` | Structured CVP events (`GetAll` + filters) | `resource_api:event.v1` |

@@ -30,6 +30,7 @@ from cvp_mcp.grpc.inventory import grpc_all_inventory, grpc_one_inventory_serial
 from cvp_mcp.grpc.lifecycle import grpc_all_device_lifecycle
 from cvp_mcp.grpc.lldp import grpc_get_lldp_neighbors
 from cvp_mcp.grpc.monitor import grpc_all_probe_status, grpc_one_probe_status
+from cvp_mcp.grpc.network_map import grpc_map_network_topology
 from cvp_mcp.grpc.overlay import (
     grpc_get_evpn,
     grpc_get_features,
@@ -646,6 +647,49 @@ def get_cvp_lldp_neighbors(
                 return {"error": "grpc_only"}
     except Exception as e:
         logging.error("get_cvp_lldp_neighbors: %s", e)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def map_cvp_network_topology(
+    output_format: str = "json",
+    include_inactive_devices: bool = False,
+    max_ethernet_ports: int | None = None,
+    device_serial_allowlist: str = "",
+    topology_name: str = "cvp-lldp",
+) -> dict:
+    """
+    Discover LLDP adjacencies across CVP inventory (per-device Ethernet sweep) and export topology.
+
+    ``output_format``: ``json`` (structured ``topology`` + ``text``), ``mermaid``, GitHub ``table`` markdown,
+    or ``containerlab`` (YAML lab spec — **images are placeholders**; edit before deploy).
+
+    ``device_serial_allowlist``: comma-separated serials to scan (empty = all inventory devices).
+    ``max_ethernet_ports``: cap ports per device (default: inferred from model).
+    """
+    datadict = get_env_vars()
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                allowed = {"json", "mermaid", "table", "containerlab"}
+                fmt = (output_format or "json").strip().lower()
+                if fmt not in allowed:
+                    return {
+                        "error": f"output_format must be one of {sorted(allowed)}",
+                        "output_format": output_format,
+                    }
+                return grpc_map_network_topology(
+                    datadict,
+                    output_format=fmt,
+                    include_inactive_devices=include_inactive_devices,
+                    max_ethernet_ports=max_ethernet_ports,
+                    device_serial_allowlist=device_serial_allowlist,
+                    topology_name=topology_name,
+                )
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        logging.error("map_cvp_network_topology: %s", e)
         return {"error": str(e)}
 
 

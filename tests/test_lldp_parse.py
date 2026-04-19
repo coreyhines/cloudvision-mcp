@@ -26,6 +26,15 @@ def test_parse_remote_leaf_ethaddr_and_index():
     assert items[0]["eth_addr"] == "dc:a6:32:02:73:43"
 
 
+def test_port_scoped_sysdb_first_skips_other_ports():
+    paths = _lldp_paths_sysdb_first_no_serial(
+        ports=("Ethernet3",), include_wildcard_portstatus=False
+    )
+    strs = [[x for x in p if isinstance(x, str)] for p in paths]
+    assert all("Ethernet3" in s for s in strs)
+    assert not any("Ethernet6" in s for s in strs)
+
+
 def test_sysdb_first_paths_match_telemetry_shape_no_serial():
     paths = _lldp_paths_sysdb_first_no_serial()
     assert paths, "expected at least one candidate path"

@@ -69,6 +69,59 @@ def _lldp_l2discovery_literal_local_paths(device_id: str) -> tuple[list[Any], ..
     return tuple(out)
 
 
+def _lldp_paths_sysdb_first_no_serial() -> tuple[list[Any], ...]:
+    """
+    Paths starting at ``Sysdb`` with no leading serial in ``pathElts``.
+
+    The Connector ``Query`` already sets ``dataset.name`` to the device serial; some
+    Arista docs and UIs show Telemetry paths as ``/Sysdb/...`` (device scope separate).
+    If ``Get`` returns empty keys for ``[serial, Sysdb, ...]`` but Telemetry shows data,
+    try these before the serial-prefixed variants.
+    """
+    out: list[list[Any]] = []
+    for port in (
+        "Ethernet6",
+        "Ethernet1",
+        "Ethernet2",
+        "Ethernet3",
+        "Ethernet4",
+        "Ethernet5",
+        "Ethernet7",
+        "Ethernet8",
+    ):
+        for lid in ("1", "0"):
+            base = [
+                "Sysdb",
+                "l2discovery",
+                "lldp",
+                "status",
+                "local",
+                lid,
+                "portStatus",
+                port,
+            ]
+            out.extend(
+                (
+                    base + ["remoteSystem", "1"],
+                    base + ["remoteSystem", Wildcard()],
+                    base + ["remoteSystemByMsap", Wildcard()],
+                )
+            )
+    out.append(
+        [
+            "Sysdb",
+            "l2discovery",
+            "lldp",
+            "status",
+            "local",
+            Wildcard(),
+            "portStatus",
+            Wildcard(),
+        ]
+    )
+    return tuple(out)
+
+
 def _lldp_telemetry_browser_leaf_paths(device_id: str) -> tuple[list[Any], ...]:
     """
     Telemetry Browser uses concrete ``portStatus/<intf>/…`` segments. Connector
@@ -376,6 +429,7 @@ def grpc_get_lldp_neighbors(
     explicit = _lldp_paths_for_port_name(device_id, port_name, remote_neighbor_key)
     candidate_paths: tuple[list[Any], ...] = (
         *explicit,
+        *_lldp_paths_sysdb_first_no_serial(),
         *_lldp_telemetry_browser_leaf_paths(device_id),
         *_lldp_l2discovery_literal_local_paths(device_id),
         # Full per-port blob (remoteSystem + remoteSystemByMsap, e.g. Ethernet6 / rpi4-0 MAC)

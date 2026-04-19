@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from cloudvision.Connector.codec import Wildcard
@@ -289,3 +290,74 @@ def grpc_get_ip_interfaces(datadict: dict[str, Any], device_id: str) -> dict[str
         items=items,
         warnings=warnings,
     )
+
+
+def _is_physical_switch_port_name(name: str) -> bool:
+    n = (name or "").strip()
+    return n.startswith("Ethernet") or n.startswith("Management")
+
+
+def _interface_row_reports_oper_up(row: dict[str, Any]) -> bool:
+    """True when Sysdb oper status indicates the interface has link / is forwarding."""
+    oper = (row.get("oper_status") or "").strip()
+    if not oper:
+        return False
+    low = oper.lower()
+    if any(
+        x in low
+        for x in (
+            "intfoperdown",
+            "lowerlayerdown",
+            "notpresent",
+        )
+    ):
+        return False
+    if "operup" in low:
+        return True
+    if low in ("linkup", "connected", "up"):
+        return True
+    return False
+
+
+def _natural_port_name_key(name: str) -> tuple[Any, ...]:
+    parts = re.split(r"(\d+)", name)
+    key: list[Any] = []
+    for p in parts:
+        if p.isdigit():
+            key.append(int(p))
+        else:
+            key.append(p.lower())
+    return tuple(key)
+
+
+def grpc_list_oper_up_physical_ports_for_lldp(
+    datadict: dict[str, Any], device_id: str
+) -> tuple[list[str], list[str]]:
+    """
+    Short names of physical ports (Ethernet*, Management*) with oper-up status.
+
+    Used to avoid probing every ``Ethernet1..N`` for LLDP when Connector returns
+    interface Sysdb. Returns ``([], warnings)`` on failure or when no rows qualify.
+    """
+    warnings: list[str] = []
+    device_id = (device_id or "").strip()
+    if not device_id:
+        return [], ["missing_device_id"]
+    try:
+        blob = _connector_device_config(datadict, device_id)
+        items = merge_intfcfg_and_status(blob["intfConfig"], blob["intfStatus"])
+        out: list[str] = []
+        for row in items:
+            name = str(row.get("interface_name") or "")
+            if not _is_physical_switch_port_name(name):
+                continue
+            if not _interface_row_reports_oper_up(row):
+                continue
+            out.append(name)
+        out.sort(key=_natural_port_name_key)
+        if not out:
+            warnings.append("no_oper_up_physical_ports_from_interface_sysdb")
+        return out, warnings
+    except Exception as e:
+        logging.warning("oper_up_ports_for_lldp %s: %s", device_id, e)
+        return [], [f"interface_port_list_failed:{e}"]

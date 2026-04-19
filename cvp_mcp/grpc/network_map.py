@@ -11,6 +11,7 @@ import grpc
 import yaml
 
 from cvp_mcp.env import cvp_credentials_missing_reasons
+from cvp_mcp.grpc.interfaces import grpc_list_oper_up_physical_ports_for_lldp
 from cvp_mcp.grpc.inventory import grpc_all_inventory
 from cvp_mcp.grpc.lldp import grpc_get_lldp_neighbors
 from cvp_mcp.grpc.utils import createConnection
@@ -77,6 +78,17 @@ def _device_port_cap(
     if max_ethernet_ports is not None:
         n = min(n, max(1, max_ethernet_ports))
     return n
+
+
+def _filter_simple_ethernet_ports_by_cap(ports: list[str], cap: int) -> list[str]:
+    """Drop ``Ethernet<n>`` when *n* exceeds the model cap; keep other names (e.g. Management)."""
+    out: list[str] = []
+    for p in ports:
+        m = re.match(r"^Ethernet(\d+)$", p.strip(), re.I)
+        if m and int(m.group(1)) > cap:
+            continue
+        out.append(p)
+    return out
 
 
 def _remote_row_signature(row: dict[str, Any]) -> str:
@@ -147,12 +159,22 @@ def scan_lldp_topology_edges(
     include_inactive_devices: bool = False,
     max_ethernet_ports: int | None = None,
     device_serial_allowlist: list[str] | None = None,
+    lldp_port_source: str = "auto",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
-    Walk inventory EOS (and other) devices and probe ``Ethernet1..N`` LLDP per device.
+    Walk inventory devices and probe LLDP on candidate ports per device.
+
+    ``lldp_port_source``: ``auto`` uses Sysdb interface oper-up physical ports
+    (Ethernet*, Management*) when Connector returns data, otherwise falls back to
+    ``Ethernet1..N`` (N from model / ``max_ethernet_ports``). ``full_range`` always
+    uses the model-based Ethernet sweep (legacy behavior).
 
     Returns ``(edges, stats)`` where each edge is a flat dict suitable for export.
     """
+    mode = (lldp_port_source or "auto").strip().lower()
+    if mode not in ("auto", "full_range"):
+        mode = "auto"
+
     cred_miss = cvp_credentials_missing_reasons(datadict)
     if cred_miss:
         return [], {
@@ -160,6 +182,9 @@ def scan_lldp_topology_edges(
             "port_probes": 0,
             "edges_found": 0,
             "extra_neighbor_index_probes": 0,
+            "devices_port_source_oper_up": 0,
+            "devices_port_source_ethernet_range": 0,
+            "lldp_port_source": mode,
             "inventory_warnings": cred_miss,
             "credential_error": True,
         }
@@ -177,6 +202,9 @@ def scan_lldp_topology_edges(
         "port_probes": 0,
         "edges_found": 0,
         "extra_neighbor_index_probes": 0,
+        "devices_port_source_oper_up": 0,
+        "devices_port_source_ethernet_range": 0,
+        "lldp_port_source": mode,
         "inventory_warnings": inv_warnings,
     }
 
@@ -189,14 +217,40 @@ def scan_lldp_topology_edges(
         # Third-party / non-EOS may have no LLDP via Connector; still try.
         cap = _device_port_cap(dev, max_ethernet_ports)
         stats["devices_scanned"] += 1
-        logging.info(
-            "topology LLDP scan: %s (%s) ports 1..%s",
-            serial,
-            dev.get("hostname") or "",
-            cap,
-        )
-        for i in range(1, cap + 1):
-            port_name = f"Ethernet{i}"
+
+        if mode == "full_range":
+            port_iter: list[str] = [f"Ethernet{i}" for i in range(1, cap + 1)]
+            stats["devices_port_source_ethernet_range"] += 1
+            logging.info(
+                "topology LLDP scan: %s (%s) full_range Ethernet1..%s",
+                serial,
+                dev.get("hostname") or "",
+                cap,
+            )
+        else:
+            raw_ports, _pw = grpc_list_oper_up_physical_ports_for_lldp(datadict, serial)
+            filtered = _filter_simple_ethernet_ports_by_cap(raw_ports, cap)
+            if filtered:
+                port_iter = filtered
+                stats["devices_port_source_oper_up"] += 1
+                logging.info(
+                    "topology LLDP scan: %s (%s) oper_up ports (%s): %s",
+                    serial,
+                    dev.get("hostname") or "",
+                    len(port_iter),
+                    ", ".join(port_iter[:12]) + ("…" if len(port_iter) > 12 else ""),
+                )
+            else:
+                port_iter = [f"Ethernet{i}" for i in range(1, cap + 1)]
+                stats["devices_port_source_ethernet_range"] += 1
+                logging.info(
+                    "topology LLDP scan: %s (%s) fallback Ethernet1..%s (no oper-up list)",
+                    serial,
+                    dev.get("hostname") or "",
+                    cap,
+                )
+
+        for port_name in port_iter:
             stats["port_probes"] += 1
             seen_remote: set[str] = set()
             try:
@@ -519,11 +573,14 @@ def grpc_map_network_topology(
     device_serial_allowlist: str = "",
     topology_name: str = "cvp-lldp",
     topology_node_scope: str = "full_inventory",
+    lldp_port_source: str = "auto",
 ) -> dict[str, Any]:
     """
     Discover LLDP adjacencies across CVP inventory and render the chosen format.
 
     ``device_serial_allowlist``: comma-separated serials to scan (empty = all).
+    ``lldp_port_source``: ``auto`` (oper-up ports from Sysdb when available, else
+    Ethernet sweep) or ``full_range`` (always ``Ethernet1..N``).
     """
     warnings: list[str] = []
     fmt = (output_format or "json").strip().lower()
@@ -553,6 +610,9 @@ def grpc_map_network_topology(
                 "port_probes": 0,
                 "edges_found": 0,
                 "extra_neighbor_index_probes": 0,
+                "devices_port_source_oper_up": 0,
+                "devices_port_source_ethernet_range": 0,
+                "lldp_port_source": (lldp_port_source or "auto").strip().lower(),
                 "inventory_warnings": cred_miss,
                 "credential_error": True,
             },
@@ -588,11 +648,17 @@ def grpc_map_network_topology(
             "warnings": warnings + cred_warn,
         }
 
+    lps = (lldp_port_source or "auto").strip().lower()
+    if lps not in ("auto", "full_range"):
+        warnings.append(f"unknown_lldp_port_source:{lldp_port_source!r}; using auto")
+        lps = "auto"
+
     edges, stats = scan_lldp_topology_edges(
         datadict,
         include_inactive_devices=include_inactive_devices,
         max_ethernet_ports=max_ethernet_ports,
         device_serial_allowlist=allow_list,
+        lldp_port_source=lps,
     )
 
     inventory, _ = _collect_inventory(

@@ -8,12 +8,14 @@ from unittest.mock import patch
 import yaml
 
 from cvp_mcp.grpc.network_map import (
+    _filter_simple_ethernet_ports_by_cap,
     build_topology_nodes_and_links,
     format_topology_containerlab,
     format_topology_mermaid,
     format_topology_table,
     grpc_map_network_topology,
     infer_ethernet_port_count,
+    scan_lldp_topology_edges,
 )
 
 
@@ -100,6 +102,9 @@ def test_containerlab_yaml_roundtrip():
             "port_probes": 0,
             "edges_found": 0,
             "extra_neighbor_index_probes": 0,
+            "devices_port_source_oper_up": 0,
+            "devices_port_source_ethernet_range": 0,
+            "lldp_port_source": "auto",
             "inventory_warnings": [],
         },
     ),
@@ -150,6 +155,84 @@ def test_build_topology_connected_scope_excludes_orphan_inventory():
     ids = {n["id"] for n in nodes}
     assert "SN99" not in ids
     assert "SN1" in ids
+
+
+def test_filter_simple_ethernet_ports_by_cap():
+    assert _filter_simple_ethernet_ports_by_cap(
+        ["Ethernet1", "Ethernet99", "Management1"], cap=48
+    ) == ["Ethernet1", "Management1"]
+
+
+@patch("cvp_mcp.grpc.network_map._collect_inventory")
+@patch("cvp_mcp.grpc.network_map.grpc_get_lldp_neighbors")
+@patch("cvp_mcp.grpc.network_map.grpc_list_oper_up_physical_ports_for_lldp")
+def test_scan_lldp_uses_oper_up_port_list(
+    mock_oper_up: object,
+    mock_lldp: object,
+    mock_inv: object,
+) -> None:
+    mock_inv.return_value = (
+        [
+            {
+                "serial_number": "SN1",
+                "hostname": "sw1",
+                "model": "CCS-720XP-48TXH-2C-S",
+            }
+        ],
+        [],
+    )
+    mock_oper_up.return_value = (["Ethernet1", "Ethernet2"], [])
+    mock_lldp.return_value = {"items": []}
+    _edges, stats = scan_lldp_topology_edges(
+        {"cvp": "h.example:443", "cvtoken": "t"},
+        lldp_port_source="auto",
+    )
+    assert stats["port_probes"] == 2
+    assert stats["devices_port_source_oper_up"] == 1
+    assert stats["devices_port_source_ethernet_range"] == 0
+    assert mock_lldp.call_count == 2
+
+
+@patch("cvp_mcp.grpc.network_map._collect_inventory")
+@patch("cvp_mcp.grpc.network_map.grpc_get_lldp_neighbors")
+@patch("cvp_mcp.grpc.network_map.grpc_list_oper_up_physical_ports_for_lldp")
+def test_scan_lldp_full_range_skips_oper_up_query(
+    mock_oper_up: object,
+    mock_lldp: object,
+    mock_inv: object,
+) -> None:
+    mock_inv.return_value = (
+        [{"serial_number": "SN1", "hostname": "sw1", "model": "CCS-710P-16P"}],
+        [],
+    )
+    mock_lldp.return_value = {"items": []}
+    _edges, stats = scan_lldp_topology_edges(
+        {"cvp": "h.example:443", "cvtoken": "t"},
+        max_ethernet_ports=4,
+        lldp_port_source="full_range",
+    )
+    mock_oper_up.assert_not_called()
+    assert stats["port_probes"] == 4
+    assert stats["devices_port_source_ethernet_range"] == 1
+
+
+@patch("cvp_mcp.grpc.interfaces._connector_device_config")
+def test_grpc_list_oper_up_physical_ports_for_lldp(mock_cfg: object) -> None:
+    from cvp_mcp.grpc.interfaces import grpc_list_oper_up_physical_ports_for_lldp
+
+    mock_cfg.return_value = {
+        "intfConfig": {"Ethernet1": {}, "Ethernet2": {}},
+        "intfStatus": {
+            "Ethernet1": {"operStatus": {"Name": "intfOperUp"}},
+            "Ethernet2": {"operStatus": {"Name": "intfOperDown"}},
+        },
+    }
+    ports, warnings = grpc_list_oper_up_physical_ports_for_lldp(
+        {"cvp": "h:443", "cvtoken": "x"},
+        "SERIAL1",
+    )
+    assert ports == ["Ethernet1"]
+    assert not warnings
 
 
 def test_build_topology_matches_inventory_mac():

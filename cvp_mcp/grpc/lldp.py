@@ -86,6 +86,11 @@ def _get_path(
     return flatten_nested_device_map(raw) if isinstance(raw, dict) else {}
 
 
+def _path_for_log(path: list[Any]) -> str:
+    """Human-readable path for logs (wildcards shown as ``*``)."""
+    return "/".join("*" if isinstance(x, Wildcard) else str(x) for x in path)
+
+
 def _unwrap_lldp_container(flat: dict[str, Any]) -> dict[str, Any]:
     """If the snapshot is wrapped (neighborStatus / neighborTable / …), return inner map."""
     current = flat
@@ -343,19 +348,41 @@ def grpc_get_lldp_neighbors(datadict: dict[str, Any], device_id: str) -> dict[st
     flat: dict[str, Any] = {}
     path_used = ""
     for p in candidate_paths:
+        path_line = _path_for_log(p)
         try:
             snap = _get_path(datadict, device_id, list(p))
+            n = len(snap) if isinstance(snap, dict) else 0
+            preview = list(snap.keys())[:12] if isinstance(snap, dict) and snap else []
+            logging.info(
+                "lldp connector: device=%s path=%s key_count=%s keys=%s",
+                device_id,
+                path_line,
+                n,
+                preview,
+            )
             if snap:
                 flat = snap
-                path_used = "/".join(str(x) for x in p)
+                path_used = path_line
                 break
         except Exception as e:
-            logging.debug("lldp path %s: %s", p, e)
+            logging.warning(
+                "lldp connector: device=%s path=%s failed: %s",
+                device_id,
+                path_line,
+                e,
+            )
     items = parse_lldp_flat_to_items(flat)
     if flat and not items:
         warnings.append("lldp_data_unparsed")
     if not items and not flat:
         warnings.append("no_lldp_data_at_known_paths")
+    logging.info(
+        "lldp result: device=%s path_used=%s items=%s warnings=%s",
+        device_id,
+        path_used or "(none)",
+        len(items),
+        warnings,
+    )
     cov = "full" if items else ("partial" if flat else "none")
     return tool_envelope(
         device_id=device_id,

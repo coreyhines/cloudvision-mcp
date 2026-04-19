@@ -669,8 +669,10 @@ def map_cvp_network_topology(
     ``device_serial_allowlist``: comma-separated serials to scan (empty = all inventory devices).
     ``max_ethernet_ports``: cap ports per device (default: inferred from model).
     ``topology_node_scope``: ``full_inventory`` (every CVP device as a node) or ``connected`` (only devices with LLDP edges).
-    ``lldp_port_source``: ``auto`` probes LLDP only on Sysdb oper-up physical ports when data is available (faster);
-    otherwise falls back to ``Ethernet1..N``. Use ``full_range`` for the legacy full sweep.
+    ``lldp_port_source``:
+    - ``auto`` probes Sysdb oper-up physical ports first, then falls back to ``Ethernet1..N``.
+    - ``oper_up_only`` probes only oper-up physical ports (no fallback sweep).
+    - ``full_range`` always uses the legacy ``Ethernet1..N`` sweep.
     """
     datadict = get_env_vars()
     try:

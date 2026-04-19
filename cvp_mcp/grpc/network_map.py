@@ -164,15 +164,16 @@ def scan_lldp_topology_edges(
     """
     Walk inventory devices and probe LLDP on candidate ports per device.
 
-    ``lldp_port_source``: ``auto`` uses Sysdb interface oper-up physical ports
-    (Ethernet*, Management*) when Connector returns data, otherwise falls back to
-    ``Ethernet1..N`` (N from model / ``max_ethernet_ports``). ``full_range`` always
-    uses the model-based Ethernet sweep (legacy behavior).
+    ``lldp_port_source``:
+    - ``auto``: use Sysdb interface oper-up physical ports (Ethernet*, Management*)
+      when Connector returns data; fallback to ``Ethernet1..N`` otherwise.
+    - ``oper_up_only``: use only oper-up physical ports; skip device when list is empty.
+    - ``full_range``: always use model-based ``Ethernet1..N`` sweep (legacy behavior).
 
     Returns ``(edges, stats)`` where each edge is a flat dict suitable for export.
     """
     mode = (lldp_port_source or "auto").strip().lower()
-    if mode not in ("auto", "full_range"):
+    if mode not in ("auto", "oper_up_only", "full_range"):
         mode = "auto"
 
     cred_miss = cvp_credentials_missing_reasons(datadict)
@@ -184,6 +185,7 @@ def scan_lldp_topology_edges(
             "extra_neighbor_index_probes": 0,
             "devices_port_source_oper_up": 0,
             "devices_port_source_ethernet_range": 0,
+            "devices_skipped_no_oper_up_ports": 0,
             "lldp_port_source": mode,
             "inventory_warnings": cred_miss,
             "credential_error": True,
@@ -204,6 +206,7 @@ def scan_lldp_topology_edges(
         "extra_neighbor_index_probes": 0,
         "devices_port_source_oper_up": 0,
         "devices_port_source_ethernet_range": 0,
+        "devices_skipped_no_oper_up_ports": 0,
         "lldp_port_source": mode,
         "inventory_warnings": inv_warnings,
     }
@@ -241,6 +244,14 @@ def scan_lldp_topology_edges(
                     ", ".join(port_iter[:12]) + ("…" if len(port_iter) > 12 else ""),
                 )
             else:
+                if mode == "oper_up_only":
+                    stats["devices_skipped_no_oper_up_ports"] += 1
+                    logging.info(
+                        "topology LLDP scan: %s (%s) skipped (oper_up_only with no oper-up list)",
+                        serial,
+                        dev.get("hostname") or "",
+                    )
+                    continue
                 port_iter = [f"Ethernet{i}" for i in range(1, cap + 1)]
                 stats["devices_port_source_ethernet_range"] += 1
                 logging.info(
@@ -580,7 +591,8 @@ def grpc_map_network_topology(
 
     ``device_serial_allowlist``: comma-separated serials to scan (empty = all).
     ``lldp_port_source``: ``auto`` (oper-up ports from Sysdb when available, else
-    Ethernet sweep) or ``full_range`` (always ``Ethernet1..N``).
+    Ethernet sweep), ``oper_up_only`` (no fallback sweep), or ``full_range``
+    (always ``Ethernet1..N``).
     """
     warnings: list[str] = []
     fmt = (output_format or "json").strip().lower()
@@ -612,6 +624,7 @@ def grpc_map_network_topology(
                 "extra_neighbor_index_probes": 0,
                 "devices_port_source_oper_up": 0,
                 "devices_port_source_ethernet_range": 0,
+                "devices_skipped_no_oper_up_ports": 0,
                 "lldp_port_source": (lldp_port_source or "auto").strip().lower(),
                 "inventory_warnings": cred_miss,
                 "credential_error": True,
@@ -649,7 +662,7 @@ def grpc_map_network_topology(
         }
 
     lps = (lldp_port_source or "auto").strip().lower()
-    if lps not in ("auto", "full_range"):
+    if lps not in ("auto", "oper_up_only", "full_range"):
         warnings.append(f"unknown_lldp_port_source:{lldp_port_source!r}; using auto")
         lps = "auto"
 

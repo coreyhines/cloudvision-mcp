@@ -43,7 +43,7 @@ Responses for the newer tools use a common envelope: `device_id`, `collected_at`
 | `get_cvp_probe_arista_apis` | Installed `arista.*.v1` Python API bundles | local package introspection |
 | `get_cvp_device_config` | Config summary URIs + optional running-config body | `resource_api:configstatus.v1`; if URIs/APIs are missing, **Connector fallback** scans Sysdb/Smash + analytics `Devices/...` paths for a running-config-like blob |
 | `get_cvp_interfaces` | Interface admin/oper, speed, MTU, counters | `connector:device:Sysdb/interface` |
-| `get_cvp_lldp_neighbors` | LLDP neighbor rows (`remoteSystem` and `remoteSystemByMsap` per port; `neighbor_source` on each row) | `connector:device:Sysdb/l2discovery/lldp` (falls back to legacy `Sysdb/lldp` paths) |
+| `get_cvp_lldp_neighbors` | LLDP neighbor rows (`remoteSystem` and `remoteSystemByMsap` per port; `neighbor_source` on each row). Connector queries use literal `local/1` and `local/0` (Aeris-style) as well as wildcards. | `connector:device:Sysdb/l2discovery/lldp` (falls back to legacy `Sysdb/lldp` paths) |
 | `get_cvp_vlans` | Switchport / VLAN hints | `connector:device:Sysdb/bridging` |
 | `get_cvp_ip_interfaces` | L3 addressing hints | `connector:device:Sysdb/ip` |
 | `get_cvp_events` | Structured CVP events (`GetAll` + filters) | `resource_api:event.v1` |

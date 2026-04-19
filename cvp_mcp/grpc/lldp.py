@@ -13,6 +13,9 @@ from cvp_mcp.grpc.connector import get_device_path, serialize_cloudvision_data
 from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.sysdb_parse import eos_name, flatten_nested_device_map
 
+# Primary tree on modern EOS: Sysdb/l2discovery/lldp/status/local/…/portStatus/…/remoteSystem/…
+LLDP_DATA_SOURCE = "connector:device:Sysdb/l2discovery/lldp"
+
 
 def _cvp_addr(datadict: dict[str, Any]) -> str:
     cvp = (datadict.get("cvp") or "").strip()
@@ -49,6 +52,92 @@ def _unwrap_lldp_container(flat: dict[str, Any]) -> dict[str, Any]:
     return current
 
 
+def _tlv_string(blob: Any) -> str:
+    """String from EOS LLDP TLV blobs: plain str or { value: { value: "…" } } / valueStr."""
+    if blob is None:
+        return ""
+    if isinstance(blob, str):
+        return blob
+    if isinstance(blob, dict):
+        vs = blob.get("valueStr")
+        if isinstance(vs, dict):
+            inner = vs.get("value")
+            if isinstance(inner, str):
+                return inner
+        val = blob.get("value")
+        if isinstance(val, dict):
+            inner = val.get("value")
+            if isinstance(inner, str):
+                return inner
+            if inner is not None:
+                return str(inner)
+    return ""
+
+
+def _msap_fields(nb: dict[str, Any]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    m = nb.get("msap")
+    if not isinstance(m, dict):
+        return out
+    pid = m.get("portIdentifier")
+    if isinstance(pid, dict) and pid.get("portId") is not None:
+        out["remote_port_id"] = str(pid.get("portId"))
+    cid = m.get("chassisIdentifier")
+    if isinstance(cid, dict) and cid.get("chassisId") is not None:
+        out["remote_chassis_id"] = str(cid.get("chassisId"))
+    return out
+
+
+def _l2_remote_row(
+    local_interface: str, neighbor_key: str, nb: dict[str, Any]
+) -> dict[str, Any]:
+    """One row from Sysdb/l2discovery/lldp/…/remoteSystem/* (Aeris / EOS 4.35+ style)."""
+    row: dict[str, Any] = {
+        "local_interface": local_interface,
+        "neighbor_key": neighbor_key,
+    }
+    name = _tlv_string(nb.get("sysName"))
+    if name:
+        row["system_name"] = name
+    desc = _tlv_string(nb.get("sysDesc"))
+    if desc:
+        row["system_description"] = desc
+    eth = nb.get("ethAddr")
+    if isinstance(eth, str) and eth:
+        row["eth_addr"] = eth
+    row.update(_msap_fields(nb))
+    ttl = nb.get("ttl")
+    if isinstance(ttl, (int, float)):
+        row["ttl_sec"] = int(ttl)
+    return row
+
+
+def _collect_l2discovery_port_status(obj: Any, items: list[dict[str, Any]]) -> None:
+    """Recurse and harvest portStatus/*/remoteSystem/* leaves."""
+    if not isinstance(obj, dict):
+        return
+    ps = obj.get("portStatus")
+    if isinstance(ps, dict):
+        for intf_name, pnode in ps.items():
+            if not isinstance(pnode, dict):
+                continue
+            rs = pnode.get("remoteSystem")
+            if not isinstance(rs, dict):
+                continue
+            for ridx, rnode in rs.items():
+                if isinstance(rnode, dict):
+                    items.append(_l2_remote_row(str(intf_name), str(ridx), rnode))
+        return
+    for v in obj.values():
+        _collect_l2discovery_port_status(v, items)
+
+
+def _parse_l2discovery_lldp_tree(flat: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    _collect_l2discovery_port_status(flat, items)
+    return items
+
+
 def _neighbor_row(
     local_interface: str, neighbor_key: str, nb: dict[str, Any]
 ) -> dict[str, Any]:
@@ -72,7 +161,20 @@ def _neighbor_row(
         row["management_address"] = nb["managementAddress"]
     if "mgmtAddr" in nb:
         row["mgmt_addr"] = nb["mgmtAddr"]
+    sn = _tlv_string(nb.get("sysName"))
+    if sn and "system_name" not in row:
+        row["system_name"] = sn
     return row
+
+
+def _parse_l2discovery_remote_leaf(flat: dict[str, Any]) -> list[dict[str, Any]]:
+    """Handle a Get that returns only one remoteSystem object (no portStatus wrapper)."""
+    if not flat:
+        return []
+    if flat.get("msap") is not None or isinstance(flat.get("sysName"), dict):
+        idx = str(flat.get("index", flat.get("name", "0")))
+        return [_l2_remote_row("", idx, flat)]
+    return []
 
 
 def parse_lldp_flat_to_items(flat: dict[str, Any]) -> list[dict[str, Any]]:
@@ -80,6 +182,15 @@ def parse_lldp_flat_to_items(flat: dict[str, Any]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     if not flat:
         return items
+    l2 = _parse_l2discovery_lldp_tree(flat)
+    if l2:
+        l2.sort(
+            key=lambda r: (r.get("local_interface") or "", r.get("neighbor_key") or "")
+        )
+        return l2
+    leaf = _parse_l2discovery_remote_leaf(flat)
+    if leaf:
+        return leaf
     work = _unwrap_lldp_container(flat)
     for local_intf, node in work.items():
         if not isinstance(node, dict):
@@ -100,12 +211,34 @@ def grpc_get_lldp_neighbors(datadict: dict[str, Any], device_id: str) -> dict[st
     if not device_id:
         return tool_envelope(
             device_id=None,
-            data_source="connector:device:Sysdb/lldp",
+            data_source=LLDP_DATA_SOURCE,
             coverage="none",
             items=[],
             warnings=["missing_device_id"],
         )
     candidate_paths: tuple[list[Any], ...] = (
+        [
+            device_id,
+            "Sysdb",
+            "l2discovery",
+            "lldp",
+            "status",
+            "local",
+            Wildcard(),
+            "portStatus",
+            Wildcard(),
+            "remoteSystem",
+            Wildcard(),
+        ],
+        [
+            device_id,
+            "Sysdb",
+            "l2discovery",
+            "lldp",
+            "status",
+            Wildcard(),
+        ],
+        [device_id, "Sysdb", "l2discovery", "lldp", Wildcard()],
         [device_id, "Sysdb", "lldp", "status", "neighborStatus", Wildcard()],
         [device_id, "Sysdb", "lldp", "status", "neighborTable", Wildcard()],
         [device_id, "Sysdb", "lldp", "status", Wildcard()],
@@ -132,7 +265,7 @@ def grpc_get_lldp_neighbors(datadict: dict[str, Any], device_id: str) -> dict[st
     cov = "full" if items else ("partial" if flat else "none")
     return tool_envelope(
         device_id=device_id,
-        data_source="connector:device:Sysdb/lldp",
+        data_source=LLDP_DATA_SOURCE,
         coverage=cov,
         items=items,
         obj={"path_hint": path_used, "raw_key_count": len(flat)},

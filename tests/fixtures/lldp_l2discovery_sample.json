@@ -1,0 +1,31 @@
+{
+  "local": {
+    "1": {
+      "portStatus": {
+        "Ethernet5": {
+          "remoteSystem": {
+            "1": {
+              "sysName": {
+                "isSet": true,
+                "value": { "value": "ztx-7230.freeblizz.com" },
+                "valueStr": { "value": "ztx-7230.freeblizz.com" }
+              },
+              "ethAddr": "ec:8a:48:04:30:bf",
+              "msap": {
+                "portIdentifier": {
+                  "portId": "Management1/1",
+                  "portIdSubtype": { "Name": "pidInterfaceName", "Value": 5 }
+                },
+                "chassisIdentifier": {
+                  "chassisId": "ec:8a:48:04:30:c0",
+                  "chassisIdSubtype": { "Name": "cidMacAddress", "Value": 4 }
+                }
+              },
+              "ttl": 120
+            }
+          }
+        }
+      }
+    }
+  }
+}

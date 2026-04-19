@@ -7,18 +7,29 @@ from pathlib import Path
 
 from cvp_mcp.grpc.lldp import (
     _lldp_l2discovery_literal_local_paths,
+    _lldp_paths_for_port_name,
     grpc_get_lldp_neighbors,
     parse_lldp_flat_to_items,
 )
+
+
+def test_explicit_port_paths_include_remote_system_one():
+    paths = _lldp_paths_for_port_name("D1", "Ethernet6", "")
+    assert any(len(p) >= 2 and p[-2:] == ["remoteSystem", "1"] for p in paths)
+
+
+def test_parse_remote_leaf_ethaddr_and_index():
+    raw = {"index": 1, "ethAddr": "dc:a6:32:02:73:43"}
+    items = parse_lldp_flat_to_items(raw)
+    assert len(items) == 1
+    assert items[0]["eth_addr"] == "dc:a6:32:02:73:43"
 
 
 def test_l2discovery_literal_local_paths_use_instance_one_and_zero():
     """Match Aeris paths like …/local/1/portStatus/Ethernet6/remoteSystem/1/."""
     paths = _lldp_l2discovery_literal_local_paths("SN99")
     lids = {
-        p[6]
-        for p in paths
-        if len(p) >= 8 and p[5] == "local" and p[7] == "portStatus"
+        p[6] for p in paths if len(p) >= 8 and p[5] == "local" and p[7] == "portStatus"
     }
     assert lids == {"0", "1"}
 

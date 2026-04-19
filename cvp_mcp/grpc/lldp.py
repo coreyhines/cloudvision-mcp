@@ -69,6 +69,80 @@ def _lldp_l2discovery_literal_local_paths(device_id: str) -> tuple[list[Any], ..
     return tuple(out)
 
 
+def _lldp_telemetry_browser_leaf_paths(device_id: str) -> tuple[list[Any], ...]:
+    """
+    Telemetry Browser uses concrete ``portStatus/<intf>/…`` segments. Connector
+    ``Get`` may return no keys for ``portStatus/*`` while literal interface names work
+    (see Aeris path …/portStatus/Ethernet6/remoteSystem/1/).
+    """
+    out: list[list[Any]] = []
+    # Ethernet6 first: common for lab uplinks; matches Telemetry Browser examples.
+    for port in (
+        "Ethernet6",
+        "Ethernet1",
+        "Ethernet2",
+        "Ethernet3",
+        "Ethernet4",
+        "Ethernet5",
+        "Ethernet7",
+        "Ethernet8",
+    ):
+        for lid in ("1", "0"):
+            base = [
+                device_id,
+                "Sysdb",
+                "l2discovery",
+                "lldp",
+                "status",
+                "local",
+                lid,
+                "portStatus",
+                port,
+            ]
+            out.extend(
+                (
+                    base + ["remoteSystem", "1"],
+                    base + ["remoteSystem", Wildcard()],
+                    base + ["remoteSystemByMsap", Wildcard()],
+                )
+            )
+    return tuple(out)
+
+
+def _lldp_paths_for_port_name(
+    device_id: str, port_name: str, remote_neighbor_key: str
+) -> tuple[list[Any], ...]:
+    """User-supplied port (and optional remote index) matching Telemetry Browser."""
+    port_name = (port_name or "").strip()
+    if not port_name:
+        return ()
+    rk = (remote_neighbor_key or "").strip()
+    out: list[list[Any]] = []
+    for lid in ("1", "0"):
+        base = [
+            device_id,
+            "Sysdb",
+            "l2discovery",
+            "lldp",
+            "status",
+            "local",
+            lid,
+            "portStatus",
+            port_name,
+        ]
+        out.extend(
+            (
+                base + ["remoteSystemByMsap", Wildcard()],
+                base + ["remoteSystem", Wildcard()],
+            )
+        )
+        if rk:
+            out.append(base + ["remoteSystem", rk])
+        else:
+            out.append(base + ["remoteSystem", "1"])
+    return tuple(out)
+
+
 def _cvp_addr(datadict: dict[str, Any]) -> str:
     cvp = (datadict.get("cvp") or "").strip()
     if cvp and ":" not in cvp:
@@ -247,6 +321,11 @@ def _parse_l2discovery_remote_leaf(flat: dict[str, Any]) -> list[dict[str, Any]]
     if flat.get("msap") is not None or isinstance(flat.get("sysName"), dict):
         idx = str(flat.get("index", flat.get("name", "0")))
         return [_l2_remote_row("", idx, flat, neighbor_source="remoteLeaf")]
+    if flat.get("ethAddr") and (
+        flat.get("index") is not None or flat.get("name") is not None
+    ):
+        idx = str(flat.get("index", flat.get("name", "0")))
+        return [_l2_remote_row("", idx, flat, neighbor_source="remoteLeaf")]
     return []
 
 
@@ -278,7 +357,12 @@ def parse_lldp_flat_to_items(flat: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
-def grpc_get_lldp_neighbors(datadict: dict[str, Any], device_id: str) -> dict[str, Any]:
+def grpc_get_lldp_neighbors(
+    datadict: dict[str, Any],
+    device_id: str,
+    port_name: str = "",
+    remote_neighbor_key: str = "",
+) -> dict[str, Any]:
     warnings: list[str] = []
     device_id = (device_id or "").strip()
     if not device_id:
@@ -289,7 +373,10 @@ def grpc_get_lldp_neighbors(datadict: dict[str, Any], device_id: str) -> dict[st
             items=[],
             warnings=["missing_device_id"],
         )
+    explicit = _lldp_paths_for_port_name(device_id, port_name, remote_neighbor_key)
     candidate_paths: tuple[list[Any], ...] = (
+        *explicit,
+        *_lldp_telemetry_browser_leaf_paths(device_id),
         *_lldp_l2discovery_literal_local_paths(device_id),
         # Full per-port blob (remoteSystem + remoteSystemByMsap, e.g. Ethernet6 / rpi4-0 MAC)
         [

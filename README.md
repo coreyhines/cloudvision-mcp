@@ -34,6 +34,10 @@ Run
 
 The server will be running by default with Streamable HTTP on port 8000
 
+### Remote MCP clients and other agents
+
+Connector tools (LLDP, inventory, topology map, etc.) read **`CVP`** and **`CVPTOKEN` from the environment of the MCP server process** (see `cvp_mcp/env.py`). They are **not** sent by the MCP client. If another agent, IDE, or hosted runner connects to your MCP URL but the **container or host running `cloudvision_mcp.py` lacks those variables**, calls will return empty data or warnings such as `missing_CVP`, `missing_CVPTOKEN`, and `mcp_server_missing_cloudvision_credentials`. Fix by injecting the same env-file or secrets you use locally into that deployment, and ensure the service account token can reach the CVP gRPC API from that network.
+
 ## Tools and data sources
 
 Responses for the newer tools use a common envelope: `device_id`, `collected_at`, `data_source`, `coverage`, `warnings`, and either `items` or `object`.

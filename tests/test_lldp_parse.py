@@ -160,3 +160,12 @@ def test_grpc_get_lldp_neighbors_missing_id():
     assert out["coverage"] == "none"
     assert out["warnings"] == ["missing_device_id"]
     assert out["data_source"] == "connector:device:Sysdb/l2discovery/lldp"
+
+
+def test_grpc_get_lldp_neighbors_missing_server_credentials():
+    out = grpc_get_lldp_neighbors({"cvp": "", "cvtoken": ""}, "SN1")
+    assert out["coverage"] == "none"
+    assert "missing_CVP" in out["warnings"]
+    assert "missing_CVPTOKEN" in out["warnings"]
+    assert "mcp_server_missing_cloudvision_credentials" in out["warnings"]
+    assert out.get("object", {}).get("hint", "")

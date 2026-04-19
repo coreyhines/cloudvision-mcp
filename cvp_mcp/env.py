@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 
 def normalize_api_token(token: str | None) -> str:
@@ -50,3 +51,20 @@ def env_datadict_from_os() -> dict:
         "cvp": normalize_cvp_endpoint(os.environ.get("CVP")),
         "cert": resolve_cert_path(os.environ.get("CERT")),
     }
+
+
+def cvp_credentials_missing_reasons(datadict: dict[str, Any]) -> list[str]:
+    """
+    Return machine-readable reasons if CloudVision gRPC cannot be used (empty if ok).
+
+    Connector tools (including LLDP) need ``CVP`` and ``CVPTOKEN`` on the **MCP server
+    process** environment. Remote AI agents and MCP clients do not pass these through
+    the protocol; each deployment must load them (e.g. ``--env-file`` / Podman/Kubernetes
+    secrets).
+    """
+    reasons: list[str] = []
+    if not (datadict.get("cvp") or "").strip():
+        reasons.append("missing_CVP")
+    if not normalize_api_token(datadict.get("cvtoken") or ""):
+        reasons.append("missing_CVPTOKEN")
+    return reasons

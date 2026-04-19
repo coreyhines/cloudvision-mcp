@@ -8,7 +8,7 @@ from typing import Any
 from cloudvision.Connector.codec import Wildcard
 from cloudvision.Connector.grpc_client import GRPCClient
 
-from cvp_mcp.env import normalize_api_token
+from cvp_mcp.env import cvp_credentials_missing_reasons, normalize_api_token
 from cvp_mcp.grpc.connector import get_device_path, serialize_cloudvision_data
 from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.sysdb_parse import eos_name, flatten_nested_device_map
@@ -479,6 +479,23 @@ def grpc_get_lldp_neighbors(
             coverage="none",
             items=[],
             warnings=["missing_device_id"],
+        )
+    cred_miss = cvp_credentials_missing_reasons(datadict)
+    if cred_miss:
+        return tool_envelope(
+            device_id=device_id,
+            data_source=LLDP_DATA_SOURCE,
+            coverage="none",
+            items=[],
+            warnings=cred_miss
+            + [
+                "mcp_server_missing_cloudvision_credentials",
+            ],
+            obj={
+                "hint": "Set CVP (apiserver host:port) and CVPTOKEN on the MCP server "
+                "process environment. MCP clients and remote agents cannot inject these; "
+                "use --env-file, container env, or systemd Environment=.",
+            },
         )
     explicit = _lldp_paths_for_port_name(device_id, port_name, remote_neighbor_key)
     port_filter = (port_name or "").strip()

@@ -10,6 +10,7 @@ from typing import Any
 import grpc
 import yaml
 
+from cvp_mcp.env import cvp_credentials_missing_reasons
 from cvp_mcp.grpc.inventory import grpc_all_inventory
 from cvp_mcp.grpc.lldp import grpc_get_lldp_neighbors
 from cvp_mcp.grpc.utils import createConnection
@@ -152,6 +153,17 @@ def scan_lldp_topology_edges(
 
     Returns ``(edges, stats)`` where each edge is a flat dict suitable for export.
     """
+    cred_miss = cvp_credentials_missing_reasons(datadict)
+    if cred_miss:
+        return [], {
+            "devices_scanned": 0,
+            "port_probes": 0,
+            "edges_found": 0,
+            "extra_neighbor_index_probes": 0,
+            "inventory_warnings": cred_miss,
+            "credential_error": True,
+        }
+
     inventory, inv_warnings = _collect_inventory(
         datadict, include_inactive=include_inactive_devices
     )
@@ -524,6 +536,57 @@ def grpc_map_network_topology(
         allow_list = [
             x.strip() for x in device_serial_allowlist.split(",") if x.strip()
         ]
+
+    cred_miss = cvp_credentials_missing_reasons(datadict)
+    if cred_miss:
+        scope0 = (topology_node_scope or "full_inventory").strip().lower()
+        if scope0 not in ("full_inventory", "connected"):
+            scope0 = "full_inventory"
+        empty_topology: dict[str, Any] = {
+            "data_source": NETWORK_MAP_DATA_SOURCE,
+            "topology_node_scope": scope0,
+            "nodes": [],
+            "links": [],
+            "edges": [],
+            "stats": {
+                "devices_scanned": 0,
+                "port_probes": 0,
+                "edges_found": 0,
+                "extra_neighbor_index_probes": 0,
+                "inventory_warnings": cred_miss,
+                "credential_error": True,
+            },
+        }
+        cred_warn = cred_miss + [
+            "mcp_server_missing_cloudvision_credentials",
+            "remote_mcp_clients_cannot_set_CVP_or_CVPTOKEN_configure_the_server",
+        ]
+        if fmt == "json":
+            text_out = json.dumps(empty_topology, indent=2)
+        elif fmt == "mermaid":
+            text_out = (
+                'flowchart LR\n  n0["(no data — missing CVP/CVPTOKEN on MCP server)"]\n'
+            )
+        elif fmt == "table":
+            text_out = (
+                "| Error |\n| --- |\n"
+                "| Missing CVP/CVPTOKEN on MCP server — see README. |\n"
+            )
+        else:
+            text_out = yaml.safe_dump(
+                {
+                    "name": topology_name or "cvp-lldp",
+                    "topology": {"nodes": {}, "links": []},
+                },
+                sort_keys=False,
+                default_flow_style=False,
+            )
+        return {
+            "output_format": fmt,
+            "text": text_out,
+            "topology": empty_topology,
+            "warnings": warnings + cred_warn,
+        }
 
     edges, stats = scan_lldp_topology_edges(
         datadict,

@@ -5,7 +5,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from cvp_mcp.grpc.lldp import grpc_get_lldp_neighbors, parse_lldp_flat_to_items
+from cvp_mcp.grpc.lldp import (
+    _lldp_l2discovery_literal_local_paths,
+    grpc_get_lldp_neighbors,
+    parse_lldp_flat_to_items,
+)
+
+
+def test_l2discovery_literal_local_paths_use_instance_one_and_zero():
+    """Match Aeris paths like …/local/1/portStatus/Ethernet6/remoteSystem/1/."""
+    paths = _lldp_l2discovery_literal_local_paths("SN99")
+    lids = {
+        p[6]
+        for p in paths
+        if len(p) >= 8 and p[5] == "local" and p[7] == "portStatus"
+    }
+    assert lids == {"0", "1"}
 
 
 def test_parse_lldp_flat_to_items_from_fixture():

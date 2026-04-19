@@ -14,7 +14,59 @@ from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.sysdb_parse import eos_name, flatten_nested_device_map
 
 # Primary tree: Sysdb/l2discovery/lldp/status/local/…/portStatus/<intf>/{remoteSystem,remoteSystemByMsap}/…
+# Aeris shows fixed instance ids, e.g. …/local/1/portStatus/Ethernet6/remoteSystem/1/
 LLDP_DATA_SOURCE = "connector:device:Sysdb/l2discovery/lldp"
+
+
+def _lldp_l2discovery_literal_local_paths(device_id: str) -> tuple[list[Any], ...]:
+    """
+    Connector often matches Aeris when ``local`` is a literal instance (``1``, ``0``),
+    not only ``Wildcard()`` under ``local``.
+    """
+    out: list[list[Any]] = []
+    for lid in ("1", "0"):
+        out.extend(
+            (
+                [
+                    device_id,
+                    "Sysdb",
+                    "l2discovery",
+                    "lldp",
+                    "status",
+                    "local",
+                    lid,
+                    "portStatus",
+                    Wildcard(),
+                ],
+                [
+                    device_id,
+                    "Sysdb",
+                    "l2discovery",
+                    "lldp",
+                    "status",
+                    "local",
+                    lid,
+                    "portStatus",
+                    Wildcard(),
+                    "remoteSystem",
+                    Wildcard(),
+                ],
+                [
+                    device_id,
+                    "Sysdb",
+                    "l2discovery",
+                    "lldp",
+                    "status",
+                    "local",
+                    lid,
+                    "portStatus",
+                    Wildcard(),
+                    "remoteSystemByMsap",
+                    Wildcard(),
+                ],
+            )
+        )
+    return tuple(out)
 
 
 def _cvp_addr(datadict: dict[str, Any]) -> str:
@@ -233,6 +285,7 @@ def grpc_get_lldp_neighbors(datadict: dict[str, Any], device_id: str) -> dict[st
             warnings=["missing_device_id"],
         )
     candidate_paths: tuple[list[Any], ...] = (
+        *_lldp_l2discovery_literal_local_paths(device_id),
         # Full per-port blob (remoteSystem + remoteSystemByMsap, e.g. Ethernet6 / rpi4-0 MAC)
         [
             device_id,

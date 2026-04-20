@@ -62,6 +62,24 @@ Responses for the newer tools use a common envelope: `device_id`, `collected_at`
 
 Connector-based tools are best-effort: EOS paths differ by release, so `coverage` may be `partial` and `warnings` may explain empty results.
 
+## Simple LLDP strategy for agents
+
+Use this workflow when you need relevant and eventually complete LLDP data across mixed device models.
+
+1. Run `get_cvp_all_inventory` and keep active EOS serials.
+2. Run `get_cvp_lldp_neighbors` per device.
+3. If a device returns `lldp_data_unparsed`, do **not** treat it as "no neighbors":
+   - retry with `port_name` for concrete interfaces, or
+   - run `map_cvp_network_topology` in **batches** (`device_serial_allowlist`, 1-5 devices).
+4. Keep batch calls bounded with `max_ethernet_ports` to avoid long sweeps.
+5. Merge results across batches and dedupe links using:
+   - `local_serial + local_port + (remote_eth_addr or remote_chassis_id)`.
+
+Why this works:
+- Some models return wildcard LLDP snapshots that are present but not directly parseable.
+- Per-port probes and topology sweeps use concrete interface paths, which consistently recover neighbor edges.
+- Batching avoids unstable long-running full-fabric calls and gives repeatable, additive results.
+
 ## Server Options
 
 The server can be configured with the following flags

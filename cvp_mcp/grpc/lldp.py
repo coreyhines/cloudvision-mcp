@@ -622,8 +622,14 @@ def grpc_get_lldp_neighbors(
                     e,
                 )
     items = parse_lldp_flat_to_items(flat)
+    obj: dict[str, Any] = {"path_hint": path_used, "raw_key_count": len(flat)}
     if flat and not items:
         warnings.append("lldp_data_unparsed")
+        obj["next_steps"] = [
+            "retry_with_port_name: use a concrete interface (for example Ethernet6)",
+            "if_unparsed_persists: use map_cvp_network_topology with batched device_serial_allowlist",
+            "merge_topology_batches: dedupe by local_serial+local_port+remote_eth_addr_or_remote_chassis_id",
+        ]
     if not items and not flat:
         warnings.append("no_lldp_data_at_known_paths")
     logging.info(
@@ -639,6 +645,6 @@ def grpc_get_lldp_neighbors(
         data_source=LLDP_DATA_SOURCE,
         coverage=cov,
         items=items,
-        obj={"path_hint": path_used, "raw_key_count": len(flat)},
+        obj=obj,
         warnings=warnings,
     )

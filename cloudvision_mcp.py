@@ -632,6 +632,10 @@ def get_cvp_lldp_neighbors(
 
     If Telemetry Browser shows a path like ``…/portStatus/Ethernet6/remoteSystem/1`` but wildcard
     queries return nothing, pass ``port_name`` (e.g. ``Ethernet6``) and optionally ``remote_neighbor_key`` (e.g. ``1``).
+
+    Practical collection rule for agents:
+    - If warning contains ``lldp_data_unparsed``, switch to per-port calls (``port_name``) or
+      run ``map_cvp_network_topology`` in small device batches and merge results.
     """
     datadict = get_env_vars()
     try:

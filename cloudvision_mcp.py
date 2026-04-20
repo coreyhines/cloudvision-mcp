@@ -673,6 +673,11 @@ def map_cvp_network_topology(
     - ``auto`` probes Sysdb oper-up physical ports first, then falls back to ``Ethernet1..N``.
     - ``oper_up_only`` probes only oper-up physical ports (no fallback sweep).
     - ``full_range`` always uses the legacy ``Ethernet1..N`` sweep.
+
+    Agent guidance for reliable mapping in flaky sessions:
+    - Run batched calls with ``device_serial_allowlist`` (roughly 1-5 serials per call).
+    - Set ``max_ethernet_ports`` to a realistic cap.
+    - Merge outputs across batches for full-fabric topology.
     """
     datadict = get_env_vars()
     try:

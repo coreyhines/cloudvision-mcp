@@ -593,7 +593,26 @@ def grpc_map_network_topology(
     ``lldp_port_source``: ``auto`` (oper-up ports from Sysdb when available, else
     Ethernet sweep), ``oper_up_only`` (no fallback sweep), or ``full_range``
     (always ``Ethernet1..N``).
+
+    Agent reliability guidance:
+    - Prefer batched scans with ``device_serial_allowlist`` (about 1-5 serials per call).
+    - Set ``max_ethernet_ports`` to a practical cap for your devices.
+    - Merge results client-side across multiple calls for full-fabric mapping.
     """
+    guidance: list[str] = []
+    if not (device_serial_allowlist or "").strip():
+        guidance.append(
+            "best_practice: set device_serial_allowlist and scan in batches (1-5 devices per call)"
+        )
+    if max_ethernet_ports is None:
+        guidance.append(
+            "best_practice: set max_ethernet_ports to cap per-device sweep time"
+        )
+    if (lldp_port_source or "auto").strip().lower() == "auto":
+        guidance.append(
+            "note: lldp_port_source=auto may fallback to Ethernet1..N when oper-up ports are unavailable"
+        )
+
     warnings: list[str] = []
     fmt = (output_format or "json").strip().lower()
     if fmt not in _VALID_OUTPUT:
@@ -659,6 +678,7 @@ def grpc_map_network_topology(
             "text": text_out,
             "topology": empty_topology,
             "warnings": warnings + cred_warn,
+            "execution_guidance": guidance,
         }
 
     lps = (lldp_port_source or "auto").strip().lower()
@@ -711,4 +731,5 @@ def grpc_map_network_topology(
         "text": text,
         "topology": topology,
         "warnings": warnings,
+        "execution_guidance": guidance,
     }

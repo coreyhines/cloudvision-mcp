@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import re
 import sys
 
 import grpc
@@ -46,6 +47,62 @@ logging.basicConfig(
     level=logging.INFO,  # Minimum log level
     format="%(asctime)s - %(levelname)s - %(message)s",  # Log message format
 )
+
+
+_NOISY_ACCESS_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r'"GET / HTTP/1\.1" 404 Not Found'),
+    re.compile(r'"GET /lldp/nodes HTTP/1\.1" 404 Not Found'),
+    re.compile(r'"GET /v1/topology HTTP/1\.1" 404 Not Found'),
+    re.compile(
+        r'"GET /\.(well-known/oauth-protected-resource(?:/mcp)?) HTTP/1\.1" 404 Not Found'
+    ),
+)
+
+_NOISY_MESSAGE_SUBSTRINGS: tuple[str, ...] = (
+    "Error handling POST request",
+    "starlette.requests.ClientDisconnect",
+    "aborting with incomplete response",
+    "reading: context canceled",
+)
+
+
+def _is_noise_record(record: logging.LogRecord) -> bool:
+    """
+    Filter known noisy disconnect/probe logs from MCP streamable-http usage.
+
+    Keep real backend/tool failures visible while dropping high-volume
+    disconnect churn and endpoint-probe 404 spam.
+    """
+    msg = record.getMessage()
+    if any(s in msg for s in _NOISY_MESSAGE_SUBSTRINGS):
+        return True
+    if record.name == "uvicorn.access":
+        return any(p.search(msg) for p in _NOISY_ACCESS_PATTERNS)
+    return False
+
+
+class _NoiseSuppressFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not _is_noise_record(record)
+
+
+def _install_noise_filters() -> None:
+    filt = _NoiseSuppressFilter()
+    # Root handlers catch most output from this app.
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(filt)
+    # Add explicit logger filters for third-party emitters.
+    for name in (
+        "uvicorn.access",
+        "uvicorn.error",
+        "mcp.server.streamable_http",
+        "mcp",
+        "starlette",
+    ):
+        logging.getLogger(name).addFilter(filt)
+
+
+_install_noise_filters()
 
 logging.info("Starting the FastMCP server...")
 

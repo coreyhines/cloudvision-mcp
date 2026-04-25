@@ -23,6 +23,7 @@ NETWORK_MAP_DATA_SOURCE = "inventory+connector:lldp_topology_scan"
 # Placeholder images — edit before ``containerlab deploy`` if versions matter.
 _DEFAULT_CEOS_IMAGE = "ceos:4.32.0F"
 _DEFAULT_LINUX_IMAGE = "alpine:latest"
+_EXTRA_REMOTE_INDEX_SCAN_LIMIT = 8
 
 
 def infer_ethernet_port_count(model: str) -> int:
@@ -98,7 +99,10 @@ def _remote_row_signature(row: dict[str, Any]) -> str:
         return f"mac:{mac}"
     name = (row.get("system_name") or "").strip().lower()
     rport = (row.get("remote_port_id") or "").strip()
-    return f"name:{name}|rp:{rport}"
+    mgmt = (row.get("management_address") or "").strip().lower()
+    if mgmt:
+        return f"name:{name}|rp:{rport}|mgmt:{mgmt}"
+    return f"name:{name}|rp:{rport}|k:{row.get('neighbor_key') or ''}"
 
 
 def _lldp_row_to_edges(
@@ -111,6 +115,7 @@ def _lldp_row_to_edges(
     chassis = (row.get("remote_chassis_id") or "").strip()
     eth = (row.get("eth_addr") or "").strip()
     rport = (row.get("remote_port_id") or "").strip()
+    rmgmt = (row.get("management_address") or "").strip()
     if not sysname and not chassis and not eth:
         return []
     return [
@@ -123,6 +128,15 @@ def _lldp_row_to_edges(
             "remote_chassis_id": chassis,
             "remote_eth_addr": eth,
             "remote_port_id": rport,
+            "remote_management_address": rmgmt,
+            "remote_management_addresses": row.get("management_addresses") or [],
+            "remote_system_description": row.get("system_description") or "",
+            "remote_system_capabilities": row.get("system_capabilities") or [],
+            "remote_enabled_system_capabilities": row.get("enabled_system_capabilities")
+            or [],
+            "remote_pvid": row.get("pvid") or "",
+            "remote_vlans": row.get("vlans") or [],
+            "remote_lldp_med": row.get("lldp_med") or {},
             "neighbor_source": row.get("neighbor_source") or "",
         }
     ]
@@ -279,16 +293,16 @@ def scan_lldp_topology_edges(
             _append_rows_from_lldp_response(
                 dev, port_name, out, edges=edges, seen_remote=seen_remote, stats=stats
             )
-            # Additional ``remoteSystem/<n>`` indices when the first snapshot lists only one row.
+            # Additional ``remoteSystem/<n>`` indices for ports with LLDP data.
             if isinstance(out, dict) and out.get("items"):
-                for idx in ("2", "3"):
+                for idx in range(2, _EXTRA_REMOTE_INDEX_SCAN_LIMIT + 1):
                     stats["extra_neighbor_index_probes"] += 1
                     try:
                         out_n = grpc_get_lldp_neighbors(
                             datadict,
                             serial,
                             port_name=port_name,
-                            remote_neighbor_key=idx,
+                            remote_neighbor_key=str(idx),
                         )
                     except Exception as e:
                         logging.debug(
@@ -420,6 +434,18 @@ def build_topology_nodes_and_links(
                 "target_id": remote_id,
                 "local_port": e.get("local_port") or "",
                 "remote_port_id": e.get("remote_port_id") or "",
+                "remote_management_address": e.get("remote_management_address") or "",
+                "remote_management_addresses": e.get("remote_management_addresses")
+                or [],
+                "remote_system_description": e.get("remote_system_description") or "",
+                "remote_system_capabilities": e.get("remote_system_capabilities") or [],
+                "remote_enabled_system_capabilities": e.get(
+                    "remote_enabled_system_capabilities"
+                )
+                or [],
+                "remote_pvid": e.get("remote_pvid") or "",
+                "remote_vlans": e.get("remote_vlans") or [],
+                "remote_lldp_med": e.get("remote_lldp_med") or {},
                 "remote_system_name": e.get("remote_system_name") or "",
                 "matched_inventory": matched is not None,
             }

@@ -30,6 +30,17 @@ _LLDP_DEFAULT_PROBE_PORTS: tuple[str, ...] = (
     "Ethernet8",
 )
 
+_LLDP_MED_KEYS: tuple[str, ...] = (
+    "lldpMedCapabilities",
+    "lldpMedPolicy",
+    "lldpMedLocation",
+    "lldpMedInventory",
+    "medCapabilities",
+    "medPolicy",
+    "medLocation",
+    "medInventory",
+)
+
 
 def _lldp_l2discovery_literal_local_paths(device_id: str) -> tuple[list[Any], ...]:
     """
@@ -329,6 +340,95 @@ def _tlv_string(blob: Any) -> str:
     return ""
 
 
+def _flatten_scalar_strings(obj: Any, *, max_depth: int = 5) -> list[str]:
+    """Flatten nested scalar-like values to strings, dropping empties."""
+    if max_depth < 0:
+        return []
+    out: list[str] = []
+    if obj is None:
+        return out
+    if isinstance(obj, (str, int, float, bool)):
+        s = str(obj).strip()
+        if s:
+            out.append(s)
+        return out
+    if isinstance(obj, list):
+        for v in obj:
+            out.extend(_flatten_scalar_strings(v, max_depth=max_depth - 1))
+        return out
+    if isinstance(obj, dict):
+        # Prefer common payload leaves first to avoid noisy keys in output.
+        for k in ("valueStr", "value", "name", "id", "address", "ip", "ipAddress"):
+            if k in obj:
+                out.extend(_flatten_scalar_strings(obj.get(k), max_depth=max_depth - 1))
+        if out:
+            return out
+        for v in obj.values():
+            out.extend(_flatten_scalar_strings(v, max_depth=max_depth - 1))
+    return out
+
+
+def _dedup_preserve(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for v in values:
+        if v in seen:
+            continue
+        seen.add(v)
+        out.append(v)
+    return out
+
+
+def _extract_management_addresses(nb: dict[str, Any]) -> list[str]:
+    vals: list[str] = []
+    for k in ("managementAddress", "managementAddresses", "mgmtAddr", "mgmtAddress"):
+        if k in nb:
+            vals.extend(_flatten_scalar_strings(nb.get(k)))
+    # Some payloads nest management addresses in TLV-ish dicts.
+    for k in ("management", "mgmt"):
+        if isinstance(nb.get(k), dict):
+            vals.extend(_flatten_scalar_strings(nb.get(k)))
+    return _dedup_preserve(vals)
+
+
+def _extract_capability_fields(nb: dict[str, Any]) -> tuple[list[str], list[str]]:
+    caps: list[str] = []
+    enabled: list[str] = []
+    for k in ("systemCapabilities", "capabilities"):
+        if k in nb:
+            caps.extend(_flatten_scalar_strings(nb.get(k)))
+    for k in ("enabledSystemCapabilities", "enabledCapabilities"):
+        if k in nb:
+            enabled.extend(_flatten_scalar_strings(nb.get(k)))
+    return _dedup_preserve(caps), _dedup_preserve(enabled)
+
+
+def _extract_vlan_fields(nb: dict[str, Any]) -> tuple[str, list[str]]:
+    pvid = ""
+    pvid_vals = _flatten_scalar_strings(nb.get("pvid"))
+    if pvid_vals:
+        pvid = pvid_vals[0]
+    vlans: list[str] = []
+    for k in ("vlanId", "vlanName", "vlans", "portVlans", "vlan"):
+        if k in nb:
+            vlans.extend(_flatten_scalar_strings(nb.get(k)))
+    return pvid, _dedup_preserve(vlans)
+
+
+def _extract_lldp_med_fields(nb: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    med: dict[str, Any] = {}
+    for k in _LLDP_MED_KEYS:
+        if k not in nb:
+            continue
+        vals = _flatten_scalar_strings(nb.get(k))
+        if vals:
+            med[k] = vals
+    if med:
+        out["lldp_med"] = med
+    return out
+
+
 def _msap_fields(nb: dict[str, Any]) -> dict[str, str]:
     out: dict[str, str] = {}
     m = nb.get("msap")
@@ -366,6 +466,21 @@ def _l2_remote_row(
     if isinstance(eth, str) and eth:
         row["eth_addr"] = eth
     row.update(_msap_fields(nb))
+    mgmt = _extract_management_addresses(nb)
+    if mgmt:
+        row["management_address"] = mgmt[0]
+        row["management_addresses"] = mgmt
+    caps, enabled_caps = _extract_capability_fields(nb)
+    if caps:
+        row["system_capabilities"] = caps
+    if enabled_caps:
+        row["enabled_system_capabilities"] = enabled_caps
+    pvid, vlans = _extract_vlan_fields(nb)
+    if pvid:
+        row["pvid"] = pvid
+    if vlans:
+        row["vlans"] = vlans
+    row.update(_extract_lldp_med_fields(nb))
     ttl = nb.get("ttl")
     if isinstance(ttl, (int, float)):
         row["ttl_sec"] = int(ttl)
@@ -432,9 +547,27 @@ def _neighbor_row(
         row["management_address"] = nb["managementAddress"]
     if "mgmtAddr" in nb:
         row["mgmt_addr"] = nb["mgmtAddr"]
+    mgmt = _extract_management_addresses(nb)
+    if mgmt:
+        row["management_addresses"] = mgmt
+        row.setdefault("management_address", mgmt[0])
     sn = _tlv_string(nb.get("sysName"))
     if sn and "system_name" not in row:
         row["system_name"] = sn
+    desc = _tlv_string(nb.get("sysDesc"))
+    if desc:
+        row["system_description"] = desc
+    caps, enabled_caps = _extract_capability_fields(nb)
+    if caps:
+        row["system_capabilities"] = caps
+    if enabled_caps:
+        row["enabled_system_capabilities"] = enabled_caps
+    pvid, vlans = _extract_vlan_fields(nb)
+    if pvid:
+        row["pvid"] = pvid
+    if vlans:
+        row["vlans"] = vlans
+    row.update(_extract_lldp_med_fields(nb))
     return row
 
 

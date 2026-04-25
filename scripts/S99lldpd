@@ -1,0 +1,34 @@
+#!/bin/sh
+#
+# Entware lldpd — must use rc.func: /opt/etc/init.d/rc.unslung SOURCES S* scripts.
+# Using `exit` or a non-rc.func script here aborts rc.unslung (seen as "rc.unslung start failed").
+#
+# State: /opt/var/run/lldpd.pid, /opt/var/run/lldpd.socket (not /var/run).
+#
+# Optional: export LLDPD_ARGS before boot to override auto-detection, e.g. LLDPD_ARGS="-I ovs_eth0"
+#
+# Usage (Entware): S99lldpd {start|stop|restart|check|kill|reconfigure}
+
+PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+# Auto-select interface set for LLDP on Synology.
+if [ -z "${LLDPD_ARGS:-}" ]; then
+	# Use all non-loopback interfaces by default. This avoids single-interface
+	# blind spots when LLDP neighbors are reachable on non-primary uplinks.
+	LLDPD_ARGS="-I *"
+	if [ -e /sys/class/net/ovs_eth0 ]; then
+		# Exclude OVS pseudo-interface to avoid duplicate/noisy neighbors.
+		LLDPD_ARGS="$LLDPD_ARGS -C ovs_eth0"
+	fi
+fi
+
+ENABLED=yes
+PROCS=lldpd
+PREARGS=""
+ARGS=$LLDPD_ARGS
+DESC=lldpd
+# Avoid "another instance is running" after a crash or failed opkg configure.
+PRECMD="rm -f /opt/var/run/lldpd.pid /opt/var/run/lldpd.socket 2>/dev/null; true"
+
+. /opt/etc/init.d/rc.func

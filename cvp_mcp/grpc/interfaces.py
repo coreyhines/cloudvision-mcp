@@ -294,7 +294,13 @@ def grpc_get_ip_interfaces(datadict: dict[str, Any], device_id: str) -> dict[str
 
 def _is_physical_switch_port_name(name: str) -> bool:
     n = (name or "").strip()
-    return n.startswith("Ethernet") or n.startswith("Management")
+    return bool(
+        re.match(
+            r"^(Ethernet|Et|Management|Ma|Port-Channel|Po)\d+([/.]\d+)*$",
+            n,
+            re.I,
+        )
+    )
 
 
 def _interface_row_reports_oper_up(row: dict[str, Any]) -> bool:

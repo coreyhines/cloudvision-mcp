@@ -34,6 +34,14 @@ def test_format_table_and_mermaid():
             "remote_system_name": "host-a",
             "remote_eth_addr": "aa:bb:cc:dd:ee:01",
             "remote_port_id": "eth0",
+            "remote_management_address": "10.0.0.8",
+            "remote_management_addresses": ["10.0.0.8"],
+            "remote_system_description": "host",
+            "remote_system_capabilities": ["bridge"],
+            "remote_enabled_system_capabilities": ["bridge"],
+            "remote_pvid": "120",
+            "remote_vlans": ["120"],
+            "remote_lldp_med": {"lldpMedPolicy": ["voice"]},
             "local_serial": "S1",
             "local_model": "",
             "remote_chassis_id": "",
@@ -149,6 +157,14 @@ def test_build_topology_connected_scope_excludes_orphan_inventory():
             "remote_chassis_id": "",
             "remote_eth_addr": "cc:cc:cc:cc:cc:cc",
             "remote_port_id": "e1",
+            "remote_management_address": "",
+            "remote_management_addresses": [],
+            "remote_system_description": "",
+            "remote_system_capabilities": [],
+            "remote_enabled_system_capabilities": [],
+            "remote_pvid": "",
+            "remote_vlans": [],
+            "remote_lldp_med": {},
             "neighbor_source": "",
         }
     ]
@@ -280,6 +296,14 @@ def test_build_topology_matches_inventory_mac():
             "remote_chassis_id": "ec:8a:48:04:30:c0",
             "remote_eth_addr": "",
             "remote_port_id": "Eth1",
+            "remote_management_address": "",
+            "remote_management_addresses": [],
+            "remote_system_description": "",
+            "remote_system_capabilities": [],
+            "remote_enabled_system_capabilities": [],
+            "remote_pvid": "",
+            "remote_vlans": [],
+            "remote_lldp_med": {},
             "neighbor_source": "",
         }
     ]
@@ -287,3 +311,33 @@ def test_build_topology_matches_inventory_mac():
     assert any(n["serial_number"] == "SN1" for n in nodes)
     assert links[0].get("matched_inventory") is True
     assert json.dumps({"nodes": nodes, "links": links})
+
+
+def test_build_topology_links_carry_rich_remote_metadata():
+    inv: list[dict[str, str]] = []
+    edges = [
+        {
+            "local_serial": "SN2",
+            "local_hostname": "leaf",
+            "local_model": "",
+            "local_port": "Ethernet1",
+            "remote_system_name": "downstream",
+            "remote_chassis_id": "",
+            "remote_eth_addr": "00:11:22:33:44:55",
+            "remote_port_id": "Eth24",
+            "remote_management_address": "10.2.2.2",
+            "remote_management_addresses": ["10.2.2.2"],
+            "remote_system_description": "switch edge",
+            "remote_system_capabilities": ["bridge", "router"],
+            "remote_enabled_system_capabilities": ["bridge"],
+            "remote_pvid": "120",
+            "remote_vlans": ["120", "121"],
+            "remote_lldp_med": {"lldpMedPolicy": ["voice"]},
+            "neighbor_source": "remoteSystem",
+        }
+    ]
+    _nodes, links = build_topology_nodes_and_links(edges, inv)
+    assert links[0]["remote_management_address"] == "10.2.2.2"
+    assert links[0]["remote_system_description"] == "switch edge"
+    assert links[0]["remote_system_capabilities"] == ["bridge", "router"]
+    assert links[0]["remote_vlans"] == ["120", "121"]

@@ -160,6 +160,36 @@ def test_parse_l2discovery_remote_leaf_only():
     assert items[0]["neighbor_source"] == "remoteLeaf"
 
 
+def test_parse_lldp_extracts_rich_neighbor_fields():
+    raw = {
+        "neighborStatus": {
+            "Ethernet10": {
+                "1": {
+                    "systemName": "edge-a",
+                    "sysDesc": {"value": {"value": "downstream switch"}},
+                    "managementAddress": "10.10.10.2",
+                    "systemCapabilities": ["bridge", "router"],
+                    "enabledCapabilities": ["bridge"],
+                    "pvid": 120,
+                    "vlans": [120, 121],
+                    "lldpMedPolicy": {"voice": {"vlanId": 121}},
+                }
+            }
+        }
+    }
+    items = parse_lldp_flat_to_items(raw)
+    assert len(items) == 1
+    row = items[0]
+    assert row["management_address"] == "10.10.10.2"
+    assert row["management_addresses"] == ["10.10.10.2"]
+    assert row["system_description"] == "downstream switch"
+    assert row["system_capabilities"] == ["bridge", "router"]
+    assert row["enabled_system_capabilities"] == ["bridge"]
+    assert row["pvid"] == "120"
+    assert row["vlans"] == ["120", "121"]
+    assert "lldp_med" in row
+
+
 def test_grpc_get_lldp_neighbors_missing_id():
     out = grpc_get_lldp_neighbors({"cvp": "x:443", "cvtoken": "t"}, "")
     assert out["coverage"] == "none"

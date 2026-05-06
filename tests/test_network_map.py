@@ -8,7 +8,9 @@ from unittest.mock import patch
 import yaml
 
 from cvp_mcp.grpc.network_map import (
+    _canonical_link_key,
     _filter_simple_ethernet_ports_by_cap,
+    _remote_device_id,
     build_topology_nodes_and_links,
     format_topology_containerlab,
     format_topology_mermaid,
@@ -341,3 +343,72 @@ def test_build_topology_links_carry_rich_remote_metadata():
     assert links[0]["remote_system_description"] == "switch edge"
     assert links[0]["remote_system_capabilities"] == ["bridge", "router"]
     assert links[0]["remote_vlans"] == ["120", "121"]
+
+
+def test_remote_device_id_prefers_remote_eth_addr():
+    edge = {
+        "local_serial": "SN1",
+        "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+        "remote_system_name": "spine-01",
+    }
+    assert _remote_device_id(edge) == "mac:aa:bb:cc:dd:ee:01"
+
+
+def test_remote_device_id_falls_back_to_chassis_id():
+    edge = {
+        "local_serial": "SN1",
+        "remote_eth_addr": "",
+        "remote_chassis_id": "aa:bb:cc:dd:ee:02",
+        "remote_system_name": "spine-01",
+    }
+    assert _remote_device_id(edge) == "mac:aa:bb:cc:dd:ee:02"
+
+
+def test_remote_device_id_falls_back_to_system_name():
+    edge = {
+        "local_serial": "SN1",
+        "remote_eth_addr": "",
+        "remote_chassis_id": "",
+        "remote_system_name": "spine-01",
+    }
+    assert _remote_device_id(edge) == "name:spine-01"
+
+
+def test_canonical_link_key_returns_stable_key():
+    # Both devices identified by MAC so the frozenset overlaps across directions.
+    # Device A: mac:aa:bb:cc:dd:ee:01  Device B: mac:cc:dd:ee:ff:00:01
+    edge_a = {
+        "local_serial": "mac:aa:bb:cc:dd:ee:01",
+        "local_port": "Ethernet5",
+        "remote_eth_addr": "cc:dd:ee:ff:00:01",
+        "remote_port_id": "Ethernet3",
+        "remote_system_name": "spine-01",
+    }
+    edge_b = {
+        "local_serial": "mac:cc:dd:ee:ff:00:01",
+        "local_port": "Ethernet3",
+        "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+        "remote_port_id": "Ethernet5",
+        "remote_system_name": "leaf-01",
+    }
+    key_a = _canonical_link_key(edge_a)
+    key_b = _canonical_link_key(edge_b)
+    assert key_a == key_b
+
+
+def test_canonical_link_key_different_ports_different_keys():
+    edge_a = {
+        "local_serial": "SN1",
+        "local_port": "Ethernet5",
+        "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+        "remote_port_id": "Ethernet3",
+        "remote_system_name": "spine-01",
+    }
+    edge_c = {
+        "local_serial": "SN1",
+        "local_port": "Ethernet6",
+        "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+        "remote_port_id": "Ethernet4",
+        "remote_system_name": "spine-01",
+    }
+    assert _canonical_link_key(edge_a) != _canonical_link_key(edge_c)

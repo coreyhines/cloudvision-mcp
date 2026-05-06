@@ -105,6 +105,36 @@ def _remote_row_signature(row: dict[str, Any]) -> str:
     return f"name:{name}|rp:{rport}|k:{row.get('neighbor_key') or ''}"
 
 
+def _remote_device_id(edge: dict[str, Any]) -> str:
+    """Stable identifier for the remote end of a directed edge."""
+    mac = _norm_mac(edge.get("remote_eth_addr") or "")
+    if mac:
+        return f"mac:{mac}"
+    ch = _norm_mac(edge.get("remote_chassis_id") or "")
+    if ch:
+        return f"mac:{ch}"
+    name = (edge.get("remote_system_name") or "").strip()
+    if name:
+        return f"name:{name.lower()}"
+    return "remote:unknown"
+
+
+def _canonical_link_key(edge: dict[str, Any]) -> tuple[frozenset[str], tuple[str, str]]:
+    """
+    Stable key for a physical link pair.
+
+    Two directed edges (A→B and B→A) on the same ports produce the same key
+    regardless of which direction is examined first.
+    """
+    local_id = (edge.get("local_serial") or "").strip()
+    remote_id = _remote_device_id(edge)
+    serials = frozenset({local_id, remote_id})
+    ports = tuple(
+        sorted([edge.get("local_port") or "", edge.get("remote_port_id") or ""])
+    )
+    return (serials, ports)
+
+
 def _lldp_row_to_edges(
     local: dict[str, Any],
     port_name: str,

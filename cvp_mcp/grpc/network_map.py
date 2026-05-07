@@ -13,7 +13,7 @@ import yaml
 from cvp_mcp.env import cvp_credentials_missing_reasons
 from cvp_mcp.grpc.interfaces import grpc_list_oper_up_physical_ports_for_lldp
 from cvp_mcp.grpc.inventory import grpc_all_inventory
-from cvp_mcp.grpc.lldp import grpc_get_lldp_neighbors
+from cvp_mcp.grpc.lldp import _make_lldp_client, grpc_get_lldp_neighbors
 from cvp_mcp.grpc.utils import _is_lab_device, createConnection
 
 _VALID_OUTPUT = frozenset({"json", "mermaid", "table", "containerlab"})
@@ -359,6 +359,7 @@ def scan_lldp_topology_edges(
             "devices_port_source_ethernet_range": 0,
             "devices_skipped_no_oper_up_ports": 0,
             "devices_skipped_lab": 0,
+            "devices_scan_errors": 0,
             "unidirectional_links": 0,
             "mismatched_links": 0,
             "lldp_port_source": mode,
@@ -383,6 +384,7 @@ def scan_lldp_topology_edges(
         "devices_port_source_ethernet_range": 0,
         "devices_skipped_no_oper_up_ports": 0,
         "devices_skipped_lab": 0,
+        "devices_scan_errors": 0,
         "unidirectional_links": 0,
         "mismatched_links": 0,
         "lldp_port_source": mode,
@@ -402,92 +404,106 @@ def scan_lldp_topology_edges(
         cap = _device_port_cap(dev, max_ethernet_ports)
         stats["devices_scanned"] += 1
 
-        if mode == "full_range":
-            port_iter: list[str] = [f"Ethernet{i}" for i in range(1, cap + 1)]
-            stats["devices_port_source_ethernet_range"] += 1
-            logging.info(
-                "topology LLDP scan: %s (%s) full_range Ethernet1..%s",
-                serial,
-                dev.get("hostname") or "",
-                cap,
-            )
-        else:
-            raw_ports, _pw = grpc_list_oper_up_physical_ports_for_lldp(datadict, serial)
-            filtered = _filter_simple_ethernet_ports_by_cap(raw_ports, cap)
-            if filtered:
-                port_iter = filtered
-                stats["devices_port_source_oper_up"] += 1
-                logging.info(
-                    "topology LLDP scan: %s (%s) oper_up ports (%s): %s",
-                    serial,
-                    dev.get("hostname") or "",
-                    len(port_iter),
-                    ", ".join(port_iter[:12]) + ("…" if len(port_iter) > 12 else ""),
-                )
-            else:
-                if mode == "oper_up_only":
-                    stats["devices_skipped_no_oper_up_ports"] += 1
+        try:
+            with _make_lldp_client(datadict) as dev_client:
+                if mode == "full_range":
+                    port_iter: list[str] = [f"Ethernet{i}" for i in range(1, cap + 1)]
+                    stats["devices_port_source_ethernet_range"] += 1
                     logging.info(
-                        "topology LLDP scan: %s (%s) skipped (oper_up_only with no oper-up list)",
+                        "topology LLDP scan: %s (%s) full_range Ethernet1..%s",
                         serial,
                         dev.get("hostname") or "",
+                        cap,
                     )
-                    continue
-                port_iter = [f"Ethernet{i}" for i in range(1, cap + 1)]
-                stats["devices_port_source_ethernet_range"] += 1
-                logging.info(
-                    "topology LLDP scan: %s (%s) fallback Ethernet1..%s (no oper-up list)",
-                    serial,
-                    dev.get("hostname") or "",
-                    cap,
-                )
+                else:
+                    raw_ports, _pw = grpc_list_oper_up_physical_ports_for_lldp(
+                        datadict, serial, _shared_client=dev_client
+                    )
+                    filtered = _filter_simple_ethernet_ports_by_cap(raw_ports, cap)
+                    if filtered:
+                        port_iter = filtered
+                        stats["devices_port_source_oper_up"] += 1
+                        logging.info(
+                            "topology LLDP scan: %s (%s) oper_up ports (%s): %s",
+                            serial,
+                            dev.get("hostname") or "",
+                            len(port_iter),
+                            ", ".join(port_iter[:12]) + ("…" if len(port_iter) > 12 else ""),
+                        )
+                    else:
+                        if mode == "oper_up_only":
+                            stats["devices_skipped_no_oper_up_ports"] += 1
+                            logging.info(
+                                "topology LLDP scan: %s (%s) skipped (oper_up_only with no oper-up list)",
+                                serial,
+                                dev.get("hostname") or "",
+                            )
+                            continue
+                        port_iter = [f"Ethernet{i}" for i in range(1, cap + 1)]
+                        stats["devices_port_source_ethernet_range"] += 1
+                        logging.info(
+                            "topology LLDP scan: %s (%s) fallback Ethernet1..%s (no oper-up list)",
+                            serial,
+                            dev.get("hostname") or "",
+                            cap,
+                        )
 
-        for port_name in port_iter:
-            stats["port_probes"] += 1
-            seen_remote: set[str] = set()
-            try:
-                out = grpc_get_lldp_neighbors(
-                    datadict,
-                    serial,
-                    port_name=port_name,
-                    remote_neighbor_key="",
-                )
-            except Exception as e:
-                logging.warning(
-                    "topology scan LLDP failed %s %s: %s", serial, port_name, e
-                )
-                continue
-            _append_rows_from_lldp_response(
-                dev, port_name, out, edges=edges, seen_remote=seen_remote, stats=stats
-            )
-            # Additional ``remoteSystem/<n>`` indices for ports with LLDP data.
-            if isinstance(out, dict) and out.get("items"):
-                for idx in range(2, _EXTRA_REMOTE_INDEX_SCAN_LIMIT + 1):
-                    stats["extra_neighbor_index_probes"] += 1
+                for port_name in port_iter:
+                    stats["port_probes"] += 1
+                    seen_remote: set[str] = set()
                     try:
-                        out_n = grpc_get_lldp_neighbors(
+                        out = grpc_get_lldp_neighbors(
                             datadict,
                             serial,
                             port_name=port_name,
-                            remote_neighbor_key=str(idx),
+                            remote_neighbor_key="",
+                            _shared_client=dev_client,
                         )
                     except Exception as e:
-                        logging.debug(
-                            "topology scan LLDP idx %s %s %s: %s",
-                            serial,
-                            port_name,
-                            idx,
-                            e,
+                        logging.warning(
+                            "topology scan LLDP failed %s %s: %s", serial, port_name, e
                         )
                         continue
                     _append_rows_from_lldp_response(
-                        dev,
-                        port_name,
-                        out_n,
-                        edges=edges,
-                        seen_remote=seen_remote,
-                        stats=stats,
+                        dev, port_name, out, edges=edges, seen_remote=seen_remote, stats=stats
                     )
+                    # Additional ``remoteSystem/<n>`` indices for ports with LLDP data.
+                    if isinstance(out, dict) and out.get("items"):
+                        for idx in range(2, _EXTRA_REMOTE_INDEX_SCAN_LIMIT + 1):
+                            stats["extra_neighbor_index_probes"] += 1
+                            try:
+                                out_n = grpc_get_lldp_neighbors(
+                                    datadict,
+                                    serial,
+                                    port_name=port_name,
+                                    remote_neighbor_key=str(idx),
+                                    _shared_client=dev_client,
+                                )
+                            except Exception as e:
+                                logging.debug(
+                                    "topology scan LLDP idx %s %s %s: %s",
+                                    serial,
+                                    port_name,
+                                    idx,
+                                    e,
+                                )
+                                continue
+                            _append_rows_from_lldp_response(
+                                dev,
+                                port_name,
+                                out_n,
+                                edges=edges,
+                                seen_remote=seen_remote,
+                                stats=stats,
+                            )
+        except Exception as dev_err:
+            logging.warning(
+                "topology scan: device %s (%s) failed: %s",
+                serial,
+                dev.get("hostname") or "",
+                dev_err,
+            )
+            stats["devices_scan_errors"] += 1
 
     serial_to_mac: dict[str, str] = {}
     for dev in inventory:

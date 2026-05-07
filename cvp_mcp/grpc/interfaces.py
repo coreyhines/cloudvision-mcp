@@ -86,6 +86,41 @@ def _connector_device_config(
     return {"intfConfig": cfg_map, "intfStatus": st_map}
 
 
+def _connector_device_config_with_client(
+    client: Any, datadict: dict[str, Any], device_id: str
+) -> dict[str, Any]:
+    """Like _connector_device_config but uses an existing GRPCClient."""
+    path_base = [
+        device_id,
+        "Sysdb",
+        "interface",
+        "config",
+        "eth",
+        "phy",
+        "slice",
+        Wildcard(),
+        "intfConfig",
+        Wildcard(),
+    ]
+    path_status = [
+        device_id,
+        "Sysdb",
+        "interface",
+        "status",
+        "eth",
+        "phy",
+        "slice",
+        Wildcard(),
+        "intfStatus",
+        Wildcard(),
+    ]
+    cfg_raw = serialize_cloudvision_data(get_device_path(client, device_id, path_base))
+    st_raw = serialize_cloudvision_data(get_device_path(client, device_id, path_status))
+    cfg_raw = flatten_nested_device_map(cfg_raw)
+    st_raw = flatten_nested_device_map(st_raw)
+    return {"intfConfig": _flatten_intf_map(cfg_raw), "intfStatus": _flatten_intf_map(st_raw)}
+
+
 def grpc_get_interfaces(datadict: dict[str, Any], device_id: str) -> dict[str, Any]:
     warnings: list[str] = []
     device_id = (device_id or "").strip()
@@ -337,20 +372,27 @@ def _natural_port_name_key(name: str) -> tuple[Any, ...]:
 
 
 def grpc_list_oper_up_physical_ports_for_lldp(
-    datadict: dict[str, Any], device_id: str
+    datadict: dict[str, Any],
+    device_id: str,
+    *,
+    _shared_client: Any = None,
 ) -> tuple[list[str], list[str]]:
     """
     Short names of physical ports (Ethernet*, Management*) with oper-up status.
 
     Used to avoid probing every ``Ethernet1..N`` for LLDP when Connector returns
     interface Sysdb. Returns ``([], warnings)`` on failure or when no rows qualify.
+    Pass ``_shared_client`` to reuse an existing GRPCClient instead of opening a new one.
     """
     warnings: list[str] = []
     device_id = (device_id or "").strip()
     if not device_id:
         return [], ["missing_device_id"]
     try:
-        blob = _connector_device_config(datadict, device_id)
+        if _shared_client is not None:
+            blob = _connector_device_config_with_client(_shared_client, datadict, device_id)
+        else:
+            blob = _connector_device_config(datadict, device_id)
         items = merge_intfcfg_and_status(blob["intfConfig"], blob["intfStatus"])
         out: list[str] = []
         for row in items:

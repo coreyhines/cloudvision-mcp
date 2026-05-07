@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Generator
 
 import grpc
 from cloudvision.Connector.codec import Wildcard
@@ -277,6 +278,23 @@ def _get_path(
         raw = get_device_path(client, device_id, path)
     raw = serialize_cloudvision_data(raw)
     return flatten_nested_device_map(raw) if isinstance(raw, dict) else {}
+
+
+def _get_path_with_client(
+    client: Any, device_id: str, path: list[Any]
+) -> dict[str, Any]:
+    """Like _get_path but uses an existing GRPCClient (no new TLS handshake)."""
+    raw = get_device_path(client, device_id, path)
+    raw = serialize_cloudvision_data(raw)
+    return flatten_nested_device_map(raw) if isinstance(raw, dict) else {}
+
+
+@contextmanager
+def _make_lldp_client(datadict: dict[str, Any]) -> Generator[Any, None, None]:
+    """Context manager yielding a single GRPCClient for reuse across multiple probes."""
+    token = normalize_api_token(datadict.get("cvtoken"))
+    with GRPCClient(grpcAddr=_cvp_addr(datadict), tokenValue=token) as client:
+        yield client
 
 
 def _path_for_log(path: list[Any]) -> str:
@@ -619,6 +637,8 @@ def grpc_get_lldp_neighbors(
     device_id: str,
     port_name: str = "",
     remote_neighbor_key: str = "",
+    *,
+    _shared_client: Any = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
     device_id = (device_id or "").strip()
@@ -726,7 +746,10 @@ def grpc_get_lldp_neighbors(
     for p in candidate_paths:
         path_line = _path_for_log(p)
         try:
-            snap = _get_path(datadict, device_id, list(p))
+            if _shared_client is not None:
+                snap = _get_path_with_client(_shared_client, device_id, list(p))
+            else:
+                snap = _get_path(datadict, device_id, list(p))
             n = len(snap) if isinstance(snap, dict) else 0
             preview = list(snap.keys())[:12] if isinstance(snap, dict) and snap else []
             logging.info(

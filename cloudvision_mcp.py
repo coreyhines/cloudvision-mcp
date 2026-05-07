@@ -29,7 +29,8 @@ from cvp_mcp.grpc.interfaces import (
 )
 from cvp_mcp.grpc.inventory import grpc_all_inventory, grpc_one_inventory_serial
 from cvp_mcp.grpc.lifecycle import grpc_all_device_lifecycle
-from cvp_mcp.grpc.lldp import grpc_get_lldp_neighbors
+from cvp_mcp.grpc.envelope import tool_envelope
+from cvp_mcp.grpc.lldp import LLDP_DATA_SOURCE, grpc_get_lldp_neighbors
 from cvp_mcp.grpc.monitor import grpc_all_probe_status, grpc_one_probe_status
 from cvp_mcp.grpc.network_map import grpc_map_network_topology
 from cvp_mcp.grpc.overlay import (
@@ -39,7 +40,7 @@ from cvp_mcp.grpc.overlay import (
     grpc_get_vxlan,
 )
 from cvp_mcp.grpc.routing import grpc_get_bgp_status, grpc_get_routes
-from cvp_mcp.grpc.utils import createConnection
+from cvp_mcp.grpc.utils import _is_lab_device, createConnection
 
 CVP_TRANSPORT = "grpc"
 
@@ -684,8 +685,12 @@ def get_cvp_lldp_neighbors(
     device_id: str,
     port_name: str = "",
     remote_neighbor_key: str = "",
+    include_lab_devices: bool = False,
 ) -> dict:
     """LLDP neighbor table from EOS Sysdb via Connector (best-effort; requires LLDP enabled on device).
+
+    By default, virtual/lab devices (vEOS, cEOS) and inactive devices are excluded.
+    Pass ``include_lab_devices=True`` to query a virtual device explicitly.
 
     If Telemetry Browser shows a path like ``…/portStatus/Ethernet6/remoteSystem/1`` but wildcard
     queries return nothing, pass ``port_name`` (e.g. ``Ethernet6``) and optionally ``remote_neighbor_key`` (e.g. ``1``).
@@ -698,6 +703,36 @@ def get_cvp_lldp_neighbors(
     try:
         match CVP_TRANSPORT:
             case "grpc":
+                connCreds = createConnection(datadict)
+                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
+                    try:
+                        device_info = grpc_one_inventory_serial(channel, device_id)
+                        if not include_lab_devices and _is_lab_device(device_info):
+                            return tool_envelope(
+                                device_id=device_id,
+                                data_source=LLDP_DATA_SOURCE,
+                                coverage="none",
+                                items=[],
+                                warnings=["device_excluded_lab_or_virtual"],
+                                obj={
+                                    "hint": "Device is a virtual/lab EOS instance (vEOS or cEOS). "
+                                    "Pass include_lab_devices=True to query it explicitly."
+                                },
+                            )
+                        if (device_info or {}).get("streaming_status") == "Inactive":
+                            return tool_envelope(
+                                device_id=device_id,
+                                data_source=LLDP_DATA_SOURCE,
+                                coverage="none",
+                                items=[],
+                                warnings=["device_inactive_not_streaming"],
+                            )
+                    except Exception as inv_err:
+                        logging.debug(
+                            "get_cvp_lldp_neighbors: inventory preflight failed for %s: %s",
+                            device_id,
+                            inv_err,
+                        )
                 return grpc_get_lldp_neighbors(
                     datadict,
                     device_id,
@@ -720,6 +755,7 @@ def map_cvp_network_topology(
     topology_name: str = "cvp-lldp",
     topology_node_scope: str = "full_inventory",
     lldp_port_source: str = "auto",
+    include_lab_devices: bool = False,
 ) -> dict:
     """
     Discover LLDP adjacencies across CVP inventory (per-device Ethernet sweep) and export topology.
@@ -734,6 +770,7 @@ def map_cvp_network_topology(
     - ``auto`` probes Sysdb oper-up physical ports first, then falls back to ``Ethernet1..N``.
     - ``oper_up_only`` probes only oper-up physical ports (no fallback sweep).
     - ``full_range`` always uses the legacy ``Ethernet1..N`` sweep.
+    ``include_lab_devices``: include virtual/lab EOS devices (vEOS, cEOS) in the scan (default: False).
 
     Agent guidance for reliable mapping in flaky sessions:
     - Run batched calls with ``device_serial_allowlist`` (roughly 1-5 serials per call).
@@ -760,6 +797,7 @@ def map_cvp_network_topology(
                     topology_name=topology_name,
                     topology_node_scope=topology_node_scope,
                     lldp_port_source=lldp_port_source,
+                    include_lab_devices=include_lab_devices,
                 )
             case "http":
                 return {"error": "grpc_only"}

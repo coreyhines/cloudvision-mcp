@@ -14,7 +14,7 @@ from cvp_mcp.env import cvp_credentials_missing_reasons
 from cvp_mcp.grpc.interfaces import grpc_list_oper_up_physical_ports_for_lldp
 from cvp_mcp.grpc.inventory import grpc_all_inventory
 from cvp_mcp.grpc.lldp import grpc_get_lldp_neighbors
-from cvp_mcp.grpc.utils import createConnection
+from cvp_mcp.grpc.utils import _is_lab_device, createConnection
 
 _VALID_OUTPUT = frozenset({"json", "mermaid", "table", "containerlab"})
 
@@ -331,6 +331,7 @@ def scan_lldp_topology_edges(
     max_ethernet_ports: int | None = None,
     device_serial_allowlist: list[str] | None = None,
     lldp_port_source: str = "auto",
+    include_lab_devices: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
     Walk inventory devices and probe LLDP on candidate ports per device.
@@ -357,6 +358,7 @@ def scan_lldp_topology_edges(
             "devices_port_source_oper_up": 0,
             "devices_port_source_ethernet_range": 0,
             "devices_skipped_no_oper_up_ports": 0,
+            "devices_skipped_lab": 0,
             "unidirectional_links": 0,
             "mismatched_links": 0,
             "lldp_port_source": mode,
@@ -380,6 +382,7 @@ def scan_lldp_topology_edges(
         "devices_port_source_oper_up": 0,
         "devices_port_source_ethernet_range": 0,
         "devices_skipped_no_oper_up_ports": 0,
+        "devices_skipped_lab": 0,
         "unidirectional_links": 0,
         "mismatched_links": 0,
         "lldp_port_source": mode,
@@ -391,6 +394,9 @@ def scan_lldp_topology_edges(
         if not serial:
             continue
         if allow is not None and serial not in allow:
+            continue
+        if not include_lab_devices and _is_lab_device(dev):
+            stats["devices_skipped_lab"] += 1
             continue
         # Third-party / non-EOS may have no LLDP via Connector; still try.
         cap = _device_port_cap(dev, max_ethernet_ports)
@@ -875,6 +881,7 @@ def grpc_map_network_topology(
     topology_name: str = "cvp-lldp",
     topology_node_scope: str = "full_inventory",
     lldp_port_source: str = "auto",
+    include_lab_devices: bool = False,
 ) -> dict[str, Any]:
     """
     Discover LLDP adjacencies across CVP inventory and render the chosen format.
@@ -934,6 +941,7 @@ def grpc_map_network_topology(
                 "devices_port_source_oper_up": 0,
                 "devices_port_source_ethernet_range": 0,
                 "devices_skipped_no_oper_up_ports": 0,
+                "devices_skipped_lab": 0,
                 "unidirectional_links": 0,
                 "mismatched_links": 0,
                 "lldp_port_source": (lldp_port_source or "auto").strip().lower(),
@@ -984,6 +992,7 @@ def grpc_map_network_topology(
         max_ethernet_ports=max_ethernet_ports,
         device_serial_allowlist=allow_list,
         lldp_port_source=lps,
+        include_lab_devices=include_lab_devices,
     )
 
     inventory, _ = _collect_inventory(

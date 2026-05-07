@@ -21,6 +21,10 @@ EOS_PLATFORMS = ["DCS-", "CCS-", "AWE-"]
 EOS_VIRTUAL = ["cEOS", "vEOS"]
 
 
+def _is_lab_device(dev: dict) -> bool:
+    return dev.get("device_type") == "Virtual EOS"
+
+
 def datetime_to_readable_format(dt, format_type="full"):
     """
     Convert datetime object to various readable formats.

@@ -506,24 +506,34 @@ def _node_key_for_local(dev: dict[str, Any]) -> str:
     return (dev.get("serial_number") or dev.get("hostname") or "unknown").strip()
 
 
-def _node_key_for_remote(edge: dict[str, Any]) -> str:
-    mac = _norm_mac(edge.get("remote_eth_addr") or "")
+def _node_key_for_remote(side: dict[str, Any]) -> str:
+    """Derive a node key from a side dict's remote fields."""
+    mac = _norm_mac(side.get("remote_eth_addr") or "")
     if mac:
         return f"mac:{mac}"
-    ch = _norm_mac(edge.get("remote_chassis_id") or "")
+    ch = _norm_mac(side.get("remote_chassis_id") or "")
     if ch:
         return f"chassis:{ch}"
-    name = (edge.get("remote_system_name") or "").strip()
+    name = (side.get("remote_system_name") or "").strip()
     if name:
         return f"name:{name.lower()}"
     return "remote:unknown"
 
 
+def _side_remote_to_edge_remote(side: dict[str, Any]) -> dict[str, Any]:
+    """Convert a side dict's remote fields to the flat edge format for _match_remote_to_inventory."""
+    return {
+        "remote_eth_addr": side.get("remote_eth_addr") or "",
+        "remote_chassis_id": side.get("remote_chassis_id") or "",
+    }
+
+
 def _match_remote_to_inventory(
-    edge: dict[str, Any], by_mac: dict[str, dict[str, Any]]
+    side: dict[str, Any], by_mac: dict[str, dict[str, Any]]
 ) -> dict[str, Any] | None:
+    """Try to match a side dict's remote fields to inventory by MAC."""
     for key in ("remote_eth_addr", "remote_chassis_id"):
-        mac = _norm_mac(edge.get(key) or "")
+        mac = _norm_mac(side.get(key) or "")
         if mac and mac in by_mac:
             return by_mac[mac]
     return None
@@ -537,6 +547,8 @@ def build_topology_nodes_and_links(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Build abstract ``nodes`` and ``links`` for JSON / Containerlab / Mermaid.
+
+    Expects merged edges with ``side_a`` / ``side_b`` structure.
 
     ``node_scope``: ``full_inventory`` preloads every CVP inventory row (orphan switches
     appear with no links). ``connected`` keeps only devices that participate in at least
@@ -565,66 +577,116 @@ def build_topology_nodes_and_links(
     links: list[dict[str, Any]] = []
 
     for e in edges:
-        ls = (e.get("local_serial") or "").strip()
-        if ls and ls not in node_map:
-            node_map[ls] = {
-                "id": ls,
-                "label": e.get("local_hostname") or ls,
+        side_a = e.get("side_a") or {}
+        side_b = e.get("side_b")
+
+        # Ensure side_a's device is in the node map
+        sa_serial = (side_a.get("serial") or "").strip()
+        if sa_serial and sa_serial not in node_map:
+            node_map[sa_serial] = {
+                "id": sa_serial,
+                "label": side_a.get("hostname") or sa_serial,
                 "kind": "local_only",
                 "device_type": "",
-                "model": e.get("local_model") or "",
-                "serial_number": ls,
+                "model": side_a.get("model") or "",
+                "serial_number": sa_serial,
                 "system_mac": "",
             }
 
-        matched = _match_remote_to_inventory(e, by_mac)
-        if matched:
-            rk = _node_key_for_local(matched)
-            if rk not in node_map:
-                node_map[rk] = {
-                    "id": rk,
-                    "label": matched.get("hostname") or rk,
-                    "kind": "inventory",
-                    "device_type": matched.get("device_type") or "",
-                    "model": matched.get("model") or "",
-                    "serial_number": matched.get("serial_number") or "",
-                    "system_mac": matched.get("system_mac") or "",
-                }
-            remote_id = rk
+        # Resolve the target (side_b side or remote from side_a)
+        if side_b:
+            # Bidirectional: try matching side_b's remote data to inventory,
+            # also try side_a's remote data
+            matched = _match_remote_to_inventory(side_b, by_mac)
+            if not matched:
+                matched = _match_remote_to_inventory(side_a, by_mac)
+            if matched:
+                target_id = _node_key_for_local(matched)
+                if target_id not in node_map:
+                    node_map[target_id] = {
+                        "id": target_id,
+                        "label": matched.get("hostname") or target_id,
+                        "kind": "inventory",
+                        "device_type": matched.get("device_type") or "",
+                        "model": matched.get("model") or "",
+                        "serial_number": matched.get("serial_number") or "",
+                        "system_mac": matched.get("system_mac") or "",
+                    }
+            else:
+                target_id = _node_key_for_remote(side_a)
+                if target_id not in node_map:
+                    label = (
+                        side_b.get("hostname") or side_a.get("remote_system_name") or ""
+                    ).strip() or target_id
+                    node_map[target_id] = {
+                        "id": target_id,
+                        "label": label,
+                        "kind": "lldp_external",
+                        "device_type": "",
+                        "model": side_b.get("model") or "",
+                        "serial_number": side_b.get("serial") or "",
+                        "system_mac": _norm_mac(side_a.get("remote_eth_addr") or ""),
+                    }
+
+            remote_port_id = side_b.get("port") or side_a.get("remote_port_id") or ""
         else:
-            remote_id = _node_key_for_remote(e)
-            if remote_id not in node_map:
-                label = (e.get("remote_system_name") or "").strip() or remote_id
-                node_map[remote_id] = {
-                    "id": remote_id,
-                    "label": label,
-                    "kind": "lldp_external",
-                    "device_type": "",
-                    "model": "",
-                    "serial_number": "",
-                    "system_mac": _norm_mac(e.get("remote_eth_addr") or ""),
-                }
+            # Unidirectional: resolve remote from side_a's remote fields
+            matched = _match_remote_to_inventory(side_a, by_mac)
+            if matched:
+                target_id = _node_key_for_local(matched)
+                if target_id not in node_map:
+                    node_map[target_id] = {
+                        "id": target_id,
+                        "label": matched.get("hostname") or target_id,
+                        "kind": "inventory",
+                        "device_type": matched.get("device_type") or "",
+                        "model": matched.get("model") or "",
+                        "serial_number": matched.get("serial_number") or "",
+                        "system_mac": matched.get("system_mac") or "",
+                    }
+            else:
+                target_id = _node_key_for_remote(side_a)
+                if target_id not in node_map:
+                    label = (
+                        side_a.get("remote_system_name") or ""
+                    ).strip() or target_id
+                    node_map[target_id] = {
+                        "id": target_id,
+                        "label": label,
+                        "kind": "lldp_external",
+                        "device_type": "",
+                        "model": "",
+                        "serial_number": "",
+                        "system_mac": _norm_mac(side_a.get("remote_eth_addr") or ""),
+                    }
+
+            remote_port_id = side_a.get("remote_port_id") or ""
 
         links.append(
             {
-                "source_id": ls,
-                "target_id": remote_id,
-                "local_port": e.get("local_port") or "",
-                "remote_port_id": e.get("remote_port_id") or "",
-                "remote_management_address": e.get("remote_management_address") or "",
-                "remote_management_addresses": e.get("remote_management_addresses")
+                "source_id": sa_serial,
+                "target_id": target_id,
+                "local_port": side_a.get("port") or "",
+                "remote_port_id": remote_port_id,
+                "remote_management_address": side_a.get("remote_management_address")
+                or "",
+                "remote_management_addresses": side_a.get("remote_management_addresses")
                 or [],
-                "remote_system_description": e.get("remote_system_description") or "",
-                "remote_system_capabilities": e.get("remote_system_capabilities") or [],
-                "remote_enabled_system_capabilities": e.get(
+                "remote_system_description": side_a.get("remote_system_description")
+                or "",
+                "remote_system_capabilities": side_a.get("remote_system_capabilities")
+                or [],
+                "remote_enabled_system_capabilities": side_a.get(
                     "remote_enabled_system_capabilities"
                 )
                 or [],
-                "remote_pvid": e.get("remote_pvid") or "",
-                "remote_vlans": e.get("remote_vlans") or [],
-                "remote_lldp_med": e.get("remote_lldp_med") or {},
-                "remote_system_name": e.get("remote_system_name") or "",
+                "remote_pvid": side_a.get("remote_pvid") or "",
+                "remote_vlans": side_a.get("remote_vlans") or [],
+                "remote_lldp_med": side_a.get("remote_lldp_med") or {},
+                "remote_system_name": side_a.get("remote_system_name") or "",
                 "matched_inventory": matched is not None,
+                "link_verified": e.get("link_verified", False),
+                "mismatches": e.get("mismatches") or [],
             }
         )
 
@@ -648,7 +710,7 @@ def build_topology_nodes_and_links(
 def format_topology_mermaid(
     nodes: list[dict[str, Any]], links: list[dict[str, Any]]
 ) -> str:
-    """Directed edges with local port labels."""
+    """Undirected edges for verified bidirectional links, dotted for unidirectional."""
     lines = ["flowchart LR"]
     nid: dict[str, str] = {}
     for i, n in enumerate(nodes):
@@ -662,30 +724,55 @@ def format_topology_mermaid(
         b = nid.get(str(lk.get("target_id")))
         if not a or not b:
             continue
-        port = str(lk.get("local_port") or "").replace('"', "'")
-        if port:
-            lines.append(f"  {a} -->|{port}| {b}")
+        local_port = str(lk.get("local_port") or "").replace('"', "'")
+        remote_port = str(lk.get("remote_port_id") or "").replace('"', "'")
+        verified = lk.get("link_verified", False)
+        if verified and local_port and remote_port:
+            label = f"{local_port} / {remote_port}"
+            lines.append(f"  {a} ---|{label}| {b}")
+        elif verified:
+            port = local_port or remote_port
+            if port:
+                lines.append(f"  {a} ---|{port}| {b}")
+            else:
+                lines.append(f"  {a} --- {b}")
         else:
-            lines.append(f"  {a} --> {b}")
+            if local_port:
+                lines.append(f"  {a} -.->|{local_port}| {b}")
+            else:
+                lines.append(f"  {a} -.-> {b}")
     return "\n".join(lines) + "\n"
 
 
 def format_topology_table(edges: list[dict[str, Any]]) -> str:
-    """GitHub-flavored markdown table."""
+    """GitHub-flavored markdown table from merged edges with side_a/side_b structure."""
     rows = [
-        "| Local hostname | Local port | Remote system | Remote MAC | Remote port |",
-        "| --- | --- | --- | --- | --- |",
+        "| Host A | Port A | Host B | Port B | MAC | Mismatch |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for e in edges:
+        side_a = e.get("side_a") or {}
+        side_b = e.get("side_b")
+        host_a = side_a.get("hostname") or side_a.get("serial") or ""
+        port_a = side_a.get("port") or ""
+        if side_b:
+            host_b = side_b.get("hostname") or side_a.get("remote_system_name") or ""
+            port_b = side_b.get("port") or ""
+        else:
+            host_b = side_a.get("remote_system_name") or ""
+            port_b = side_a.get("remote_port_id") or ""
+        mac = side_a.get("remote_eth_addr") or side_a.get("remote_chassis_id") or ""
+        mismatch_str = ", ".join(e.get("mismatches") or [])
         rows.append(
             "| "
             + " | ".join(
                 [
-                    str(e.get("local_hostname") or ""),
-                    str(e.get("local_port") or ""),
-                    str(e.get("remote_system_name") or ""),
-                    str(e.get("remote_eth_addr") or e.get("remote_chassis_id") or ""),
-                    str(e.get("remote_port_id") or ""),
+                    str(host_a),
+                    str(port_a),
+                    str(host_b),
+                    str(port_b),
+                    str(mac),
+                    mismatch_str,
                 ]
             )
             + " |"

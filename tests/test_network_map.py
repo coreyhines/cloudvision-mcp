@@ -34,32 +34,50 @@ def test_infer_ethernet_port_count_models():
 def test_format_table_and_mermaid():
     edges = [
         {
-            "local_hostname": "sw1",
-            "local_port": "Ethernet6",
-            "remote_system_name": "host-a",
-            "remote_eth_addr": "aa:bb:cc:dd:ee:01",
-            "remote_port_id": "eth0",
-            "remote_management_address": "10.0.0.8",
-            "remote_management_addresses": ["10.0.0.8"],
-            "remote_system_description": "host",
-            "remote_system_capabilities": ["bridge"],
-            "remote_enabled_system_capabilities": ["bridge"],
-            "remote_pvid": "120",
-            "remote_vlans": ["120"],
-            "remote_lldp_med": {"lldpMedPolicy": ["voice"]},
-            "local_serial": "S1",
-            "local_model": "",
-            "remote_chassis_id": "",
-            "neighbor_source": "",
+            "side_a": {
+                "serial": "S1",
+                "hostname": "sw1",
+                "model": "",
+                "port": "Ethernet6",
+                "remote_system_name": "host-a",
+                "remote_chassis_id": "",
+                "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+                "remote_port_id": "eth0",
+                "remote_management_address": "10.0.0.8",
+                "remote_management_addresses": ["10.0.0.8"],
+                "remote_system_description": "host",
+                "remote_system_capabilities": ["bridge"],
+                "remote_enabled_system_capabilities": ["bridge"],
+                "remote_pvid": "120",
+                "remote_vlans": ["120"],
+                "remote_lldp_med": {"lldpMedPolicy": ["voice"]},
+                "neighbor_source": "",
+            },
+            "side_b": None,
+            "mismatches": [],
+            "link_verified": False,
+            "link_direction": "undirected",
         }
     ]
-    assert "sw1" in format_topology_table(edges)
+    table = format_topology_table(edges)
+    assert "sw1" in table
+    assert "Ethernet6" in table
+    assert "host-a" in table
     mmd = format_topology_mermaid(
         [
             {"id": "S1", "label": "sw1"},
             {"id": "name:host-a", "label": "host-a"},
         ],
-        [{"source_id": "S1", "target_id": "name:host-a", "local_port": "Ethernet6"}],
+        [
+            {
+                "source_id": "S1",
+                "target_id": "name:host-a",
+                "local_port": "Ethernet6",
+                "remote_port_id": "eth0",
+                "link_verified": False,
+                "mismatches": [],
+            }
+        ],
     )
     assert "Ethernet6" in mmd
 
@@ -93,6 +111,8 @@ def test_containerlab_yaml_roundtrip():
             "remote_port_id": "Management1/1",
             "remote_system_name": "pi",
             "matched_inventory": False,
+            "link_verified": False,
+            "mismatches": [],
         }
     ]
     yml = format_topology_containerlab(nodes, links, topology_name="t1")
@@ -156,23 +176,29 @@ def test_build_topology_connected_scope_excludes_orphan_inventory():
     ]
     edges = [
         {
-            "local_serial": "SN1",
-            "local_hostname": "core",
-            "local_model": "",
-            "local_port": "Ethernet1",
-            "remote_system_name": "other",
-            "remote_chassis_id": "",
-            "remote_eth_addr": "cc:cc:cc:cc:cc:cc",
-            "remote_port_id": "e1",
-            "remote_management_address": "",
-            "remote_management_addresses": [],
-            "remote_system_description": "",
-            "remote_system_capabilities": [],
-            "remote_enabled_system_capabilities": [],
-            "remote_pvid": "",
-            "remote_vlans": [],
-            "remote_lldp_med": {},
-            "neighbor_source": "",
+            "side_a": {
+                "serial": "SN1",
+                "hostname": "core",
+                "model": "",
+                "port": "Ethernet1",
+                "remote_system_name": "other",
+                "remote_chassis_id": "",
+                "remote_eth_addr": "cc:cc:cc:cc:cc:cc",
+                "remote_port_id": "e1",
+                "remote_management_address": "",
+                "remote_management_addresses": [],
+                "remote_system_description": "",
+                "remote_system_capabilities": [],
+                "remote_enabled_system_capabilities": [],
+                "remote_pvid": "",
+                "remote_vlans": [],
+                "remote_lldp_med": {},
+                "neighbor_source": "",
+            },
+            "side_b": None,
+            "mismatches": ["unidirectional_lldp"],
+            "link_verified": False,
+            "link_direction": "undirected",
         }
     ]
     nodes, _ = build_topology_nodes_and_links(edges, inv, node_scope="connected")
@@ -301,23 +327,29 @@ def test_build_topology_matches_inventory_mac():
     ]
     edges = [
         {
-            "local_serial": "SN2",
-            "local_hostname": "leaf",
-            "local_model": "",
-            "local_port": "Ethernet1",
-            "remote_system_name": "core",
-            "remote_chassis_id": "ec:8a:48:04:30:c0",
-            "remote_eth_addr": "",
-            "remote_port_id": "Eth1",
-            "remote_management_address": "",
-            "remote_management_addresses": [],
-            "remote_system_description": "",
-            "remote_system_capabilities": [],
-            "remote_enabled_system_capabilities": [],
-            "remote_pvid": "",
-            "remote_vlans": [],
-            "remote_lldp_med": {},
-            "neighbor_source": "",
+            "side_a": {
+                "serial": "SN2",
+                "hostname": "leaf",
+                "model": "",
+                "port": "Ethernet1",
+                "remote_system_name": "core",
+                "remote_chassis_id": "ec:8a:48:04:30:c0",
+                "remote_eth_addr": "",
+                "remote_port_id": "Eth1",
+                "remote_management_address": "",
+                "remote_management_addresses": [],
+                "remote_system_description": "",
+                "remote_system_capabilities": [],
+                "remote_enabled_system_capabilities": [],
+                "remote_pvid": "",
+                "remote_vlans": [],
+                "remote_lldp_med": {},
+                "neighbor_source": "",
+            },
+            "side_b": None,
+            "mismatches": ["unidirectional_lldp"],
+            "link_verified": False,
+            "link_direction": "undirected",
         }
     ]
     nodes, links = build_topology_nodes_and_links(edges, inv)
@@ -330,23 +362,29 @@ def test_build_topology_links_carry_rich_remote_metadata():
     inv: list[dict[str, str]] = []
     edges = [
         {
-            "local_serial": "SN2",
-            "local_hostname": "leaf",
-            "local_model": "",
-            "local_port": "Ethernet1",
-            "remote_system_name": "downstream",
-            "remote_chassis_id": "",
-            "remote_eth_addr": "00:11:22:33:44:55",
-            "remote_port_id": "Eth24",
-            "remote_management_address": "10.2.2.2",
-            "remote_management_addresses": ["10.2.2.2"],
-            "remote_system_description": "switch edge",
-            "remote_system_capabilities": ["bridge", "router"],
-            "remote_enabled_system_capabilities": ["bridge"],
-            "remote_pvid": "120",
-            "remote_vlans": ["120", "121"],
-            "remote_lldp_med": {"lldpMedPolicy": ["voice"]},
-            "neighbor_source": "remoteSystem",
+            "side_a": {
+                "serial": "SN2",
+                "hostname": "leaf",
+                "model": "",
+                "port": "Ethernet1",
+                "remote_system_name": "downstream",
+                "remote_chassis_id": "",
+                "remote_eth_addr": "00:11:22:33:44:55",
+                "remote_port_id": "Eth24",
+                "remote_management_address": "10.2.2.2",
+                "remote_management_addresses": ["10.2.2.2"],
+                "remote_system_description": "switch edge",
+                "remote_system_capabilities": ["bridge", "router"],
+                "remote_enabled_system_capabilities": ["bridge"],
+                "remote_pvid": "120",
+                "remote_vlans": ["120", "121"],
+                "remote_lldp_med": {"lldpMedPolicy": ["voice"]},
+                "neighbor_source": "remoteSystem",
+            },
+            "side_b": None,
+            "mismatches": ["unidirectional_lldp"],
+            "link_verified": False,
+            "link_direction": "undirected",
         }
     ]
     _nodes, links = build_topology_nodes_and_links(edges, inv)
@@ -752,3 +790,275 @@ def test_merge_bidirectional_edges_multiple_links():
     unidir = [e for e in merged if not e["link_verified"]]
     assert len(verified) == 1
     assert len(unidir) == 1
+
+
+def test_build_topology_with_merged_edges():
+    """Bidirectional merged edge with both sides: verify link_verified and ports."""
+    inv: list[dict[str, str]] = []
+    edges = [
+        {
+            "side_a": {
+                "serial": "SN1",
+                "hostname": "leaf-01",
+                "model": "7050X3",
+                "port": "Ethernet5",
+                "remote_system_name": "spine-01",
+                "remote_chassis_id": "",
+                "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+                "remote_port_id": "Ethernet3",
+                "remote_management_address": "10.0.0.2",
+                "remote_management_addresses": ["10.0.0.2"],
+                "remote_system_description": "Arista EOS",
+                "remote_system_capabilities": ["bridge", "router"],
+                "remote_enabled_system_capabilities": ["bridge"],
+                "remote_pvid": "100",
+                "remote_vlans": ["100", "200"],
+                "remote_lldp_med": {},
+                "neighbor_source": "remoteSystem",
+            },
+            "side_b": {
+                "serial": "SN2",
+                "hostname": "spine-01",
+                "model": "7280R3",
+                "port": "Ethernet3",
+                "remote_system_name": "leaf-01",
+                "remote_chassis_id": "",
+                "remote_eth_addr": "cc:dd:ee:ff:00:01",
+                "remote_port_id": "Ethernet5",
+                "remote_management_address": "10.0.0.1",
+                "remote_management_addresses": ["10.0.0.1"],
+                "remote_system_description": "Arista EOS",
+                "remote_system_capabilities": ["bridge", "router"],
+                "remote_enabled_system_capabilities": ["bridge", "router"],
+                "remote_pvid": "100",
+                "remote_vlans": ["100", "200"],
+                "remote_lldp_med": {},
+                "neighbor_source": "remoteSystem",
+            },
+            "mismatches": [],
+            "link_verified": True,
+            "link_direction": "undirected",
+        }
+    ]
+    nodes, links = build_topology_nodes_and_links(edges, inv)
+    assert len(links) == 1
+    lk = links[0]
+    assert lk["link_verified"] is True
+    assert lk["local_port"] == "Ethernet5"
+    assert lk["remote_port_id"] == "Ethernet3"
+    assert lk["source_id"] == "SN1"
+    assert lk["target_id"] == "mac:aa:bb:cc:dd:ee:01"
+    assert lk["mismatches"] == []
+
+
+def test_build_topology_unidirectional_merged_edge():
+    """Single-side edge: verify link_verified is False."""
+    inv: list[dict[str, str]] = []
+    edges = [
+        {
+            "side_a": {
+                "serial": "SN1",
+                "hostname": "leaf-01",
+                "model": "",
+                "port": "Ethernet5",
+                "remote_system_name": "spine-01",
+                "remote_chassis_id": "",
+                "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+                "remote_port_id": "Ethernet3",
+                "remote_management_address": "",
+                "remote_management_addresses": [],
+                "remote_system_description": "",
+                "remote_system_capabilities": [],
+                "remote_enabled_system_capabilities": [],
+                "remote_pvid": "",
+                "remote_vlans": [],
+                "remote_lldp_med": {},
+                "neighbor_source": "",
+            },
+            "side_b": None,
+            "mismatches": ["unidirectional_lldp"],
+            "link_verified": False,
+            "link_direction": "undirected",
+        }
+    ]
+    nodes, links = build_topology_nodes_and_links(edges, inv)
+    assert len(links) == 1
+    lk = links[0]
+    assert lk["link_verified"] is False
+    assert lk["local_port"] == "Ethernet5"
+    assert lk["remote_port_id"] == "Ethernet3"
+    assert lk["mismatches"] == ["unidirectional_lldp"]
+
+
+def test_format_table_with_merged_edges():
+    """Verify one row per link, both hostnames and ports present."""
+    edges = [
+        {
+            "side_a": {
+                "serial": "SN1",
+                "hostname": "leaf-01",
+                "model": "",
+                "port": "Ethernet5",
+                "remote_system_name": "spine-01",
+                "remote_chassis_id": "",
+                "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+                "remote_port_id": "Ethernet3",
+                "remote_management_address": "",
+                "remote_management_addresses": [],
+                "remote_system_description": "",
+                "remote_system_capabilities": [],
+                "remote_enabled_system_capabilities": [],
+                "remote_pvid": "",
+                "remote_vlans": [],
+                "remote_lldp_med": {},
+                "neighbor_source": "",
+            },
+            "side_b": {
+                "serial": "SN2",
+                "hostname": "spine-01",
+                "model": "",
+                "port": "Ethernet3",
+                "remote_system_name": "leaf-01",
+                "remote_chassis_id": "",
+                "remote_eth_addr": "cc:dd:ee:ff:00:01",
+                "remote_port_id": "Ethernet5",
+                "remote_management_address": "",
+                "remote_management_addresses": [],
+                "remote_system_description": "",
+                "remote_system_capabilities": [],
+                "remote_enabled_system_capabilities": [],
+                "remote_pvid": "",
+                "remote_vlans": [],
+                "remote_lldp_med": {},
+                "neighbor_source": "",
+            },
+            "mismatches": [],
+            "link_verified": True,
+            "link_direction": "undirected",
+        }
+    ]
+    table = format_topology_table(edges)
+    assert "leaf-01" in table
+    assert "Ethernet5" in table
+    assert "spine-01" in table
+    assert "Ethernet3" in table
+    # Count data rows (exclude header + separator)
+    all_rows = table.strip().split("\n")
+    data_rows = all_rows[2:]  # skip header + separator
+    assert len(data_rows) == 1
+
+
+def test_format_table_unidirectional_edge():
+    """Verify unidirectional edge in table uses side_a's remote fields for Host B / Port B."""
+    edges = [
+        {
+            "side_a": {
+                "serial": "SN1",
+                "hostname": "leaf-01",
+                "model": "",
+                "port": "Ethernet5",
+                "remote_system_name": "spine-01",
+                "remote_chassis_id": "",
+                "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+                "remote_port_id": "Ethernet3",
+                "remote_management_address": "",
+                "remote_management_addresses": [],
+                "remote_system_description": "",
+                "remote_system_capabilities": [],
+                "remote_enabled_system_capabilities": [],
+                "remote_pvid": "",
+                "remote_vlans": [],
+                "remote_lldp_med": {},
+                "neighbor_source": "",
+            },
+            "side_b": None,
+            "mismatches": ["unidirectional_lldp"],
+            "link_verified": False,
+            "link_direction": "undirected",
+        }
+    ]
+    table = format_topology_table(edges)
+    assert "leaf-01" in table
+    assert "spine-01" in table
+    assert "Ethernet5" in table
+    assert "Ethernet3" in table
+    assert "unidirectional_lldp" in table
+
+
+def test_format_mermaid_merged_edge_shows_both_ports():
+    """Verified bidirectional link: --- syntax with both ports."""
+    nodes = [
+        {"id": "SN1", "label": "leaf-01"},
+        {"id": "mac:aa:bb:cc:dd:ee:01", "label": "spine-01"},
+    ]
+    links = [
+        {
+            "source_id": "SN1",
+            "target_id": "mac:aa:bb:cc:dd:ee:01",
+            "local_port": "Ethernet5",
+            "remote_port_id": "Ethernet3",
+            "link_verified": True,
+            "mismatches": [],
+        }
+    ]
+    mmd = format_topology_mermaid(nodes, links)
+    assert "---" in mmd
+    assert "Ethernet5" in mmd
+    assert "Ethernet3" in mmd
+    assert "-->" not in mmd
+
+
+def test_format_mermaid_unidirectional_edge():
+    """Unidirectional link: -.-> dotted syntax."""
+    nodes = [
+        {"id": "SN1", "label": "leaf-01"},
+        {"id": "mac:aa:bb:cc:dd:ee:01", "label": "spine-01"},
+    ]
+    links = [
+        {
+            "source_id": "SN1",
+            "target_id": "mac:aa:bb:cc:dd:ee:01",
+            "local_port": "Ethernet5",
+            "remote_port_id": "Ethernet3",
+            "link_verified": False,
+            "mismatches": ["unidirectional_lldp"],
+        }
+    ]
+    mmd = format_topology_mermaid(nodes, links)
+    assert "-.->" in mmd
+    assert "Ethernet5" in mmd
+
+
+@patch(
+    "cvp_mcp.grpc.network_map._collect_inventory",
+    return_value=([], []),
+)
+@patch(
+    "cvp_mcp.grpc.network_map.scan_lldp_topology_edges",
+    return_value=(
+        [],
+        {
+            "devices_scanned": 0,
+            "port_probes": 0,
+            "edges_found": 0,
+            "extra_neighbor_index_probes": 0,
+            "devices_port_source_oper_up": 0,
+            "devices_port_source_ethernet_range": 0,
+            "devices_skipped_no_oper_up_ports": 0,
+            "unidirectional_links": 0,
+            "mismatched_links": 0,
+            "lldp_port_source": "auto",
+            "inventory_warnings": [],
+        },
+    ),
+)
+def test_grpc_map_network_topology_stats_include_new_fields(
+    _mock_scan: object,
+    _mock_inv: object,
+) -> None:
+    out = grpc_map_network_topology(
+        {"cvp": "x:443", "cvtoken": "t"},
+    )
+    stats = out["topology"]["stats"]
+    assert "unidirectional_links" in stats
+    assert "mismatched_links" in stats

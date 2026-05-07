@@ -64,6 +64,8 @@ _NOISY_MESSAGE_SUBSTRINGS: tuple[str, ...] = (
     "starlette.requests.ClientDisconnect",
     "aborting with incomplete response",
     "reading: context canceled",
+    "Stateless session crashed",
+    "ClosedResourceError",
 )
 
 
@@ -108,7 +110,7 @@ _install_noise_filters()
 logging.info("Starting the FastMCP server...")
 
 # Initialize FastMCP server
-mcp = FastMCP(name="CVP MCP Server", host="0.0.0.0", stateless_http=True)
+mcp = FastMCP(name="CVP MCP Server", host="0.0.0.0", stateless_http=True, log_level="WARNING")
 
 
 # async function to return creds

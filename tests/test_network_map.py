@@ -9,7 +9,10 @@ import yaml
 
 from cvp_mcp.grpc.network_map import (
     _canonical_link_key,
+    _check_edge_mismatches,
+    _directed_edge_to_side,
     _filter_simple_ethernet_ports_by_cap,
+    _merge_bidirectional_edges,
     _remote_device_id,
     build_topology_nodes_and_links,
     format_topology_containerlab,
@@ -115,6 +118,8 @@ def test_containerlab_yaml_roundtrip():
             "devices_port_source_oper_up": 0,
             "devices_port_source_ethernet_range": 0,
             "devices_skipped_no_oper_up_ports": 0,
+            "unidirectional_links": 0,
+            "mismatched_links": 0,
             "lldp_port_source": "auto",
             "inventory_warnings": [],
         },
@@ -209,6 +214,8 @@ def test_scan_lldp_uses_oper_up_port_list(
     assert stats["port_probes"] == 2
     assert stats["devices_port_source_oper_up"] == 1
     assert stats["devices_port_source_ethernet_range"] == 0
+    assert "unidirectional_links" in stats
+    assert "mismatched_links" in stats
     assert mock_lldp.call_count == 2
 
 
@@ -233,6 +240,8 @@ def test_scan_lldp_full_range_skips_oper_up_query(
     mock_oper_up.assert_not_called()
     assert stats["port_probes"] == 4
     assert stats["devices_port_source_ethernet_range"] == 1
+    assert "unidirectional_links" in stats
+    assert "mismatched_links" in stats
 
 
 @patch("cvp_mcp.grpc.network_map._collect_inventory")
@@ -257,6 +266,8 @@ def test_scan_lldp_oper_up_only_skips_fallback_range(
     assert stats["port_probes"] == 0
     assert stats["devices_port_source_ethernet_range"] == 0
     assert stats["devices_skipped_no_oper_up_ports"] == 1
+    assert "unidirectional_links" in stats
+    assert "mismatched_links" in stats
 
 
 @patch("cvp_mcp.grpc.interfaces._connector_device_config")
@@ -374,29 +385,29 @@ def test_remote_device_id_falls_back_to_system_name():
     assert _remote_device_id(edge) == "name:spine-01"
 
 
-def test_canonical_link_key_returns_stable_key():
-    # Both devices identified by MAC so the frozenset overlaps across directions.
-    # Device A: mac:aa:bb:cc:dd:ee:01  Device B: mac:cc:dd:ee:ff:00:01
+def test_canonical_link_key_uses_serial_to_mac():
+    serial_to_mac = {"SN1": "cc:dd:ee:ff:00:01", "SN2": "aa:bb:cc:dd:ee:01"}
     edge_a = {
-        "local_serial": "mac:aa:bb:cc:dd:ee:01",
+        "local_serial": "SN1",
         "local_port": "Ethernet5",
-        "remote_eth_addr": "cc:dd:ee:ff:00:01",
+        "remote_eth_addr": "aa:bb:cc:dd:ee:01",
         "remote_port_id": "Ethernet3",
         "remote_system_name": "spine-01",
     }
     edge_b = {
-        "local_serial": "mac:cc:dd:ee:ff:00:01",
+        "local_serial": "SN2",
         "local_port": "Ethernet3",
-        "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+        "remote_eth_addr": "cc:dd:ee:ff:00:01",
         "remote_port_id": "Ethernet5",
         "remote_system_name": "leaf-01",
     }
-    key_a = _canonical_link_key(edge_a)
-    key_b = _canonical_link_key(edge_b)
+    key_a = _canonical_link_key(edge_a, serial_to_mac)
+    key_b = _canonical_link_key(edge_b, serial_to_mac)
     assert key_a == key_b
 
 
 def test_canonical_link_key_different_ports_different_keys():
+    serial_to_mac = {"SN1": "cc:dd:ee:ff:00:01"}
     edge_a = {
         "local_serial": "SN1",
         "local_port": "Ethernet5",
@@ -411,4 +422,333 @@ def test_canonical_link_key_different_ports_different_keys():
         "remote_port_id": "Ethernet4",
         "remote_system_name": "spine-01",
     }
-    assert _canonical_link_key(edge_a) != _canonical_link_key(edge_c)
+    assert _canonical_link_key(edge_a, serial_to_mac) != _canonical_link_key(
+        edge_c, serial_to_mac
+    )
+
+
+def test_directed_edge_to_side_extracts_local_side():
+    edge = {
+        "local_serial": "SN1",
+        "local_hostname": "leaf-01",
+        "local_model": "7050X3",
+        "local_port": "Ethernet5",
+        "remote_system_name": "spine-01",
+        "remote_chassis_id": "aa:bb:cc:dd:ee:02",
+        "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+        "remote_port_id": "Ethernet3",
+        "remote_management_address": "10.0.0.2",
+        "remote_management_addresses": ["10.0.0.2"],
+        "remote_system_description": "Arista EOS",
+        "remote_system_capabilities": ["bridge", "router"],
+        "remote_enabled_system_capabilities": ["bridge"],
+        "remote_pvid": "100",
+        "remote_vlans": ["100", "200"],
+        "remote_lldp_med": {"lldpMedPolicy": ["voice"]},
+        "neighbor_source": "remoteSystem",
+    }
+    side = _directed_edge_to_side(edge)
+    assert side["serial"] == "SN1"
+    assert side["hostname"] == "leaf-01"
+    assert side["port"] == "Ethernet5"
+    assert side["remote_system_name"] == "spine-01"
+    assert side["remote_eth_addr"] == "aa:bb:cc:dd:ee:01"
+    assert side["remote_port_id"] == "Ethernet3"
+    assert side["remote_pvid"] == "100"
+    assert side["remote_vlans"] == ["100", "200"]
+
+
+def test_check_edge_mismatches_detects_pvid_mismatch():
+    side_a = {
+        "serial": "SN1",
+        "hostname": "a",
+        "port": "Ethernet5",
+        "remote_system_name": "b",
+        "remote_eth_addr": "",
+        "remote_port_id": "Ethernet3",
+        "remote_pvid": "100",
+        "remote_vlans": ["100"],
+    }
+    side_b = {
+        "serial": "SN2",
+        "hostname": "b",
+        "port": "Ethernet3",
+        "remote_system_name": "a",
+        "remote_eth_addr": "",
+        "remote_port_id": "Ethernet5",
+        "remote_pvid": "200",
+        "remote_vlans": ["200"],
+    }
+    mismatches = _check_edge_mismatches(side_a, side_b)
+    assert any("pvid_mismatch" in m for m in mismatches)
+
+
+def test_check_edge_mismatches_detects_vlan_mismatch():
+    side_a = {
+        "serial": "SN1",
+        "hostname": "a",
+        "port": "Ethernet5",
+        "remote_system_name": "b",
+        "remote_eth_addr": "",
+        "remote_port_id": "Ethernet3",
+        "remote_pvid": "100",
+        "remote_vlans": ["100", "200"],
+    }
+    side_b = {
+        "serial": "SN2",
+        "hostname": "b",
+        "port": "Ethernet3",
+        "remote_system_name": "a",
+        "remote_eth_addr": "",
+        "remote_port_id": "Ethernet5",
+        "remote_pvid": "100",
+        "remote_vlans": ["100", "300"],
+    }
+    mismatches = _check_edge_mismatches(side_a, side_b)
+    assert any("vlan_mismatch" in m for m in mismatches)
+
+
+def test_check_edge_mismatches_detects_port_crossref_mismatch():
+    side_a = {
+        "serial": "SN1",
+        "hostname": "a",
+        "port": "Ethernet5",
+        "remote_system_name": "b",
+        "remote_eth_addr": "",
+        "remote_port_id": "Ethernet3",
+        "remote_pvid": "",
+        "remote_vlans": [],
+    }
+    side_b = {
+        "serial": "SN2",
+        "hostname": "b",
+        "port": "Ethernet3",
+        "remote_system_name": "a",
+        "remote_eth_addr": "",
+        "remote_port_id": "Ethernet9",
+        "remote_pvid": "",
+        "remote_vlans": [],
+    }
+    mismatches = _check_edge_mismatches(side_a, side_b)
+    assert any("port_crossref_mismatch" in m for m in mismatches)
+
+
+def test_check_edge_mismatches_clean_when_matching():
+    side_a = {
+        "serial": "SN1",
+        "hostname": "a",
+        "port": "Ethernet5",
+        "remote_system_name": "b",
+        "remote_eth_addr": "",
+        "remote_port_id": "Ethernet3",
+        "remote_pvid": "100",
+        "remote_vlans": ["100"],
+    }
+    side_b = {
+        "serial": "SN2",
+        "hostname": "b",
+        "port": "Ethernet3",
+        "remote_system_name": "a",
+        "remote_eth_addr": "",
+        "remote_port_id": "Ethernet5",
+        "remote_pvid": "100",
+        "remote_vlans": ["100"],
+    }
+    assert _check_edge_mismatches(side_a, side_b) == []
+
+
+def test_merge_bidirectional_edges_merges_pair():
+    serial_to_mac = {"SN1": "cc:dd:ee:ff:00:01", "SN2": "aa:bb:cc:dd:ee:01"}
+    edge_a = {
+        "local_serial": "SN1",
+        "local_hostname": "leaf-01",
+        "local_model": "7050X3",
+        "local_port": "Ethernet5",
+        "remote_system_name": "spine-01",
+        "remote_chassis_id": "",
+        "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+        "remote_port_id": "Ethernet3",
+        "remote_management_address": "10.0.0.2",
+        "remote_management_addresses": ["10.0.0.2"],
+        "remote_system_description": "Arista EOS",
+        "remote_system_capabilities": ["bridge", "router"],
+        "remote_enabled_system_capabilities": ["bridge"],
+        "remote_pvid": "100",
+        "remote_vlans": ["100", "200"],
+        "remote_lldp_med": {},
+        "neighbor_source": "remoteSystem",
+    }
+    edge_b = {
+        "local_serial": "SN2",
+        "local_hostname": "spine-01",
+        "local_model": "7280R3",
+        "local_port": "Ethernet3",
+        "remote_system_name": "leaf-01",
+        "remote_chassis_id": "",
+        "remote_eth_addr": "cc:dd:ee:ff:00:01",
+        "remote_port_id": "Ethernet5",
+        "remote_management_address": "10.0.0.1",
+        "remote_management_addresses": ["10.0.0.1"],
+        "remote_system_description": "Arista EOS",
+        "remote_system_capabilities": ["bridge", "router"],
+        "remote_enabled_system_capabilities": ["bridge", "router"],
+        "remote_pvid": "100",
+        "remote_vlans": ["100", "200"],
+        "remote_lldp_med": {},
+        "neighbor_source": "remoteSystem",
+    }
+    merged = _merge_bidirectional_edges([edge_a, edge_b], serial_to_mac)
+    assert len(merged) == 1
+    e = merged[0]
+    assert e["link_verified"] is True
+    assert e["side_a"]["serial"] == "SN1"
+    assert e["side_a"]["port"] == "Ethernet5"
+    assert e["side_b"]["serial"] == "SN2"
+    assert e["side_b"]["port"] == "Ethernet3"
+    assert e["mismatches"] == []
+    assert e["link_direction"] == "undirected"
+
+
+def test_merge_bidirectional_edges_unidirectional_edge():
+    serial_to_mac = {"SN1": "cc:dd:ee:ff:00:01"}
+    edge_a = {
+        "local_serial": "SN1",
+        "local_hostname": "leaf-01",
+        "local_model": "",
+        "local_port": "Ethernet5",
+        "remote_system_name": "spine-01",
+        "remote_chassis_id": "",
+        "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+        "remote_port_id": "Ethernet3",
+        "remote_management_address": "",
+        "remote_management_addresses": [],
+        "remote_system_description": "",
+        "remote_system_capabilities": [],
+        "remote_enabled_system_capabilities": [],
+        "remote_pvid": "",
+        "remote_vlans": [],
+        "remote_lldp_med": {},
+        "neighbor_source": "",
+    }
+    merged = _merge_bidirectional_edges([edge_a], serial_to_mac)
+    assert len(merged) == 1
+    e = merged[0]
+    assert e["link_verified"] is False
+    assert e["side_a"]["serial"] == "SN1"
+    assert e["side_b"] is None
+    assert "unidirectional_lldp" in e["mismatches"]
+
+
+def test_merge_bidirectional_edges_with_mismatch():
+    serial_to_mac = {"SN1": "cc:dd:ee:ff:00:01", "SN2": "aa:bb:cc:dd:ee:01"}
+    edge_a = {
+        "local_serial": "SN1",
+        "local_hostname": "leaf-01",
+        "local_model": "",
+        "local_port": "Ethernet5",
+        "remote_system_name": "spine-01",
+        "remote_chassis_id": "",
+        "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+        "remote_port_id": "Ethernet3",
+        "remote_management_address": "",
+        "remote_management_addresses": [],
+        "remote_system_description": "",
+        "remote_system_capabilities": [],
+        "remote_enabled_system_capabilities": [],
+        "remote_pvid": "100",
+        "remote_vlans": ["100"],
+        "remote_lldp_med": {},
+        "neighbor_source": "",
+    }
+    edge_b = {
+        "local_serial": "SN2",
+        "local_hostname": "spine-01",
+        "local_model": "",
+        "local_port": "Ethernet3",
+        "remote_system_name": "leaf-01",
+        "remote_chassis_id": "",
+        "remote_eth_addr": "cc:dd:ee:ff:00:01",
+        "remote_port_id": "Ethernet5",
+        "remote_management_address": "",
+        "remote_management_addresses": [],
+        "remote_system_description": "",
+        "remote_system_capabilities": [],
+        "remote_enabled_system_capabilities": [],
+        "remote_pvid": "200",
+        "remote_vlans": ["200"],
+        "remote_lldp_med": {},
+        "neighbor_source": "",
+    }
+    merged = _merge_bidirectional_edges([edge_a, edge_b], serial_to_mac)
+    assert len(merged) == 1
+    e = merged[0]
+    assert e["link_verified"] is True
+    assert any("pvid_mismatch" in m for m in e["mismatches"])
+    assert any("vlan_mismatch" in m for m in e["mismatches"])
+
+
+def test_merge_bidirectional_edges_multiple_links():
+    serial_to_mac = {"SN1": "cc:dd:ee:ff:00:01", "SN2": "aa:bb:cc:dd:ee:01"}
+    edge_a1 = {
+        "local_serial": "SN1",
+        "local_hostname": "leaf-01",
+        "local_model": "",
+        "local_port": "Ethernet5",
+        "remote_system_name": "spine-01",
+        "remote_chassis_id": "",
+        "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+        "remote_port_id": "Ethernet3",
+        "remote_management_address": "",
+        "remote_management_addresses": [],
+        "remote_system_description": "",
+        "remote_system_capabilities": [],
+        "remote_enabled_system_capabilities": [],
+        "remote_pvid": "",
+        "remote_vlans": [],
+        "remote_lldp_med": {},
+        "neighbor_source": "",
+    }
+    edge_a2 = {
+        "local_serial": "SN1",
+        "local_hostname": "leaf-01",
+        "local_model": "",
+        "local_port": "Ethernet6",
+        "remote_system_name": "spine-01",
+        "remote_chassis_id": "",
+        "remote_eth_addr": "aa:bb:cc:dd:ee:01",
+        "remote_port_id": "Ethernet4",
+        "remote_management_address": "",
+        "remote_management_addresses": [],
+        "remote_system_description": "",
+        "remote_system_capabilities": [],
+        "remote_enabled_system_capabilities": [],
+        "remote_pvid": "",
+        "remote_vlans": [],
+        "remote_lldp_med": {},
+        "neighbor_source": "",
+    }
+    edge_b1 = {
+        "local_serial": "SN2",
+        "local_hostname": "spine-01",
+        "local_model": "",
+        "local_port": "Ethernet3",
+        "remote_system_name": "leaf-01",
+        "remote_chassis_id": "",
+        "remote_eth_addr": "cc:dd:ee:ff:00:01",
+        "remote_port_id": "Ethernet5",
+        "remote_management_address": "",
+        "remote_management_addresses": [],
+        "remote_system_description": "",
+        "remote_system_capabilities": [],
+        "remote_enabled_system_capabilities": [],
+        "remote_pvid": "",
+        "remote_vlans": [],
+        "remote_lldp_med": {},
+        "neighbor_source": "",
+    }
+    merged = _merge_bidirectional_edges([edge_a1, edge_a2, edge_b1], serial_to_mac)
+    assert len(merged) == 2
+    verified = [e for e in merged if e["link_verified"]]
+    unidir = [e for e in merged if not e["link_verified"]]
+    assert len(verified) == 1
+    assert len(unidir) == 1

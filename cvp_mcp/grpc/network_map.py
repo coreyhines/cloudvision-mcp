@@ -119,20 +119,147 @@ def _remote_device_id(edge: dict[str, Any]) -> str:
     return "remote:unknown"
 
 
-def _canonical_link_key(edge: dict[str, Any]) -> tuple[frozenset[str], tuple[str, str]]:
+def _canonical_link_key(
+    edge: dict[str, Any], serial_to_mac: dict[str, str]
+) -> tuple[frozenset[str], tuple[str, str]]:
     """
     Stable key for a physical link pair.
 
     Two directed edges (A→B and B→A) on the same ports produce the same key
     regardless of which direction is examined first.
     """
-    local_id = (edge.get("local_serial") or "").strip()
+    local_serial = (edge.get("local_serial") or "").strip()
+    # Normalize local device ID to MAC namespace if we have it
+    local_mac = serial_to_mac.get(local_serial, "")
+    local_id = f"mac:{local_mac}" if local_mac else f"serial:{local_serial}"
     remote_id = _remote_device_id(edge)
     serials = frozenset({local_id, remote_id})
     ports = tuple(
         sorted([edge.get("local_port") or "", edge.get("remote_port_id") or ""])
     )
     return (serials, ports)
+
+
+_SIDE_KEYS = (
+    "serial",
+    "hostname",
+    "model",
+    "port",
+    "remote_system_name",
+    "remote_chassis_id",
+    "remote_eth_addr",
+    "remote_port_id",
+    "remote_management_address",
+    "remote_management_addresses",
+    "remote_system_description",
+    "remote_system_capabilities",
+    "remote_enabled_system_capabilities",
+    "remote_pvid",
+    "remote_vlans",
+    "remote_lldp_med",
+    "neighbor_source",
+)
+
+
+def _directed_edge_to_side(edge: dict[str, Any]) -> dict[str, Any]:
+    """Extract local-side fields from a directed edge into a side dict."""
+    return {
+        "serial": edge.get("local_serial") or "",
+        "hostname": edge.get("local_hostname") or "",
+        "model": edge.get("local_model") or "",
+        "port": edge.get("local_port") or "",
+        "remote_system_name": edge.get("remote_system_name") or "",
+        "remote_chassis_id": edge.get("remote_chassis_id") or "",
+        "remote_eth_addr": edge.get("remote_eth_addr") or "",
+        "remote_port_id": edge.get("remote_port_id") or "",
+        "remote_management_address": edge.get("remote_management_address") or "",
+        "remote_management_addresses": edge.get("remote_management_addresses") or [],
+        "remote_system_description": edge.get("remote_system_description") or "",
+        "remote_system_capabilities": edge.get("remote_system_capabilities") or [],
+        "remote_enabled_system_capabilities": edge.get(
+            "remote_enabled_system_capabilities"
+        )
+        or [],
+        "remote_pvid": edge.get("remote_pvid") or "",
+        "remote_vlans": edge.get("remote_vlans") or [],
+        "remote_lldp_med": edge.get("remote_lldp_med") or {},
+        "neighbor_source": edge.get("neighbor_source") or "",
+    }
+
+
+def _check_edge_mismatches(side_a: dict[str, Any], side_b: dict[str, Any]) -> list[str]:
+    """Detect PVID, VLAN, and port cross-reference mismatches between two sides."""
+    mismatches: list[str] = []
+    a_pvid = (side_a.get("remote_pvid") or "").strip()
+    b_pvid = (side_b.get("remote_pvid") or "").strip()
+    if a_pvid and b_pvid and a_pvid != b_pvid:
+        mismatches.append(f"pvid_mismatch: side_a={a_pvid} side_b={b_pvid}")
+    a_vlans = set(side_a.get("remote_vlans") or [])
+    b_vlans = set(side_b.get("remote_vlans") or [])
+    if a_vlans and b_vlans and a_vlans != b_vlans:
+        only_a = a_vlans - b_vlans
+        only_b = b_vlans - a_vlans
+        mismatches.append(
+            f"vlan_mismatch: only_a={sorted(only_a)} only_b={sorted(only_b)}"
+        )
+    a_port_b = (side_a.get("remote_port_id") or "").strip()
+    b_port = (side_b.get("port") or "").strip()
+    b_port_a = (side_b.get("remote_port_id") or "").strip()
+    a_port = (side_a.get("port") or "").strip()
+    if a_port_b and b_port and a_port_b != b_port:
+        mismatches.append(
+            f"port_crossref_mismatch: side_a_sees_remote={a_port_b} side_b_local={b_port}"
+        )
+    if b_port_a and a_port and b_port_a != a_port:
+        mismatches.append(
+            f"port_crossref_mismatch: side_b_sees_remote={b_port_a} side_a_local={a_port}"
+        )
+    return mismatches
+
+
+def _merge_bidirectional_edges(
+    edges: list[dict[str, Any]], serial_to_mac: dict[str, str]
+) -> list[dict[str, Any]]:
+    """Merge directed edges into undirected links, grouping by canonical key."""
+    groups: dict[tuple[frozenset[str], tuple[str, str]], list[dict[str, Any]]] = {}
+    for e in edges:
+        key = _canonical_link_key(e, serial_to_mac)
+        groups.setdefault(key, []).append(e)
+    merged: list[dict[str, Any]] = []
+    for _key, group in groups.items():
+        if len(group) == 1:
+            side_a = _directed_edge_to_side(group[0])
+            merged.append(
+                {
+                    "side_a": side_a,
+                    "side_b": None,
+                    "mismatches": ["unidirectional_lldp"],
+                    "link_verified": False,
+                    "link_direction": "undirected",
+                }
+            )
+            continue
+        # Two directions: assign side_a to the lower serial for stability.
+        s0 = _directed_edge_to_side(group[0])
+        s1 = _directed_edge_to_side(group[1])
+        if (s0.get("serial") or "") <= (s1.get("serial") or ""):
+            side_a, side_b = s0, s1
+        else:
+            side_a, side_b = s1, s0
+        mismatches = _check_edge_mismatches(side_a, side_b)
+        merged.append(
+            {
+                "side_a": side_a,
+                "side_b": side_b,
+                "mismatches": mismatches,
+                "link_verified": True,
+                "link_direction": "undirected",
+            }
+        )
+    merged.sort(
+        key=lambda e: (e["side_a"].get("serial") or "", e["side_a"].get("port") or "")
+    )
+    return merged
 
 
 def _lldp_row_to_edges(
@@ -230,6 +357,8 @@ def scan_lldp_topology_edges(
             "devices_port_source_oper_up": 0,
             "devices_port_source_ethernet_range": 0,
             "devices_skipped_no_oper_up_ports": 0,
+            "unidirectional_links": 0,
+            "mismatched_links": 0,
             "lldp_port_source": mode,
             "inventory_warnings": cred_miss,
             "credential_error": True,
@@ -251,6 +380,8 @@ def scan_lldp_topology_edges(
         "devices_port_source_oper_up": 0,
         "devices_port_source_ethernet_range": 0,
         "devices_skipped_no_oper_up_ports": 0,
+        "unidirectional_links": 0,
+        "mismatched_links": 0,
         "lldp_port_source": mode,
         "inventory_warnings": inv_warnings,
     }
@@ -352,7 +483,23 @@ def scan_lldp_topology_edges(
                         stats=stats,
                     )
 
-    return edges, stats
+    serial_to_mac: dict[str, str] = {}
+    for dev in inventory:
+        sn = (dev.get("serial_number") or "").strip()
+        sm = _norm_mac(str(dev.get("system_mac") or ""))
+        if sn and sm:
+            serial_to_mac[sn] = sm
+
+    merged = _merge_bidirectional_edges(edges, serial_to_mac)
+    stats["edges_found"] = len(merged)
+    stats["unidirectional_links"] = sum(1 for e in merged if not e.get("link_verified"))
+    stats["mismatched_links"] = sum(
+        1
+        for e in merged
+        if e.get("mismatches")
+        and any(m != "unidirectional_lldp" for m in e["mismatches"])
+    )
+    return merged, stats
 
 
 def _node_key_for_local(dev: dict[str, Any]) -> str:
@@ -700,6 +847,8 @@ def grpc_map_network_topology(
                 "devices_port_source_oper_up": 0,
                 "devices_port_source_ethernet_range": 0,
                 "devices_skipped_no_oper_up_ports": 0,
+                "unidirectional_links": 0,
+                "mismatched_links": 0,
                 "lldp_port_source": (lldp_port_source or "auto").strip().lower(),
                 "inventory_warnings": cred_miss,
                 "credential_error": True,

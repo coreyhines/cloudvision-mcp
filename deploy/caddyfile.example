@@ -22,6 +22,7 @@ cloudvision-mcp.example.com {
 	# }
 
 	reverse_proxy http://127.0.0.1:8000 {
+		header_up Host 127.0.0.1:8000
 		flush_interval -1
 	}
 }

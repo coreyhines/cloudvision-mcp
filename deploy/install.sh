@@ -3,19 +3,24 @@
 # Idempotent: safe to re-run (refresh quadlets, optional image rebuild, systemd reload).
 #
 #   sudo bash deploy/install.sh
-# From a clone:
-#   sudo CLOUDVISION_MCP_INSTALL_ROOT=/opt/containerdata/cloudvision-mcp bash deploy/install.sh
+# Non-interactive (recommended under sudo — no TTY prompts):
+#   sudo CLOUDVISION_MCP_INSTALL_ROOT=/opt/containerdata/cloudvision-mcp \
+#        CLOUDVISION_MCP_IMAGE_REPO=hub.example.com/cloudvision_mcp \
+#        bash deploy/install.sh
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=lib.sh
+source "${SCRIPT_DIR}/lib.sh"
 
 DEFAULT_REPO_URL="${CLOUDVISION_MCP_REPO_URL:-}"
 GIT_REF="${CLOUDVISION_MCP_GIT_REF:-main}"
 INSTALL_ROOT="${CLOUDVISION_MCP_INSTALL_ROOT:-/opt/containerdata/cloudvision-mcp}"
 IMAGE_REPO="${CLOUDVISION_MCP_IMAGE_REPO:-}"
-IMAGE_TAG="${CLOUDVISION_MCP_IMAGE_TAG:-latest}"
+EXPLICIT_IMAGE_TAG="${CLOUDVISION_MCP_IMAGE_TAG:-}"
+IMAGE_TAG="${EXPLICIT_IMAGE_TAG}"
 QUADLET_SUBDIR="${CLOUDVISION_MCP_QUADLET_SUBDIR:-cloudvision-mcp}"
 RUNTIME="${CLOUDVISION_MCP_RUNTIME:-podman}"
 SKIP_IMAGE="${CLOUDVISION_MCP_SKIP_IMAGE:-0}"
@@ -27,10 +32,13 @@ usage() {
   echo "  Builds the container image and pushes to CLOUDVISION_MCP_IMAGE_REPO:TAG." >&2
   echo "  Env: CLOUDVISION_MCP_INSTALL_ROOT (default /opt/containerdata/cloudvision-mcp)" >&2
   echo "       CLOUDVISION_MCP_IMAGE_REPO (required non-interactive; prompted on TTY)" >&2
-  echo "       CLOUDVISION_MCP_IMAGE_TAG (default latest)" >&2
+  echo "       CLOUDVISION_MCP_IMAGE_TAG (optional; auto-increment from registry when unset)" >&2
+  echo "       CLOUDVISION_MCP_PUSH_LATEST=1 (also tag/push :latest; default on)" >&2
   echo "       CLOUDVISION_MCP_SKIP_IMAGE=1 or --skip-image to skip build/push" >&2
   echo "       CLOUDVISION_MCP_QUADLET_SUBDIR (under /etc/containers/systemd/)" >&2
+  echo "  To change Basic Auth password: deploy/rotate-basic-auth.sh (no image rebuild)." >&2
   echo "  Run 'podman login <registry>' before install if the registry requires auth." >&2
+  echo "  Under sudo, prefer env vars for non-interactive install (see script header)." >&2
 }
 
 while [[ $# -gt 0 ]]; do
@@ -71,9 +79,11 @@ fi
 
 prompt_install_root() {
   local tty_device=/dev/tty
-  if [[ -t 0 ]] && [[ -e "${tty_device}" ]] && [[ -z "${CLOUDVISION_MCP_INSTALL_ROOT:-}" ]]; then
+  if is_interactive_shell && [[ -z "${CLOUDVISION_MCP_INSTALL_ROOT:-}" ]]; then
     read -r -p "Install root (env + Caddyfile) [/opt/containerdata/cloudvision-mcp]: " _root <"${tty_device}" || true
-    [[ -n "${_root}" ]] && INSTALL_ROOT="${_root}"
+    if [[ -n "${_root}" ]]; then
+      INSTALL_ROOT="${_root}"
+    fi
   fi
 }
 
@@ -132,10 +142,145 @@ normalize_image_repo() {
   IMAGE_REPO="${IMAGE_REPO%/}"
 }
 
+json_tags_from_skopeo() {
+  python3 -c 'import json, sys
+try:
+    data = json.load(sys.stdin)
+except json.JSONDecodeError:
+    sys.exit(1)
+for tag in data.get("Tags") or []:
+    print(tag)'
+}
+
+list_registry_tags() {
+  local repo=$1
+  local tags=""
+
+  if command -v skopeo >/dev/null 2>&1; then
+    tags="$(skopeo list-tags "docker://${repo}" 2>/dev/null | json_tags_from_skopeo || true)"
+  fi
+
+  if [[ -z "${tags}" ]]; then
+    tags="$(python3 - "${repo}" <<'PY' || true
+import base64
+import json
+import os
+import ssl
+import sys
+import urllib.error
+import urllib.request
+
+repo = sys.argv[1]
+registry, _, name = repo.partition("/")
+if not name:
+    sys.exit(1)
+
+def auth_header(registry_name):
+    paths = [
+        "/run/containers/0/auth.json",
+        os.path.expanduser("~/.config/containers/auth.json"),
+        os.path.expanduser("~/.docker/config.json"),
+    ]
+    for path in paths:
+        if not os.path.isfile(path):
+            continue
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        auths = data.get("auths", data)
+        if not isinstance(auths, dict):
+            continue
+        for key, value in auths.items():
+            if registry_name not in key:
+                continue
+            if not isinstance(value, dict):
+                continue
+            encoded = value.get("auth")
+            if encoded:
+                return f"Basic {encoded}"
+            username = value.get("username")
+            password = value.get("password")
+            if username is not None and password is not None:
+                token = base64.b64encode(f"{username}:{password}".encode()).decode()
+                return f"Basic {token}"
+    return None
+
+url = f"https://{registry}/v2/{name}/tags/list"
+request = urllib.request.Request(
+    url,
+    headers={"Accept": "application/json"},
+)
+header = auth_header(registry)
+if header:
+    request.add_header("Authorization", header)
+
+try:
+    with urllib.request.urlopen(request, context=ssl.create_default_context()) as response:
+        payload = json.load(response)
+except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+    sys.exit(1)
+
+for tag in payload.get("Tags") or []:
+    print(tag)
+PY
+)"
+  fi
+
+  if [[ -z "${tags}" ]]; then
+    return 1
+  fi
+  printf '%s\n' "${tags}"
+}
+
+next_version_tag() {
+  local tags=$1
+  local best_major=-1
+  local best_minor=-1
+  local tag major minor
+
+  while IFS= read -r tag; do
+    [[ -z "${tag}" ]] && continue
+    if [[ "${tag}" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+      major=$((10#${BASH_REMATCH[1]}))
+      minor=$((10#${BASH_REMATCH[2]}))
+      if (( major > best_major )) || { (( major == best_major )) && (( minor > best_minor )); }; then
+        best_major=${major}
+        best_minor=${minor}
+      fi
+    fi
+  done <<<"${tags}"
+
+  if (( best_major < 0 )); then
+    echo "1.0"
+  else
+    echo "${best_major}.$((best_minor + 1))"
+  fi
+}
+
+resolve_next_image_tag() {
+  local repo=$1
+  local tags next
+
+  echo "Querying registry tags for ${repo}..." >&2
+  tags="$(list_registry_tags "${repo}")" || {
+    echo "Could not list tags for ${repo}." >&2
+    echo "Run 'podman login ${repo%%/*}' or set CLOUDVISION_MCP_IMAGE_TAG explicitly." >&2
+    exit 1
+  }
+  next="$(next_version_tag "${tags}")"
+  echo "Auto-selected image tag: ${next}" >&2
+  echo "${next}"
+}
+
+read_env_image_tag() {
+  if [[ -f "${ENV_HOST_PATH}" ]]; then
+    grep -E '^CLOUDVISION_MCP_IMAGE_TAG=' "${ENV_HOST_PATH}" 2>/dev/null | tail -1 | cut -d= -f2- || true
+  fi
+}
+
 collect_image_settings() {
   local tty_device=/dev/tty
   local interactive=0
-  if [[ -t 0 ]] && [[ -e "${tty_device}" ]] && [[ -r "${tty_device}" ]]; then
+  if is_interactive_shell; then
     interactive=1
   fi
 
@@ -147,34 +292,60 @@ collect_image_settings() {
     elif [[ -n "${_default}" ]]; then
       IMAGE_REPO="${_default}"
     fi
-    if [[ -z "${CLOUDVISION_MCP_IMAGE_TAG:-}" ]]; then
-      read -r -p "Container image tag [latest]: " CLOUDVISION_MCP_IMAGE_TAG <"${tty_device}" || true
-    fi
   fi
 
   IMAGE_REPO="${IMAGE_REPO:-${CLOUDVISION_MCP_IMAGE_REPO:-}}"
-  IMAGE_TAG="${CLOUDVISION_MCP_IMAGE_TAG:-${IMAGE_TAG:-latest}}"
   normalize_image_repo
 
   if [[ "${SKIP_IMAGE}" -eq 0 && -z "${IMAGE_REPO}" ]]; then
     echo "Container registry/image is required (set CLOUDVISION_MCP_IMAGE_REPO or run interactively)." >&2
     exit 1
   fi
+
+  if [[ -z "${IMAGE_TAG}" && -n "${IMAGE_REPO}" && "${SKIP_IMAGE}" -eq 0 ]]; then
+    local suggested
+    suggested="$(resolve_next_image_tag "${IMAGE_REPO}")"
+    if [[ "${interactive}" -eq 1 ]]; then
+      read -r -p "Container image tag [${suggested}]: " _tag <"${tty_device}" || true
+      if [[ -n "${_tag}" ]]; then
+        IMAGE_TAG="${_tag}"
+      else
+        IMAGE_TAG="${suggested}"
+      fi
+    else
+      IMAGE_TAG="${suggested}"
+    fi
+  elif [[ -z "${IMAGE_TAG}" ]]; then
+    IMAGE_TAG="$(read_env_image_tag)"
+    IMAGE_TAG="${IMAGE_TAG:-latest}"
+  fi
 }
 
 build_and_push_image() {
-  local full="${IMAGE_REPO}:${IMAGE_TAG}"
-  echo "Building ${full} from ${SRC_DIR}..." >&2
-  "${RUNTIME}" build -f "${DEPLOY_DIR}/Containerfile" -t "${full}" "${SRC_DIR}"
-  echo "Pushing ${full}..." >&2
-  "${RUNTIME}" push "${full}"
-  echo "Image published: ${full}" >&2
+  local version_full="${IMAGE_REPO}:${IMAGE_TAG}"
+  local push_latest="${CLOUDVISION_MCP_PUSH_LATEST:-1}"
+
+  echo "Building ${version_full} from ${SRC_DIR}..." >&2
+  "${RUNTIME}" build -f "${DEPLOY_DIR}/Containerfile" -t "${version_full}" "${SRC_DIR}"
+  echo "Pushing ${version_full}..." >&2
+  "${RUNTIME}" push "${version_full}"
+
+  if [[ "${push_latest}" == "1" && "${IMAGE_TAG}" != "latest" ]]; then
+    "${RUNTIME}" tag "${version_full}" "${IMAGE_REPO}:latest"
+    echo "Pushing ${IMAGE_REPO}:latest..." >&2
+    "${RUNTIME}" push "${IMAGE_REPO}:latest"
+  fi
+
+  echo "Image published: ${version_full}" >&2
+  if [[ "${push_latest}" == "1" && "${IMAGE_TAG}" != "latest" ]]; then
+    echo "Also published: ${IMAGE_REPO}:latest" >&2
+  fi
 }
 
 collect_settings() {
   local tty_device=/dev/tty
   local interactive=0
-  if [[ -t 0 ]] && [[ -e "${tty_device}" ]] && [[ -r "${tty_device}" ]]; then
+  if is_interactive_shell; then
     interactive=1
   fi
 
@@ -208,8 +379,7 @@ collect_settings() {
         read -r -s -p "Basic auth password (input hidden): " _pw <"${tty_device}" || true
         echo >&2
         if [[ -n "${_pw}" ]]; then
-          CLOUDVISION_MCP_BASIC_AUTH_HASH="$("${RUNTIME}" run --rm docker.io/library/caddy:2-alpine \
-            caddy hash-password --plaintext "${_pw}")"
+          CLOUDVISION_MCP_BASIC_AUTH_HASH="$(hash_basic_auth_password "${_pw}")"
         fi
       fi
     fi
@@ -232,66 +402,6 @@ collect_settings() {
   CLOUDVISION_MCP_FORWARD_AUTH_URL=${CLOUDVISION_MCP_FORWARD_AUTH_URL:-}
 }
 
-write_caddyfile() {
-  local out=$1
-  local host=$2
-  local auth_mode=$3
-  local basic_user=$4
-  local basic_hash=$5
-  local forward_url=$6
-  {
-    printf '%s\n' '# Generated by deploy/install.sh — edit auth via environment + re-run install.'
-    printf '%s\n' '{'
-    printf '\tadmin off\n'
-    printf '%s\n' '}'
-    printf '\n'
-    printf '%s\n' "${host} {"
-    printf '\ttls /opt/certs/wild/fullchain.pem /opt/certs/wild/privkey.pem\n'
-    printf '\n'
-    printf '\tencode zstd gzip\n'
-    printf '\n'
-    case "${auth_mode}" in
-      basic)
-        if [[ -z "${basic_hash}" ]]; then
-          echo "basic auth selected but CLOUDVISION_MCP_BASIC_AUTH_HASH is empty" >&2
-          exit 1
-        fi
-        printf '\tbasicauth {\n'
-        printf '\t\t%s %s\n' "${basic_user}" "${basic_hash}"
-        printf '\t}\n'
-        printf '\n'
-        ;;
-      forward_auth)
-        if [[ -z "${forward_url}" ]]; then
-          echo "forward_auth selected but CLOUDVISION_MCP_FORWARD_AUTH_URL is empty" >&2
-          exit 1
-        fi
-        printf '\tforward_auth %s {\n' "${forward_url}"
-        printf '\t\turi /verify\n'
-        printf '\t\tcopy_headers Remote-User Remote-Email X-Forwarded-User\n'
-        printf '\t}\n'
-        printf '\n'
-        ;;
-      none)
-        echo "warning: CLOUDVISION_MCP_AUTH_MODE=none — MCP is TLS-only, no client auth." >&2
-        ;;
-      *)
-        echo "Invalid CLOUDVISION_MCP_AUTH_MODE: ${auth_mode}" >&2
-        exit 1
-        ;;
-    esac
-    printf '\treverse_proxy http://127.0.0.1:8000 {\n'
-    printf '\t\tflush_interval -1\n'
-    printf '\t}\n'
-    printf '%s\n' '}'
-    printf '\n'
-    printf '%s\n' ':80 {'
-    printf '\tredir https://%s{uri} permanent\n' "${host}"
-    printf '%s\n' '}'
-  } >"${out}"
-  chmod 644 "${out}"
-}
-
 write_pod_quadlet() {
   local out=$1
   local pod_name=$2
@@ -303,12 +413,20 @@ write_pod_quadlet() {
     printf '%s\n' ''
     printf '%s\n' '[Pod]'
     printf '%s\n' "PodName=${pod_name}"
-    [[ -n "${CLOUDVISION_MCP_NETWORK}" ]] && printf '%s\n' "Network=${CLOUDVISION_MCP_NETWORK}"
-    [[ -n "${CLOUDVISION_MCP_IP}" ]] && printf '%s\n' "IP=${CLOUDVISION_MCP_IP}"
-    [[ -n "${CLOUDVISION_MCP_IP6}" ]] && printf '%s\n' "IP6=${CLOUDVISION_MCP_IP6}"
+    if [[ -n "${CLOUDVISION_MCP_NETWORK}" ]]; then
+      printf '%s\n' "Network=${CLOUDVISION_MCP_NETWORK}"
+    fi
+    if [[ -n "${CLOUDVISION_MCP_IP}" ]]; then
+      printf '%s\n' "IP=${CLOUDVISION_MCP_IP}"
+    fi
+    if [[ -n "${CLOUDVISION_MCP_IP6}" ]]; then
+      printf '%s\n' "IP6=${CLOUDVISION_MCP_IP6}"
+    fi
     local dns
     for dns in ${CLOUDVISION_MCP_DNS}; do
-      [[ -n "${dns}" ]] && printf '%s\n' "DNS=${dns}"
+      if [[ -n "${dns}" ]]; then
+        printf '%s\n' "DNS=${dns}"
+      fi
     done
     printf '%s\n' ''
     printf '%s\n' '[Service]'
@@ -404,22 +522,16 @@ fi
 
 if [[ -f "${ENV_HOST_PATH}" ]]; then
   set -a
-  # shellcheck disable=SC1090
-  . "${ENV_HOST_PATH}"
+  load_environment_file "${ENV_HOST_PATH}"
   set +a
+fi
+
+if [[ -z "${EXPLICIT_IMAGE_TAG}" ]]; then
+  unset CLOUDVISION_MCP_IMAGE_TAG
 fi
 
 collect_image_settings
 collect_settings
-
-update_env_key() {
-  local file=$1 key=$2 value=$3
-  local tmp
-  tmp="$(mktemp)"
-  grep -v "^${key}=" "${file}" >"${tmp}" || true
-  printf '%s=%s\n' "${key}" "${value}" >>"${tmp}"
-  mv "${tmp}" "${file}"
-}
 
 write_caddyfile \
   "${CADDYFILE_HOST}" \
@@ -432,22 +544,29 @@ write_caddyfile \
 update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_PUBLIC_HOST" "${CLOUDVISION_MCP_PUBLIC_HOST}"
 update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_AUTH_MODE" "${CLOUDVISION_MCP_AUTH_MODE}"
 update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_BASIC_AUTH_USER" "${CLOUDVISION_MCP_BASIC_AUTH_USER}"
-[[ -n "${CLOUDVISION_MCP_BASIC_AUTH_HASH:-}" ]] && \
+if [[ -n "${CLOUDVISION_MCP_BASIC_AUTH_HASH:-}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_BASIC_AUTH_HASH" "${CLOUDVISION_MCP_BASIC_AUTH_HASH}"
-[[ -n "${CLOUDVISION_MCP_FORWARD_AUTH_URL:-}" ]] && \
+fi
+if [[ -n "${CLOUDVISION_MCP_FORWARD_AUTH_URL:-}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_FORWARD_AUTH_URL" "${CLOUDVISION_MCP_FORWARD_AUTH_URL}"
+fi
 update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_POD_NAME" "${CLOUDVISION_MCP_POD_NAME}"
 update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_TLS_CERTS" "${CLOUDVISION_MCP_TLS_CERTS}"
-[[ -n "${CLOUDVISION_MCP_NETWORK}" ]] && \
+if [[ -n "${CLOUDVISION_MCP_NETWORK}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_NETWORK" "${CLOUDVISION_MCP_NETWORK}"
-[[ -n "${CLOUDVISION_MCP_IP}" ]] && \
+fi
+if [[ -n "${CLOUDVISION_MCP_IP}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_IP" "${CLOUDVISION_MCP_IP}"
-[[ -n "${CLOUDVISION_MCP_IP6}" ]] && \
+fi
+if [[ -n "${CLOUDVISION_MCP_IP6}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_IP6" "${CLOUDVISION_MCP_IP6}"
-[[ -n "${CLOUDVISION_MCP_DNS}" ]] && \
+fi
+if [[ -n "${CLOUDVISION_MCP_DNS}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_DNS" "${CLOUDVISION_MCP_DNS}"
-[[ -n "${IMAGE_REPO}" ]] && \
+fi
+if [[ -n "${IMAGE_REPO}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_IMAGE_REPO" "${IMAGE_REPO}"
+fi
 update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_IMAGE_TAG" "${IMAGE_TAG}"
 chmod 600 "${ENV_HOST_PATH}"
 

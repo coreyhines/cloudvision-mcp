@@ -16,7 +16,7 @@ The installer **builds** the image from `deploy/Containerfile` and **pushes** it
 Prompts include:
 
 - **Container registry/image** (required, e.g. `hub.example.com/cloudvision_mcp`)
-- **Image tag** (default `latest`)
+- **Image tag** — auto-incremented from the registry when unset (e.g. `1.49` → `1.50`); also pushes `:latest`
 - Install root (default `/opt/containerdata/cloudvision-mcp`)
 - Public HTTPS hostname
 - Auth mode: `basic` (default), `forward_auth`, or `none`
@@ -29,7 +29,6 @@ Non-interactive example:
 ```bash
 sudo env \
   CLOUDVISION_MCP_IMAGE_REPO=hub.freeblizz.com/cloudvision_mcp \
-  CLOUDVISION_MCP_IMAGE_TAG=1.50 \
   CLOUDVISION_MCP_INSTALL_ROOT=/opt/containerdata/cloudvision-mcp \
   CLOUDVISION_MCP_PUBLIC_HOST=cloudvision-mcp.freeblizz.com \
   CLOUDVISION_MCP_AUTH_MODE=basic \
@@ -57,6 +56,8 @@ https://<CLOUDVISION_MCP_PUBLIC_HOST>/mcp
 
 With Basic Auth, configure the MCP client to send the same credentials (e.g. `Authorization: Basic …`).
 
+If authenticated requests return `Invalid Host header`, ensure `CLOUDVISION_MCP_PUBLIC_HOST` is set in `$INSTALL_ROOT/environment` (the installer writes this) and redeploy so the MCP app allows that hostname through DNS rebinding protection.
+
 ## Auth modes
 
 | Mode | Caddy behavior |
@@ -64,6 +65,24 @@ With Basic Auth, configure the MCP client to send the same credentials (e.g. `Au
 | `basic` | `basicauth` before reverse_proxy (recommended default) |
 | `forward_auth` | Delegates to OAuth2-proxy / Authelia at `CLOUDVISION_MCP_FORWARD_AUTH_URL` |
 | `none` | TLS only — not recommended for WAN |
+
+## Rotate Basic Auth password
+
+No container image rebuild is required. Caddy Basic Auth credentials live on the host in `$INSTALL_ROOT/environment` and `$INSTALL_ROOT/Caddyfile`.
+
+```bash
+sudo bash deploy/rotate-basic-auth.sh
+```
+
+Non-interactive (automation):
+
+```bash
+sudo CLOUDVISION_MCP_BASIC_AUTH_PASSWORD='new-secret' bash deploy/rotate-basic-auth.sh
+```
+
+The script updates the bcrypt hash, regenerates the Caddyfile, restarts `cloudvision-mcp-caddy.service` only, and prints the `CLOUDVISION_MCP_AUTH_HEADER` value for MCP clients (e.g. `scripts/cursor-remote-mcp.sh`).
+
+Advanced fallback: set `CLOUDVISION_MCP_BASIC_AUTH_HASH` in `environment` and re-run `deploy/install.sh --skip-image`.
 
 ## Quadlet units
 

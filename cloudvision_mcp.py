@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import os
 import re
 import sys
 
@@ -44,6 +45,7 @@ from cvp_mcp.grpc.routing import grpc_get_bgp_status, grpc_get_routes
 from cvp_mcp.grpc.utils import _is_lab_device, createConnection
 from cvp_mcp.rate_limit import rate_limited_tool
 from cvp_mcp.tool_access import tool_enabled
+from cvp_mcp.transport_security_config import build_transport_security
 
 CVP_TRANSPORT = "grpc"
 
@@ -112,9 +114,14 @@ _install_noise_filters()
 
 logging.info("Starting the FastMCP server...")
 
-# Initialize FastMCP server (host updated from CLI in main() for HTTP transport)
+# Initialize FastMCP server (bind host updated from CLI in main() for HTTP transport)
+_mcp_http_host = os.environ.get("CVP_MCP_HTTP_HOST", "127.0.0.1")
 mcp = FastMCP(
-    name="CVP MCP Server", host="127.0.0.1", stateless_http=True, log_level="WARNING"
+    name="CVP MCP Server",
+    host=_mcp_http_host,
+    stateless_http=True,
+    log_level="WARNING",
+    transport_security=build_transport_security(),
 )
 
 

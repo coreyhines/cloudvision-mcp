@@ -39,13 +39,31 @@ Trust depends on your certificate (wildcard SAN or public CA).
 
 Install with `CLOUDVISION_MCP_AUTH_MODE=basic`. Caddy validates credentials before proxying to `127.0.0.1:8000`.
 
-Generate a password hash without the full installer:
+### Rotate password (recommended)
+
+No image rebuild required:
+
+```bash
+sudo bash deploy/rotate-basic-auth.sh
+```
+
+Non-interactive:
+
+```bash
+sudo CLOUDVISION_MCP_BASIC_AUTH_PASSWORD='your-password' bash deploy/rotate-basic-auth.sh
+```
+
+Update MCP clients with the printed `CLOUDVISION_MCP_AUTH_HEADER` (see `scripts/cursor-remote-mcp.sh`).
+
+### Manual hash (advanced)
+
+Generate a password hash without the rotate script:
 
 ```bash
 podman run --rm docker.io/library/caddy:2-alpine caddy hash-password --plaintext 'your-password'
 ```
 
-Store the hash in `environment` as `CLOUDVISION_MCP_BASIC_AUTH_HASH` and re-run `deploy/install.sh` to refresh the Caddyfile.
+Store the hash in `environment` as `CLOUDVISION_MCP_BASIC_AUTH_HASH` and re-run `deploy/install.sh --skip-image` to refresh the Caddyfile.
 
 ## forward_auth (OAuth2-proxy / Authelia)
 
@@ -54,5 +72,5 @@ Set `CLOUDVISION_MCP_AUTH_MODE=forward_auth` and `CLOUDVISION_MCP_FORWARD_AUTH_U
 ## Operations
 
 - Rotate TLS: replace PEMs under the cert directory, then `systemctl restart cloudvision-mcp-caddy.service`
-- Change auth: update `environment` + re-run `deploy/install.sh`
+- Change Basic Auth password: `sudo bash deploy/rotate-basic-auth.sh` (or update `environment` + `deploy/install.sh --skip-image`)
 - Do not expose port 8000 outside the pod; only 443 (and 80 redirect) should face clients

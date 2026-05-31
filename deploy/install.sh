@@ -3,8 +3,10 @@
 # Idempotent: safe to re-run (refresh quadlets, optional image rebuild, systemd reload).
 #
 #   sudo bash deploy/install.sh
-# From a clone:
-#   sudo CLOUDVISION_MCP_INSTALL_ROOT=/opt/containerdata/cloudvision-mcp bash deploy/install.sh
+# Non-interactive (recommended under sudo — no TTY prompts):
+#   sudo CLOUDVISION_MCP_INSTALL_ROOT=/opt/containerdata/cloudvision-mcp \
+#        CLOUDVISION_MCP_IMAGE_REPO=hub.example.com/cloudvision_mcp \
+#        bash deploy/install.sh
 #
 set -euo pipefail
 
@@ -31,6 +33,7 @@ usage() {
   echo "       CLOUDVISION_MCP_SKIP_IMAGE=1 or --skip-image to skip build/push" >&2
   echo "       CLOUDVISION_MCP_QUADLET_SUBDIR (under /etc/containers/systemd/)" >&2
   echo "  Run 'podman login <registry>' before install if the registry requires auth." >&2
+  echo "  Under sudo, prefer env vars for non-interactive install (see script header)." >&2
 }
 
 while [[ $# -gt 0 ]]; do
@@ -69,11 +72,24 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
+is_interactive_shell() {
+  local tty_device=/dev/tty
+  if [[ -e "${tty_device}" && -r "${tty_device}" ]]; then
+    return 0
+  fi
+  if [[ -t 0 ]]; then
+    return 0
+  fi
+  return 1
+}
+
 prompt_install_root() {
   local tty_device=/dev/tty
-  if [[ -t 0 ]] && [[ -e "${tty_device}" ]] && [[ -z "${CLOUDVISION_MCP_INSTALL_ROOT:-}" ]]; then
+  if is_interactive_shell && [[ -z "${CLOUDVISION_MCP_INSTALL_ROOT:-}" ]]; then
     read -r -p "Install root (env + Caddyfile) [/opt/containerdata/cloudvision-mcp]: " _root <"${tty_device}" || true
-    [[ -n "${_root}" ]] && INSTALL_ROOT="${_root}"
+    if [[ -n "${_root}" ]]; then
+      INSTALL_ROOT="${_root}"
+    fi
   fi
 }
 
@@ -135,7 +151,7 @@ normalize_image_repo() {
 collect_image_settings() {
   local tty_device=/dev/tty
   local interactive=0
-  if [[ -t 0 ]] && [[ -e "${tty_device}" ]] && [[ -r "${tty_device}" ]]; then
+  if is_interactive_shell; then
     interactive=1
   fi
 
@@ -174,7 +190,7 @@ build_and_push_image() {
 collect_settings() {
   local tty_device=/dev/tty
   local interactive=0
-  if [[ -t 0 ]] && [[ -e "${tty_device}" ]] && [[ -r "${tty_device}" ]]; then
+  if is_interactive_shell; then
     interactive=1
   fi
 
@@ -303,12 +319,20 @@ write_pod_quadlet() {
     printf '%s\n' ''
     printf '%s\n' '[Pod]'
     printf '%s\n' "PodName=${pod_name}"
-    [[ -n "${CLOUDVISION_MCP_NETWORK}" ]] && printf '%s\n' "Network=${CLOUDVISION_MCP_NETWORK}"
-    [[ -n "${CLOUDVISION_MCP_IP}" ]] && printf '%s\n' "IP=${CLOUDVISION_MCP_IP}"
-    [[ -n "${CLOUDVISION_MCP_IP6}" ]] && printf '%s\n' "IP6=${CLOUDVISION_MCP_IP6}"
+    if [[ -n "${CLOUDVISION_MCP_NETWORK}" ]]; then
+      printf '%s\n' "Network=${CLOUDVISION_MCP_NETWORK}"
+    fi
+    if [[ -n "${CLOUDVISION_MCP_IP}" ]]; then
+      printf '%s\n' "IP=${CLOUDVISION_MCP_IP}"
+    fi
+    if [[ -n "${CLOUDVISION_MCP_IP6}" ]]; then
+      printf '%s\n' "IP6=${CLOUDVISION_MCP_IP6}"
+    fi
     local dns
     for dns in ${CLOUDVISION_MCP_DNS}; do
-      [[ -n "${dns}" ]] && printf '%s\n' "DNS=${dns}"
+      if [[ -n "${dns}" ]]; then
+        printf '%s\n' "DNS=${dns}"
+      fi
     done
     printf '%s\n' ''
     printf '%s\n' '[Service]'
@@ -432,22 +456,29 @@ write_caddyfile \
 update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_PUBLIC_HOST" "${CLOUDVISION_MCP_PUBLIC_HOST}"
 update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_AUTH_MODE" "${CLOUDVISION_MCP_AUTH_MODE}"
 update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_BASIC_AUTH_USER" "${CLOUDVISION_MCP_BASIC_AUTH_USER}"
-[[ -n "${CLOUDVISION_MCP_BASIC_AUTH_HASH:-}" ]] && \
+if [[ -n "${CLOUDVISION_MCP_BASIC_AUTH_HASH:-}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_BASIC_AUTH_HASH" "${CLOUDVISION_MCP_BASIC_AUTH_HASH}"
-[[ -n "${CLOUDVISION_MCP_FORWARD_AUTH_URL:-}" ]] && \
+fi
+if [[ -n "${CLOUDVISION_MCP_FORWARD_AUTH_URL:-}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_FORWARD_AUTH_URL" "${CLOUDVISION_MCP_FORWARD_AUTH_URL}"
+fi
 update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_POD_NAME" "${CLOUDVISION_MCP_POD_NAME}"
 update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_TLS_CERTS" "${CLOUDVISION_MCP_TLS_CERTS}"
-[[ -n "${CLOUDVISION_MCP_NETWORK}" ]] && \
+if [[ -n "${CLOUDVISION_MCP_NETWORK}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_NETWORK" "${CLOUDVISION_MCP_NETWORK}"
-[[ -n "${CLOUDVISION_MCP_IP}" ]] && \
+fi
+if [[ -n "${CLOUDVISION_MCP_IP}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_IP" "${CLOUDVISION_MCP_IP}"
-[[ -n "${CLOUDVISION_MCP_IP6}" ]] && \
+fi
+if [[ -n "${CLOUDVISION_MCP_IP6}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_IP6" "${CLOUDVISION_MCP_IP6}"
-[[ -n "${CLOUDVISION_MCP_DNS}" ]] && \
+fi
+if [[ -n "${CLOUDVISION_MCP_DNS}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_DNS" "${CLOUDVISION_MCP_DNS}"
-[[ -n "${IMAGE_REPO}" ]] && \
+fi
+if [[ -n "${IMAGE_REPO}" ]]; then
   update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_IMAGE_REPO" "${IMAGE_REPO}"
+fi
 update_env_key "${ENV_HOST_PATH}" "CLOUDVISION_MCP_IMAGE_TAG" "${IMAGE_TAG}"
 chmod 600 "${ENV_HOST_PATH}"
 

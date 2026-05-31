@@ -16,7 +16,7 @@ The installer **builds** the image from `deploy/Containerfile` and **pushes** it
 Prompts include:
 
 - **Container registry/image** (required, e.g. `hub.example.com/cloudvision_mcp`)
-- **Image tag** (default `latest`)
+- **Image tag** — auto-incremented from the registry when unset (e.g. `1.49` → `1.50`); also pushes `:latest`
 - Install root (default `/opt/containerdata/cloudvision-mcp`)
 - Public HTTPS hostname
 - Auth mode: `basic` (default), `forward_auth`, or `none`
@@ -29,7 +29,6 @@ Non-interactive example:
 ```bash
 sudo env \
   CLOUDVISION_MCP_IMAGE_REPO=hub.freeblizz.com/cloudvision_mcp \
-  CLOUDVISION_MCP_IMAGE_TAG=1.50 \
   CLOUDVISION_MCP_INSTALL_ROOT=/opt/containerdata/cloudvision-mcp \
   CLOUDVISION_MCP_PUBLIC_HOST=cloudvision-mcp.freeblizz.com \
   CLOUDVISION_MCP_AUTH_MODE=basic \

@@ -10,10 +10,14 @@ from unittest.mock import patch
 import grpc
 
 from cvp_mcp.grpc.lldp import (
+    _dedupe_lldp_items,
+    _grpc_get_lldp_neighbors_bulk,
+    _infer_ethernet_port_count,
     _is_expected_probe_not_found,
     _lldp_l2discovery_literal_local_paths,
     _lldp_paths_for_port_name,
     _lldp_paths_sysdb_first_no_serial,
+    _local_interface_from_path_hint,
     grpc_get_lldp_neighbors,
     parse_lldp_flat_to_items,
 )
@@ -221,7 +225,9 @@ def test_grpc_get_lldp_neighbors_not_found_logs_debug_not_warning(
 ) -> None:
     mock_get_path.side_effect = _FakeNotFound()
     with caplog.at_level(logging.DEBUG):
-        out = grpc_get_lldp_neighbors({"cvp": "x:443", "cvtoken": "t"}, "SN1")
+        out = grpc_get_lldp_neighbors(
+            {"cvp": "x:443", "cvtoken": "t"}, "SN1", port_name="Ethernet1"
+        )
     assert out["coverage"] == "none"
     assert "no_lldp_data_at_known_paths" in out["warnings"]
     assert any("probe miss" in rec.message for rec in caplog.records)
@@ -237,8 +243,111 @@ def test_grpc_get_lldp_neighbors_unexpected_error_still_warns(
 ) -> None:
     mock_get_path.side_effect = RuntimeError("boom")
     with caplog.at_level(logging.WARNING):
-        grpc_get_lldp_neighbors({"cvp": "x:443", "cvtoken": "t"}, "SN1")
+        grpc_get_lldp_neighbors(
+            {"cvp": "x:443", "cvtoken": "t"}, "SN1", port_name="Ethernet1"
+        )
     assert any(
         rec.levelno >= logging.WARNING and "lldp connector:" in rec.message
         for rec in caplog.records
     )
+
+
+def test_infer_ethernet_port_count_720xp24():
+    assert _infer_ethernet_port_count("CCS-720XP-24ZY4") == 24
+
+
+def test_local_interface_from_path_hint():
+    hint = (
+        "SN/Sysdb/l2discovery/lldp/status/local/1/portStatus/Ethernet19/remoteSystem/*"
+    )
+    assert _local_interface_from_path_hint(hint) == "Ethernet19"
+
+
+def test_dedupe_lldp_items_preserves_distinct_ports():
+    rows = [
+        {"local_interface": "Ethernet6", "neighbor_key": "1", "system_name": "pi5"},
+        {
+            "local_interface": "Ethernet19",
+            "neighbor_key": "1",
+            "system_name": "720xp-48",
+        },
+        {"local_interface": "Ethernet6", "neighbor_key": "1", "system_name": "pi5"},
+    ]
+    out = _dedupe_lldp_items(rows)
+    assert len(out) == 2
+    assert {r["local_interface"] for r in out} == {"Ethernet6", "Ethernet19"}
+
+
+@patch("cvp_mcp.grpc.lldp._grpc_get_lldp_neighbors_probe")
+@patch("cvp_mcp.grpc.lldp._fetch_lldp_snapshot")
+@patch("cvp_mcp.grpc.lldp._lldp_bulk_port_names")
+def test_bulk_lldp_sweep_merges_neighbors_from_multiple_ports(
+    mock_ports: object,
+    mock_fetch: object,
+    mock_probe: object,
+) -> None:
+    mock_fetch.return_value = ({}, "")
+    mock_ports.return_value = (["Ethernet6", "Ethernet19"], [])
+
+    def _probe_side_effect(
+        datadict: dict[str, object],
+        device_id: str,
+        port_name: str = "",
+        remote_neighbor_key: str = "",
+        *,
+        _shared_client: object = None,
+    ) -> dict[str, object]:
+        if port_name == "Ethernet6":
+            return {
+                "items": [
+                    {
+                        "neighbor_key": "1",
+                        "system_name": "pi5",
+                        "neighbor_source": "remoteLeaf",
+                    }
+                ],
+                "object": {"path_hint": "…/Ethernet6/remoteSystem/*"},
+            }
+        if port_name == "Ethernet19":
+            return {
+                "items": [
+                    {
+                        "neighbor_key": "1",
+                        "system_name": "720xp-48",
+                        "neighbor_source": "remoteSystem",
+                    }
+                ],
+                "object": {"path_hint": "…/Ethernet19/remoteSystem/*"},
+            }
+        return {"items": [], "object": {}}
+
+    mock_probe.side_effect = _probe_side_effect
+    out = _grpc_get_lldp_neighbors_bulk(
+        {"cvp": "x:443", "cvtoken": "t"},
+        "JPE19151499",
+        device_model="CCS-720XP-24ZY4",
+    )
+    assert out["coverage"] == "full"
+    assert len(out["items"]) == 2
+    by_port = {r["local_interface"]: r["system_name"] for r in out["items"]}
+    assert by_port["Ethernet6"] == "pi5"
+    assert by_port["Ethernet19"] == "720xp-48"
+    assert out["object"]["bulk_sweep"] is True
+    assert out["object"]["ports_probed"] == 2
+    assert out["object"]["ports_with_neighbors"] == 2
+
+
+@patch("cvp_mcp.grpc.lldp._grpc_get_lldp_neighbors_bulk")
+def test_grpc_get_lldp_neighbors_uses_bulk_when_no_port(mock_bulk: object) -> None:
+    mock_bulk.return_value = {"coverage": "full", "items": []}
+    grpc_get_lldp_neighbors({"cvp": "x:443", "cvtoken": "t"}, "SN1")
+    mock_bulk.assert_called_once()
+
+
+@patch("cvp_mcp.grpc.lldp._grpc_get_lldp_neighbors_probe")
+def test_grpc_get_lldp_neighbors_uses_probe_when_port_set(mock_probe: object) -> None:
+    mock_probe.return_value = {"coverage": "full", "items": []}
+    grpc_get_lldp_neighbors(
+        {"cvp": "x:443", "cvtoken": "t"}, "SN1", port_name="Ethernet6"
+    )
+    mock_probe.assert_called_once()

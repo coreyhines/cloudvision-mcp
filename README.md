@@ -288,7 +288,7 @@ The example client configs can work with Claude Desktop or a local Ollama LLM vi
       }
     }
   }
-  
+
 ```
 
 ### Streamable HTTP Server Configuration (Claude Desktop)
@@ -305,5 +305,5 @@ The example client configs can work with Claude Desktop or a local Ollama LLM vi
       }
     }
   }
-  
+
 ```

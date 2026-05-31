@@ -56,6 +56,8 @@ https://<CLOUDVISION_MCP_PUBLIC_HOST>/mcp
 
 With Basic Auth, configure the MCP client to send the same credentials (e.g. `Authorization: Basic …`).
 
+If authenticated requests return `Invalid Host header`, ensure `CLOUDVISION_MCP_PUBLIC_HOST` is set in `$INSTALL_ROOT/environment` (the installer writes this) and redeploy so the MCP app allows that hostname through DNS rebinding protection.
+
 ## Auth modes
 
 | Mode | Caddy behavior |

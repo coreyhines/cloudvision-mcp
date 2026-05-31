@@ -9,6 +9,7 @@ def test_build_transport_security_allows_public_host(monkeypatch):
     settings = build_transport_security()
     assert settings is not None
     assert settings.enable_dns_rebinding_protection is True
+    assert "cloudvision-mcp.freeblizz.com" in settings.allowed_hosts
     assert "cloudvision-mcp.freeblizz.com:*" in settings.allowed_hosts
     assert "127.0.0.1:*" in settings.allowed_hosts
 

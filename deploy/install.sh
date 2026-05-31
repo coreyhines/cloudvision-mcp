@@ -489,6 +489,7 @@ write_caddyfile() {
         ;;
     esac
     printf '\treverse_proxy http://127.0.0.1:8000 {\n'
+    printf '\t\theader_up Host 127.0.0.1:8000\n'
     printf '\t\tflush_interval -1\n'
     printf '\t}\n'
     printf '%s\n' '}'

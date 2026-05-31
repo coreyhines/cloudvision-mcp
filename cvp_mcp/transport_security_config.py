@@ -13,15 +13,20 @@ def _truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _normalize_allowed_host(entry: str) -> str:
+def _host_allowlist_entries(entry: str) -> list[str]:
+    """Return Host header values MCP should accept for this configured name."""
     entry = entry.strip()
     if not entry:
-        return ""
+        return []
+
     if entry.endswith(":*"):
-        return entry
+        base = entry[:-2]
+        return list(dict.fromkeys([base, entry]))
+
     if ":" in entry and not entry.startswith("["):
-        return entry
-    return f"{entry}:*"
+        return [entry]
+
+    return list(dict.fromkeys([entry, f"{entry}:*"]))
 
 
 def build_transport_security() -> TransportSecuritySettings | None:
@@ -43,13 +48,11 @@ def build_transport_security() -> TransportSecuritySettings | None:
 
     public = (os.environ.get("CLOUDVISION_MCP_PUBLIC_HOST") or "").strip()
     if public:
-        allowed.append(_normalize_allowed_host(public))
+        allowed.extend(_host_allowlist_entries(public))
 
     extra = (os.environ.get("CVP_MCP_ALLOWED_HOSTS") or "").strip()
     for entry in extra.split(","):
-        normalized = _normalize_allowed_host(entry)
-        if normalized:
-            allowed.append(normalized)
+        allowed.extend(_host_allowlist_entries(entry))
 
     if public or extra:
         deduped = list(dict.fromkeys(allowed))

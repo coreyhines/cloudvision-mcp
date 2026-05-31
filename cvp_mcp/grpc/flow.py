@@ -60,6 +60,16 @@ def conn_get_flow_data(datadict, device_id=None, flow_index=None):
     return all_flows
 
 
+def _safe_int(value, default: int = 0) -> int:
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        logging.debug("flow parse: non-numeric int value %r", value)
+        return default
+
+
 def _protocol_str(value) -> str:
     if value is None or value == "":
         return ""
@@ -88,12 +98,12 @@ def _clover_record(path_index: str, header: dict, stat: dict) -> FlowRecord:
         "flow_path_index": path_index,
         "src_ip": str(header.get("srcIP") or header.get("srcIp") or ""),
         "dst_ip": str(header.get("dstIP") or header.get("dstIp") or ""),
-        "src_port": int(header.get("srcPort") or header.get("src_port") or 0),
-        "dst_port": int(header.get("dstPort") or header.get("dst_port") or 0),
+        "src_port": _safe_int(header.get("srcPort") or header.get("src_port")),
+        "dst_port": _safe_int(header.get("dstPort") or header.get("dst_port")),
         "vrf_name": str(header.get("vrfName") or ""),
         "protocol": _protocol_str(proto),
-        "bytes_count": int(stat.get("bytes") or 0),
-        "packet_count": int(stat.get("packets") or 0),
+        "bytes_count": _safe_int(stat.get("bytes")),
+        "packet_count": _safe_int(stat.get("packets")),
         "device_id": str(n0.get("device") or ""),
         "ingress_interface": str(n0.get("ingressInterface") or ""),
         "egress_interface": str(n0.get("egressInterface") or ""),

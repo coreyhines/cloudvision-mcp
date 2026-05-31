@@ -13,6 +13,7 @@ from arista.event.v1 import services as es
 from arista.time import models as tm
 from google.protobuf.timestamp_pb2 import Timestamp
 
+from cvp_mcp.errors import sanitize_warning
 from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.utils import RPC_TIMEOUT, serialize_arista_protobuf
 
@@ -48,6 +49,7 @@ def _time_bounds(start_time: str | None, end_time: str | None) -> tm.TimeBounds 
     if not start_time and not end_time:
         return None
     bounds = tm.TimeBounds()
+    parsed_any = False
 
     def _parse_iso(s: str) -> Timestamp:
         ts = Timestamp()
@@ -57,13 +59,19 @@ def _time_bounds(start_time: str | None, end_time: str | None) -> tm.TimeBounds 
         ts.FromDatetime(dt)
         return ts
 
-    try:
-        if start_time:
+    if start_time:
+        try:
             bounds.start.CopyFrom(_parse_iso(start_time))
-        if end_time:
+            parsed_any = True
+        except Exception as e:
+            logging.warning("event start_time parse: %s", e)
+    if end_time:
+        try:
             bounds.end.CopyFrom(_parse_iso(end_time))
-    except Exception as e:
-        logging.warning("event time bounds parse: %s", e)
+            parsed_any = True
+        except Exception as e:
+            logging.warning("event end_time parse: %s", e)
+    if not parsed_any:
         return None
     return bounds
 
@@ -179,7 +187,7 @@ def grpc_get_cvp_events(
             data_source="resource_api:event.v1",
             coverage="none",
             items=[],
-            warnings=[str(e)],
+            warnings=[sanitize_warning("events_fetch_failed", log_exc=e)],
         )
 
     filtered = [e for e in raw_list if _event_matches_device(e, dev)]
@@ -245,7 +253,7 @@ def grpc_search_cvp_events(
             data_source="resource_api:event.v1+client_search",
             coverage="none",
             items=[],
-            warnings=[str(e)],
+            warnings=[sanitize_warning("events_fetch_failed", log_exc=e)],
         )
 
     tokens = [t for t in re.split(r"\s+", q) if t]

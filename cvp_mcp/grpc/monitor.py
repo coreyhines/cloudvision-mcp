@@ -3,7 +3,6 @@ import logging
 from arista.connectivitymonitor.v1 import models, services
 from google.protobuf import wrappers_pb2 as wrappers
 
-from .models import ProbeStats
 from .utils import RPC_TIMEOUT, convert_response_to_probe_stat
 
 
@@ -67,4 +66,4 @@ def grpc_one_probe_status(channel, serial_number="", host="", vrf="", sourceIntf
         return all_probes
     except Exception as e:
         logging.error(f"Error with probe: {e}")
-        return ProbeStats()
+        return []

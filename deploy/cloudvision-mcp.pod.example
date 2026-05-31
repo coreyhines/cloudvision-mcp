@@ -1,0 +1,22 @@
+# Podman quadlet: shared pod for CloudVision MCP + Caddy auth/TLS front.
+# Install to /etc/containers/systemd/cloudvision-mcp/cloudvision-mcp.pod
+# systemd unit: cloudvision-mcp-pod.service
+
+[Unit]
+Description=CloudVision MCP pod (shared network for Caddy + MCP)
+Wants=network-online.target
+After=network-online.target
+
+[Pod]
+PodName=cloudvision-mcp-pod
+# Optional custom network / static addresses:
+# Network=net-10
+# IP=10.0.10.18
+# IP6=2601:441:8400:b7e1::18
+# DNS=10.0.2.2
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

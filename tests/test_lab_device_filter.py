@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 # ---------------------------------------------------------------------------
 # _is_lab_device helper
 # ---------------------------------------------------------------------------
@@ -172,7 +170,6 @@ def test_lldp_allows_virtual_eos_when_flag_set(
     mock_channel: MagicMock,
     mock_inv_serial: MagicMock,
 ) -> None:
-    from cvp_mcp.grpc.lldp import grpc_get_lldp_neighbors as _grpc_fn
     from cloudvision_mcp import get_cvp_lldp_neighbors
 
     mock_env.return_value = {"cvp": "test.example:443", "cvtoken": "tok"}
@@ -240,6 +237,6 @@ def test_lldp_falls_through_when_inventory_lookup_fails(
 
     with patch("cloudvision_mcp.grpc_get_lldp_neighbors") as mock_lldp:
         mock_lldp.return_value = {"coverage": "full", "items": [], "warnings": []}
-        result = get_cvp_lldp_neighbors("UNKNOWN1")
+        get_cvp_lldp_neighbors("UNKNOWN1")
 
     mock_lldp.assert_called_once()

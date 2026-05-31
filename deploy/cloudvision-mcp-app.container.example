@@ -1,0 +1,31 @@
+# Podman quadlet: CloudVision MCP app (Streamable HTTP on 8000).
+# Install to /etc/containers/systemd/cloudvision-mcp/cloudvision-mcp-app.container
+
+[Unit]
+Description=CloudVision MCP (Podman quadlet, Streamable HTTP)
+After=network-online.target cloudvision-mcp-pod.service
+Wants=network-online.target
+Requires=cloudvision-mcp-pod.service
+
+[Container]
+Pod=cloudvision-mcp.pod
+Image=registry.example.com/cloudvision_mcp:latest
+ContainerName=cloudvision-mcp-app
+Environment=CLOUDVISION_MCP_INSTALL_ROOT=/opt/containerdata/cloudvision-mcp
+EnvironmentFile=/opt/containerdata/cloudvision-mcp/environment
+Volume=/opt/containerdata/cloudvision-mcp:/opt/containerdata/cloudvision-mcp:ro,Z
+Volume=/opt/containerdata/certs/wild:/opt/certs/wild:ro,Z
+HealthCmd=["sh", "-c", "curl -sS --max-time 8 http://127.0.0.1:8000/ -o /dev/null"]
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=60s
+
+[Service]
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+TimeoutStopSec=40
+
+[Install]
+WantedBy=multi-user.target

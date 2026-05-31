@@ -62,7 +62,7 @@ def _run_async_in_sync_context(coro: Coroutine[Any, Any, _T]) -> _T:
     except RuntimeError:
         return asyncio.run(coro)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+        return pool.submit(asyncio.run, coro).result(timeout=RPC_TIMEOUT * 4)
 
 
 def _cvp_https_base(cvp: str) -> str:
@@ -339,7 +339,12 @@ def grpc_get_device_config(
         if isinstance(uri, dict):
             uri = uri.get("value", "")
         if uri and token:
-            text, err = fetch_uri_with_bearer(str(uri), token, cafile=cafile)
+            text, err = fetch_uri_with_bearer(
+                str(uri),
+                token,
+                cafile=cafile,
+                cvp_endpoint=datadict.get("cvp"),
+            )
             running_config_text = text
             running_config_source = "resource_uri"
             if err:

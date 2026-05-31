@@ -10,10 +10,21 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from cvp_mcp.grpc.uri_allowlist import is_uri_host_allowed
+
 try:
     import aiohttp
 except Exception:  # pragma: no cover - optional at runtime
     aiohttp = None
+
+_DEFAULT_MAX_CONCURRENT = 10
+
+
+def _check_uri_allowed(uri: str, cvp_endpoint: str | None) -> str | None:
+    if not is_uri_host_allowed(uri, cvp_endpoint):
+        logging.error("URI fetch blocked (host not allowlisted): %s", uri)
+        return "uri_host_not_allowed"
+    return None
 
 
 def fetch_uri_with_bearer(
@@ -21,6 +32,7 @@ def fetch_uri_with_bearer(
     bearer_token: str,
     *,
     cafile: str | None = None,
+    cvp_endpoint: str | None = None,
     max_bytes: int = 2_000_000,
     timeout_sec: float = 60.0,
 ) -> tuple[str | None, str | None]:
@@ -31,6 +43,10 @@ def fetch_uri_with_bearer(
         return None, "empty_uri"
     if not bearer_token:
         return None, "missing_token"
+
+    blocked = _check_uri_allowed(uri, cvp_endpoint)
+    if blocked:
+        return None, blocked
 
     req = urllib.request.Request(
         uri.strip(),
@@ -46,7 +62,7 @@ def fetch_uri_with_bearer(
         return None, f"http_error:{e.code}"
     except Exception as e:
         logging.error("URI fetch error: %s %s", uri, e)
-        return None, str(e)
+        return None, "uri_fetch_failed"
 
     if len(data) > max_bytes:
         return (
@@ -61,6 +77,7 @@ def get_json_with_bearer(
     bearer_token: str,
     *,
     cafile: str | None = None,
+    cvp_endpoint: str | None = None,
     max_bytes: int = 5_000_000,
     timeout_sec: float = 60.0,
 ) -> tuple[dict | list | None, str | None]:
@@ -69,6 +86,7 @@ def get_json_with_bearer(
         uri,
         bearer_token,
         cafile=cafile,
+        cvp_endpoint=cvp_endpoint,
         max_bytes=max_bytes,
         timeout_sec=timeout_sec,
     )
@@ -95,8 +113,7 @@ def get_json_with_bearer(
             except Exception:
                 continue
         else:
-            preview = text[:200].replace("\n", "\\n")
-            return None, f"invalid_json_response:{preview}"
+            return None, "invalid_json_response"
     if not isinstance(obj, (dict, list)):
         return None, "unexpected_json_type"
     return obj, None
@@ -108,6 +125,7 @@ def post_json_with_bearer(
     bearer_token: str,
     *,
     cafile: str | None = None,
+    cvp_endpoint: str | None = None,
     max_bytes: int = 2_000_000,
     timeout_sec: float = 60.0,
 ) -> tuple[dict | list | None, str | None]:
@@ -116,6 +134,10 @@ def post_json_with_bearer(
         return None, "empty_uri"
     if not bearer_token:
         return None, "missing_token"
+
+    blocked = _check_uri_allowed(uri, cvp_endpoint)
+    if blocked:
+        return None, blocked
 
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -133,19 +155,11 @@ def post_json_with_bearer(
         with urllib.request.urlopen(req, context=ctx, timeout=timeout_sec) as resp:
             raw = resp.read(max_bytes + 1)
     except urllib.error.HTTPError as e:
-        body = ""
-        try:
-            body = e.read().decode("utf-8", errors="replace")
-        except Exception:
-            body = ""
-        preview = body[:200].replace("\n", "\\n")
         logging.error("POST HTTP error: %s %s", e.code, uri)
-        if preview:
-            return None, f"http_error:{e.code}:{preview}"
         return None, f"http_error:{e.code}"
     except Exception as e:
         logging.error("POST error: %s %s", uri, e)
-        return None, str(e)
+        return None, "uri_post_failed"
 
     if len(raw) > max_bytes:
         raw = raw[:max_bytes]
@@ -164,6 +178,7 @@ def post_raw_with_bearer(
     bearer_token: str,
     *,
     cafile: str | None = None,
+    cvp_endpoint: str | None = None,
     content_type: str = "application/json",
     max_bytes: int = 2_000_000,
     timeout_sec: float = 60.0,
@@ -173,6 +188,10 @@ def post_raw_with_bearer(
         return None, "empty_uri"
     if not bearer_token:
         return None, "missing_token"
+
+    blocked = _check_uri_allowed(uri, cvp_endpoint)
+    if blocked:
+        return None, blocked
 
     req = urllib.request.Request(
         uri.strip(),
@@ -189,17 +208,11 @@ def post_raw_with_bearer(
         with urllib.request.urlopen(req, context=ctx, timeout=timeout_sec) as resp:
             raw = resp.read(max_bytes + 1)
     except urllib.error.HTTPError as e:
-        msg = ""
-        try:
-            msg = e.read().decode("utf-8", errors="replace")
-        except Exception:
-            msg = ""
-        preview = msg[:200].replace("\n", "\\n")
-        if preview:
-            return None, f"http_error:{e.code}:{preview}"
+        logging.error("POST HTTP error: %s %s", e.code, uri)
         return None, f"http_error:{e.code}"
     except Exception as e:
-        return None, str(e)
+        logging.error("POST raw error: %s %s", uri, e)
+        return None, "uri_post_failed"
 
     if len(raw) > max_bytes:
         raw = raw[:max_bytes]
@@ -212,8 +225,10 @@ async def post_json_many_with_bearer_async(
     bearer_token: str,
     *,
     cafile: str | None = None,
+    cvp_endpoint: str | None = None,
     max_bytes: int = 2_000_000,
     timeout_sec: float = 60.0,
+    max_concurrent: int = _DEFAULT_MAX_CONCURRENT,
 ) -> tuple[list[dict | list | None], str | None]:
     """POST many JSON payloads concurrently using aiohttp."""
     if not uri or not uri.strip():
@@ -222,6 +237,10 @@ async def post_json_many_with_bearer_async(
         return [], "missing_token"
     if aiohttp is None:
         return [], "aiohttp_not_installed"
+
+    blocked = _check_uri_allowed(uri, cvp_endpoint)
+    if blocked:
+        return [], blocked
 
     ssl_ctx = ssl.create_default_context(cafile=cafile if cafile else None)
     timeout = aiohttp.ClientTimeout(total=timeout_sec)
@@ -232,23 +251,25 @@ async def post_json_many_with_bearer_async(
     }
     results: list[dict | list | None] = [None] * len(payloads)
     errors: list[str] = []
+    sem = asyncio.Semaphore(max(1, max_concurrent))
 
     async def _one(session: aiohttp.ClientSession, idx: int, payload: Any):
-        try:
-            async with session.post(uri.strip(), json=payload, ssl=ssl_ctx) as resp:
-                if resp.status >= 400:
-                    body = (await resp.text())[:200].replace("\n", "\\n")
-                    errors.append(f"http_error:{resp.status}:{body}")
+        async with sem:
+            try:
+                async with session.post(uri.strip(), json=payload, ssl=ssl_ctx) as resp:
+                    if resp.status >= 400:
+                        errors.append(f"http_error:{resp.status}")
+                        return idx, None
+                    text = await resp.text()
+                    if len(text.encode("utf-8", errors="ignore")) > max_bytes:
+                        text = text[:max_bytes]
+                    obj = json.loads(text)
+                    if isinstance(obj, (dict, list)):
+                        return idx, obj
                     return idx, None
-                text = await resp.text()
-                if len(text.encode("utf-8", errors="ignore")) > max_bytes:
-                    text = text[:max_bytes]
-                obj = json.loads(text)
-                if isinstance(obj, (dict, list)):
-                    return idx, obj
+            except Exception as e:
+                logging.debug("POST async item %s failed: %s", idx, e)
                 return idx, None
-        except Exception:
-            return idx, None
 
     try:
         async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
@@ -261,4 +282,4 @@ async def post_json_many_with_bearer_async(
             return results, None
     except Exception as e:
         logging.error("POST async error: %s %s", uri, e)
-        return [], str(e)
+        return [], "uri_post_failed"

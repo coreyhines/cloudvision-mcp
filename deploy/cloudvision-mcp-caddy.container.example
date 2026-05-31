@@ -1,0 +1,30 @@
+# Podman quadlet: Caddy TLS + auth proxy (same pod as MCP app).
+# Install to /etc/containers/systemd/cloudvision-mcp/cloudvision-mcp-caddy.container
+
+[Unit]
+Description=TLS and auth front for CloudVision MCP (Caddy)
+Documentation=https://caddyserver.com/docs/caddyfile
+After=network-online.target cloudvision-mcp-pod.service cloudvision-mcp-app.service
+Wants=network-online.target
+Requires=cloudvision-mcp-pod.service
+Requires=cloudvision-mcp-app.service
+
+[Container]
+Pod=cloudvision-mcp.pod
+Image=docker.io/library/caddy:2-alpine
+ContainerName=cloudvision-mcp-caddy
+Volume=/opt/containerdata/certs/wild:/opt/certs/wild:ro,Z
+Volume=/opt/containerdata/cloudvision-mcp/Caddyfile:/etc/caddy/Caddyfile:ro,Z
+HealthCmd=["sh", "-c", "curl -fsS --max-time 10 http://127.0.0.1:80/ -o /dev/null"]
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=30s
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

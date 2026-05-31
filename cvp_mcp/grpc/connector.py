@@ -49,7 +49,9 @@ def get_device_path(client, device_id: str, pathElts: list):
     return get(client, device_id, pathElts, dtype="device")
 
 
-def getBugInfo(client, bugId, mem=dict()):
+def getBugInfo(client, bugId, mem=None):
+    if mem is None:
+        mem = {}
     if bugId in mem:
         return mem[bugId]
     pathElts = ["BugAlerts", "bugs", bugId]

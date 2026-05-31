@@ -9,10 +9,7 @@ GRPCClient per device and reuses it for all probes.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from unittest.mock import MagicMock, call, patch
-
-import pytest
-
+from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -50,7 +47,7 @@ def test_lldp_neighbors_uses_shared_client_not_new_connection():
             "cvp_mcp.grpc.lldp._get_path_with_client", return_value=fake_snap
         ) as mock_gwc,
     ):
-        result = grpc_get_lldp_neighbors(
+        grpc_get_lldp_neighbors(
             _DATADICT,
             "SERIAL1",
             port_name="Ethernet3",
@@ -154,9 +151,7 @@ def test_topology_scan_creates_one_client_per_device(
     mock_client_cm.return_value.__enter__ = MagicMock(return_value=inner_client)
     mock_client_cm.return_value.__exit__ = MagicMock(return_value=False)
 
-    _edges, stats = scan_lldp_topology_edges(
-        _DATADICT, lldp_port_source="auto"
-    )
+    _edges, stats = scan_lldp_topology_edges(_DATADICT, lldp_port_source="auto")
 
     # 3 devices → 3 client context managers (NOT 2 ports × 3 = 6)
     assert mock_client_cm.call_count == 3
@@ -236,9 +231,7 @@ def test_device_client_error_increments_stat_and_continues(
     import logging
 
     with patch.object(logging, "warning") as mock_warn:
-        _edges, stats = scan_lldp_topology_edges(
-            _DATADICT, lldp_port_source="auto"
-        )
+        _edges, stats = scan_lldp_topology_edges(_DATADICT, lldp_port_source="auto")
 
     # First device errored, second succeeded
     assert stats.get("devices_scan_errors", 0) == 1

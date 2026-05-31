@@ -31,5 +31,5 @@ CVPTOKEN=
 # CLOUDVISION_MCP_PUBLIC_HOST=cloudvision-mcp.example.com
 # CLOUDVISION_MCP_AUTH_MODE=basic
 # CLOUDVISION_MCP_BASIC_AUTH_USER=mcp
-# CLOUDVISION_MCP_BASIC_AUTH_HASH=$2a$14$...
+# CLOUDVISION_MCP_BASIC_AUTH_HASH=$2a$14$...   # bcrypt; do not shell-source this file (use install.sh)
 # CLOUDVISION_MCP_FORWARD_AUTH_URL=http://127.0.0.1:4180

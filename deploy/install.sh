@@ -285,6 +285,35 @@ read_env_image_tag() {
   fi
 }
 
+parse_env_value() {
+  local value=$1
+  if [[ "${value}" =~ ^\'(.*)\'$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  elif [[ "${value}" =~ ^\"(.*)\"$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  else
+    printf '%s' "${value}"
+  fi
+}
+
+load_environment_file() {
+  local file=$1
+  local line key raw_value value
+
+  [[ -f "${file}" ]] || return 0
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    [[ "${line}" =~ ^[[:space:]]*# ]] && continue
+    [[ "${line}" =~ ^[[:space:]]*$ ]] && continue
+    [[ "${line}" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+    key="${BASH_REMATCH[1]}"
+    raw_value="${BASH_REMATCH[2]}"
+    value="$(parse_env_value "${raw_value}")"
+    printf -v "${key}" '%s' "${value}"
+    export "${key?}"
+  done <"${file}"
+}
+
 collect_image_settings() {
   local tty_device=/dev/tty
   local interactive=0
@@ -591,8 +620,7 @@ fi
 
 if [[ -f "${ENV_HOST_PATH}" ]]; then
   set -a
-  # shellcheck disable=SC1090
-  . "${ENV_HOST_PATH}"
+  load_environment_file "${ENV_HOST_PATH}"
   set +a
 fi
 

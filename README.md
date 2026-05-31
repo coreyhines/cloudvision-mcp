@@ -2,6 +2,77 @@
 
 This MCP server can be used to query and interact with Arista CloudVision.
 
+## Security and deployment
+
+### Threat model
+
+This MCP server holds **full CloudVision service-account credentials** (`CVP`, `CVPTOKEN`) in its process environment. Any client that can invoke MCP tools receives the same access as that token (inventory, configs, routes, BGP, topology, etc.).
+
+| Transport | Default bind | Recommended use |
+| --- | --- | --- |
+| **stdio** (default) | N/A | Local desktop agents (Claude Desktop, Cursor) on a trusted host |
+| **streamable HTTP** | `127.0.0.1:8000` | Same host only, or behind VPN / authenticated reverse proxy |
+
+**Do not** expose streamable HTTP on `0.0.0.0` to untrusted networks without authentication in front of it.
+
+### HTTP hardening flags
+
+| Flag | Default | Notes |
+| --- | --- | --- |
+| `-t` / `--transport` | `stdio` | Use `http` only when a remote client needs streamable HTTP |
+| `--host` | `127.0.0.1` | Use `0.0.0.0` only inside a container on a trusted network, still behind auth |
+| `-p` / `--port` | `8000` | Streamable HTTP port |
+
+Example (local HTTP only):
+
+```
+uv run --env-file cvp-mcp.env cloudvision_mcp.py --transport http --host 127.0.0.1
+```
+
+### Authenticated reverse proxy (recommended for remote HTTP)
+
+Place OAuth2, mTLS, or VPN in front of the MCP HTTP endpoint. The MCP server does not implement client authentication.
+
+Typical patterns:
+
+- **VPN / private network** — publish Podman/Kubernetes service on an internal VLAN only
+- **mTLS** — terminate client certificates at nginx/Envoy/Caddy before proxying to `127.0.0.1:8000`
+- **OAuth2 proxy** — protect `/mcp` with an identity provider; agents connect through the proxy URL
+
+### Per-tool capability flags
+
+Disable sensitive tools via comma-separated env var (server-side):
+
+```
+CVP_MCP_DISABLED_TOOLS=get_cvp_device_config,get_cvp_routes,get_cvp_bgp_status
+```
+
+Disabled tools return `{"error": "tool_disabled", "tool": "<name>"}`.
+
+### URI fetch allowlist
+
+Config body fetches (`fetch_uri_with_bearer`) only allow HTTPS/HTTP URIs whose host matches the configured `CVP` endpoint or known Arista CloudVision domains (`*.arista.io`, `*.cloudvisionportal.com`). Other hosts are rejected to limit SSRF with the bearer token.
+
+### Container notes
+
+The Dockerfile runs as non-root user `cvpmcp` and starts HTTP on `0.0.0.0` **inside the container** so port mapping works. Treat published ports like any other sensitive service: internal networks + reverse proxy auth for WAN access.
+
+```
+podman run -d --name cvp-mcp -p 127.0.0.1:8000:8000 --env-file cvp-mcp.env cloudvision-mcp:latest
+```
+
+Binding the host side to `127.0.0.1` prevents LAN-wide exposure when using `-p`.
+
+### Podman quadlet install (production)
+
+For hosts using systemd + Podman quadlets (Caddy TLS + Basic Auth front), see [`deploy/README.md`](deploy/README.md):
+
+```bash
+sudo bash deploy/install.sh
+```
+
+Quadlets install to `/etc/containers/systemd/cloudvision-mcp/`. Default data root is `/opt/containerdata/cloudvision-mcp` (prompted on install).
+
 ## Usage
 
 To run, you can the server via `uv`. Make sure you load your environment variables for `CVP` and `CVPTOKEN` prior to running.
@@ -27,12 +98,13 @@ Populate an env-file, sample below.
 ```
 **Note** The Cert file is only necessary if you are connecting to an on-prem CVP instance with self-signed certs
 
-Run
+Run (HTTP on localhost only — see Security section for remote access):
+
 ```
-  podman run -d --name cvp-mcp -p 8000:8000 --env-file cvp-mcp.env cloudvision-mcp:latest
+  podman run -d --name cvp-mcp -p 127.0.0.1:8000:8000 --env-file cvp-mcp.env cloudvision-mcp:latest
 ```
 
-The server will be running by default with Streamable HTTP on port 8000
+The container serves streamable HTTP on port 8000 (bound inside the container; map only on trusted hosts).
 
 ### Remote MCP clients and other agents
 
@@ -175,8 +247,9 @@ Example `topology.edges[]` row:
 The server can be configured with the following flags
 | Flag | Description |
 | --- | --- |
-| -t | MCP Transport {"http", "stdio"} (default=http) |
+| -t | MCP Transport {"http", "stdio"} (default=stdio) |
 | -p | MCP Port for Streamable HTTP (default=8000) |
+| --host | Bind address for HTTP (default=127.0.0.1) |
 | -c | CVP Connection protocol {"grcp", "http"} (default=grpc) |
 | -d | Enable debug logging |
 

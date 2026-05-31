@@ -428,7 +428,8 @@ def scan_lldp_topology_edges(
                             serial,
                             dev.get("hostname") or "",
                             len(port_iter),
-                            ", ".join(port_iter[:12]) + ("…" if len(port_iter) > 12 else ""),
+                            ", ".join(port_iter[:12])
+                            + ("…" if len(port_iter) > 12 else ""),
                         )
                     else:
                         if mode == "oper_up_only":
@@ -465,7 +466,12 @@ def scan_lldp_topology_edges(
                         )
                         continue
                     _append_rows_from_lldp_response(
-                        dev, port_name, out, edges=edges, seen_remote=seen_remote, stats=stats
+                        dev,
+                        port_name,
+                        out,
+                        edges=edges,
+                        seen_remote=seen_remote,
+                        stats=stats,
                     )
                     # Additional ``remoteSystem/<n>`` indices for ports with LLDP data.
                     if isinstance(out, dict) and out.get("items"):

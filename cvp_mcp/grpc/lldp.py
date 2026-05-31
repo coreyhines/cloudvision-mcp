@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Generator
+from typing import Any
 
 import grpc
 from cloudvision.Connector.codec import Wildcard

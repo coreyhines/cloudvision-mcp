@@ -1,0 +1,31 @@
+# CloudVision MCP — Caddy terminates TLS and enforces client auth before Streamable HTTP.
+# FastMCP listens at http://127.0.0.1:8000/mcp inside the same pod.
+#
+# Install copies a rendered Caddyfile to $CLOUDVISION_MCP_INSTALL_ROOT/Caddyfile.
+# PEM paths must exist on the host (default mount: /opt/containerdata/certs/wild).
+#
+# DNS: point CLOUDVISION_MCP_PUBLIC_HOST (A or AAAA) at this pod's IP.
+# TLS: manual PEMs only in this template (wildcard SAN must cover the public hostname).
+
+{
+	admin off
+}
+
+cloudvision-mcp.example.com {
+	tls /opt/certs/wild/fullchain.pem /opt/certs/wild/privkey.pem
+
+	encode zstd gzip
+
+	# Auth proxy: replace this block via install.sh (basicauth or forward_auth).
+	# basicauth {
+	# 	mcp $2a$14$REPLACE_ME
+	# }
+
+	reverse_proxy http://127.0.0.1:8000 {
+		flush_interval -1
+	}
+}
+
+:80 {
+	redir https://cloudvision-mcp.example.com{uri} permanent
+}

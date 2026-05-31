@@ -1,3 +1,4 @@
+# Build context: repository root (parent of deploy/).
 FROM docker.io/python:3.13
 
 RUN pip3 install uv && useradd -m -u 10001 cvpmcp
@@ -10,6 +11,4 @@ RUN uv sync && chown -R cvpmcp:cvpmcp /workspace
 
 USER cvpmcp
 
-# HTTP inside the container; publish ports only on trusted networks and place an
-# authenticated reverse proxy in front for remote/WAN access (see README Security).
 ENTRYPOINT [ "uv", "run", "cloudvision_mcp.py", "--transport", "http", "--host", "0.0.0.0" ]

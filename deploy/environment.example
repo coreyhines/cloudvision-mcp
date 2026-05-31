@@ -1,0 +1,35 @@
+# Copy to $CLOUDVISION_MCP_INSTALL_ROOT/environment (default /opt/containerdata/cloudvision-mcp/environment).
+# chmod 600. Quadlet sets CLOUDVISION_MCP_INSTALL_ROOT and EnvironmentFile to this path.
+#
+# With TLS + auth (Caddy), MCP clients use (default hostname in caddyfile template):
+#   https://cloudvision-mcp.example.com/mcp
+# Streamable HTTP clients must send the same Basic Auth credentials configured at install time.
+
+CLOUDVISION_MCP_INSTALL_ROOT=/opt/containerdata/cloudvision-mcp
+
+CVP=www.cv-staging.corp.arista.io
+CVPTOKEN=
+# On-prem self-signed CVP: place cert.pem under INSTALL_ROOT and set:
+# CERT=cert.pem
+
+# Optional: disable sensitive tools (comma-separated MCP tool names)
+# CVP_MCP_DISABLED_TOOLS=get_cvp_device_config,get_cvp_routes,get_cvp_bgp_status
+
+# --- Quadlet / network (optional; install.sh prompts when stdin is a TTY) ---
+# CLOUDVISION_MCP_POD_NAME=cloudvision-mcp-pod
+# CLOUDVISION_MCP_CONTAINER_NAME=cloudvision-mcp-app
+# CLOUDVISION_MCP_CADDY_CONTAINER_NAME=cloudvision-mcp-caddy
+# CLOUDVISION_MCP_NETWORK=net-10
+# CLOUDVISION_MCP_IP=10.0.10.18
+# CLOUDVISION_MCP_IP6=2601:441:8400:b7e1::18
+# CLOUDVISION_MCP_DNS=10.0.2.2
+# CLOUDVISION_MCP_TLS_CERTS=/opt/containerdata/certs/wild
+
+# --- Container image (install builds and pushes to this registry) ---
+# CLOUDVISION_MCP_IMAGE_REPO=hub.example.com/cloudvision_mcp
+# CLOUDVISION_MCP_IMAGE_TAG=latest
+# CLOUDVISION_MCP_PUBLIC_HOST=cloudvision-mcp.example.com
+# CLOUDVISION_MCP_AUTH_MODE=basic
+# CLOUDVISION_MCP_BASIC_AUTH_USER=mcp
+# CLOUDVISION_MCP_BASIC_AUTH_HASH=$2a$14$...
+# CLOUDVISION_MCP_FORWARD_AUTH_URL=http://127.0.0.1:4180

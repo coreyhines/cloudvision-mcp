@@ -1,6 +1,7 @@
 import json
 import logging
 
+import grpc
 from arista.inventory.v1 import models, services
 from google.protobuf import wrappers_pb2 as wrappers
 
@@ -84,23 +85,25 @@ def grpc_all_inventory(channel, *, exclude_access_points: bool = True):
     # return(json.dumps(all_devices))
 
 
-def grpc_one_inventory_serial(channel, device_id):
+def grpc_one_inventory_serial(channel, device_id) -> SwitchInfo | None:
     """
-    Function to get details of one device from CloudVision
+    Function to get details of one device from CloudVision.
+
+    Returns ``None`` when the device is not found. Raises on transport or
+    conversion failures so callers can distinguish errors from missing devices.
     """
     logging.info("Get one device from CVP by serial number")
-    device = ""
     stub = services.DeviceServiceStub(channel)
-    try:
-        req = services.DeviceRequest(
-            key={"device_id": wrappers.StringValue(value=device_id)}
-        )
-    except Exception as e:
-        logging.error(e)
+    req = services.DeviceRequest(
+        key={"device_id": wrappers.StringValue(value=device_id)}
+    )
     try:
         device = stub.GetOne(req)
-        converted_device = convert_response_to_switch(device)
-        logging.debug(json.dumps(converted_device))
-        return converted_device
-    except Exception:
-        return SwitchInfo()
+    except grpc.RpcError as e:
+        if e.code() == grpc.StatusCode.NOT_FOUND:
+            return None
+        logging.error("GetOne inventory %s: %s", device_id, e)
+        raise
+    converted_device = convert_response_to_switch(device)
+    logging.debug(json.dumps(converted_device))
+    return converted_device

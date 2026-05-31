@@ -118,7 +118,10 @@ def _connector_device_config_with_client(
     st_raw = serialize_cloudvision_data(get_device_path(client, device_id, path_status))
     cfg_raw = flatten_nested_device_map(cfg_raw)
     st_raw = flatten_nested_device_map(st_raw)
-    return {"intfConfig": _flatten_intf_map(cfg_raw), "intfStatus": _flatten_intf_map(st_raw)}
+    return {
+        "intfConfig": _flatten_intf_map(cfg_raw),
+        "intfStatus": _flatten_intf_map(st_raw),
+    }
 
 
 def grpc_get_interfaces(datadict: dict[str, Any], device_id: str) -> dict[str, Any]:
@@ -390,7 +393,9 @@ def grpc_list_oper_up_physical_ports_for_lldp(
         return [], ["missing_device_id"]
     try:
         if _shared_client is not None:
-            blob = _connector_device_config_with_client(_shared_client, datadict, device_id)
+            blob = _connector_device_config_with_client(
+                _shared_client, datadict, device_id
+            )
         else:
             blob = _connector_device_config(datadict, device_id)
         items = merge_intfcfg_and_status(blob["intfConfig"], blob["intfStatus"])

@@ -10,6 +10,7 @@ import grpc
 from mcp.server.fastmcp import FastMCP
 
 from cvp_mcp.env import env_datadict_from_os
+from cvp_mcp.errors import client_error
 from cvp_mcp.grpc.bugs import grpc_all_bug_exposure
 from cvp_mcp.grpc.capability import probe_arista_v1_packages
 from cvp_mcp.grpc.config import grpc_get_device_config
@@ -19,6 +20,7 @@ from cvp_mcp.grpc.endpoint import (
     grpc_endpoints_by_filter,
     grpc_one_endpoint_location,
 )
+from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.events import grpc_get_cvp_events, grpc_search_cvp_events
 from cvp_mcp.grpc.flow import conn_get_flow_data
 from cvp_mcp.grpc.hostname_resolve import resolve_endpoint_query
@@ -29,7 +31,6 @@ from cvp_mcp.grpc.interfaces import (
 )
 from cvp_mcp.grpc.inventory import grpc_all_inventory, grpc_one_inventory_serial
 from cvp_mcp.grpc.lifecycle import grpc_all_device_lifecycle
-from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.lldp import LLDP_DATA_SOURCE, grpc_get_lldp_neighbors
 from cvp_mcp.grpc.monitor import grpc_all_probe_status, grpc_one_probe_status
 from cvp_mcp.grpc.network_map import grpc_map_network_topology
@@ -41,6 +42,8 @@ from cvp_mcp.grpc.overlay import (
 )
 from cvp_mcp.grpc.routing import grpc_get_bgp_status, grpc_get_routes
 from cvp_mcp.grpc.utils import _is_lab_device, createConnection
+from cvp_mcp.rate_limit import rate_limited_tool
+from cvp_mcp.tool_access import tool_enabled
 
 CVP_TRANSPORT = "grpc"
 
@@ -109,8 +112,10 @@ _install_noise_filters()
 
 logging.info("Starting the FastMCP server...")
 
-# Initialize FastMCP server
-mcp = FastMCP(name="CVP MCP Server", host="0.0.0.0", stateless_http=True, log_level="WARNING")
+# Initialize FastMCP server (host updated from CLI in main() for HTTP transport)
+mcp = FastMCP(
+    name="CVP MCP Server", host="127.0.0.1", stateless_http=True, log_level="WARNING"
+)
 
 
 # async function to return creds
@@ -160,6 +165,7 @@ def get_cvp_one_device(device_id) -> str:
 
 
 @mcp.tool()
+@rate_limited_tool("get_cvp_all_inventory")
 def get_cvp_all_inventory() -> dict:
     """
     Grabs switches and devices from CloudVision (CVP).
@@ -183,8 +189,7 @@ def get_cvp_all_inventory() -> dict:
                 all_devices["streaming_active"] = all_active
                 all_devices["streaming_inactive"] = all_inactive
         case "http":
-            logging.info("CVP HTTP Request for all devices")
-            all_devices = {}
+            return {"error": "grpc_only"}
     logging.debug(json.dumps(all_devices))
     # return(json.dumps(all_devices, indent=2))
     return all_devices
@@ -515,6 +520,7 @@ def get_cvp_probe_arista_apis() -> dict:
 
 
 @mcp.tool()
+@tool_enabled("get_cvp_device_config")
 def get_cvp_device_config(device_id: str, include_running_config: bool = False) -> dict:
     """Device config summary (URIs, sync metadata) from configstatus API; optional running-config text via URI fetch."""
     datadict = get_env_vars()
@@ -532,8 +538,9 @@ def get_cvp_device_config(device_id: str, include_running_config: bool = False) 
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("get_cvp_device_config: %s", e)
-        return {"error": str(e)}
+        return client_error(
+            "device_config_failed", log_exc=e, context="get_cvp_device_config"
+        )
 
 
 @mcp.tool()
@@ -547,8 +554,9 @@ def get_cvp_interfaces(device_id: str) -> dict:
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("get_cvp_interfaces: %s", e)
-        return {"error": str(e)}
+        return client_error(
+            "interfaces_failed", log_exc=e, context="get_cvp_interfaces"
+        )
 
 
 @mcp.tool()
@@ -562,8 +570,7 @@ def get_cvp_vlans(device_id: str) -> dict:
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("get_cvp_vlans: %s", e)
-        return {"error": str(e)}
+        return client_error("vlans_failed", log_exc=e, context="get_cvp_vlans")
 
 
 @mcp.tool()
@@ -577,8 +584,9 @@ def get_cvp_ip_interfaces(device_id: str) -> dict:
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("get_cvp_ip_interfaces: %s", e)
-        return {"error": str(e)}
+        return client_error(
+            "ip_interfaces_failed", log_exc=e, context="get_cvp_ip_interfaces"
+        )
 
 
 # ===================================================
@@ -614,11 +622,11 @@ def get_cvp_events(
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("get_cvp_events: %s", e)
-        return {"error": str(e)}
+        return client_error("events_failed", log_exc=e, context="get_cvp_events")
 
 
 @mcp.tool()
+@rate_limited_tool("search_cvp_events")
 def search_cvp_events(
     query: str,
     severity: str | None = None,
@@ -648,11 +656,13 @@ def search_cvp_events(
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("search_cvp_events: %s", e)
-        return {"error": str(e)}
+        return client_error(
+            "search_events_failed", log_exc=e, context="search_cvp_events"
+        )
 
 
 @mcp.tool()
+@tool_enabled("get_cvp_bgp_status")
 def get_cvp_bgp_status(device_id: str) -> dict:
     """BGP operational snapshot from Sysdb/Smash routing paths (best-effort)."""
     datadict = get_env_vars()
@@ -663,11 +673,13 @@ def get_cvp_bgp_status(device_id: str) -> dict:
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("get_cvp_bgp_status: %s", e)
-        return {"error": str(e)}
+        return client_error(
+            "bgp_status_failed", log_exc=e, context="get_cvp_bgp_status"
+        )
 
 
 @mcp.tool()
+@tool_enabled("get_cvp_routes")
 def get_cvp_routes(device_id: str, vrf: str = "default") -> dict:
     """Active route-like RIB entries from Sysdb routing status (best-effort; vrf labels path selection)."""
     datadict = get_env_vars()
@@ -678,8 +690,7 @@ def get_cvp_routes(device_id: str, vrf: str = "default") -> dict:
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("get_cvp_routes: %s", e)
-        return {"error": str(e)}
+        return client_error("routes_failed", log_exc=e, context="get_cvp_routes")
 
 
 @mcp.tool()
@@ -744,11 +755,13 @@ def get_cvp_lldp_neighbors(
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("get_cvp_lldp_neighbors: %s", e)
-        return {"error": str(e)}
+        return client_error(
+            "lldp_neighbors_failed", log_exc=e, context="get_cvp_lldp_neighbors"
+        )
 
 
 @mcp.tool()
+@rate_limited_tool("map_cvp_network_topology")
 def map_cvp_network_topology(
     output_format: str = "json",
     include_inactive_devices: bool = False,
@@ -804,8 +817,9 @@ def map_cvp_network_topology(
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("map_cvp_network_topology: %s", e)
-        return {"error": str(e)}
+        return client_error(
+            "network_topology_failed", log_exc=e, context="map_cvp_network_topology"
+        )
 
 
 # ===================================================
@@ -824,8 +838,7 @@ def get_cvp_features(device_id: str) -> dict:
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("get_cvp_features: %s", e)
-        return {"error": str(e)}
+        return client_error("features_failed", log_exc=e, context="get_cvp_features")
 
 
 @mcp.tool()
@@ -839,8 +852,7 @@ def get_cvp_evpn(device_id: str) -> dict:
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("get_cvp_evpn: %s", e)
-        return {"error": str(e)}
+        return client_error("evpn_failed", log_exc=e, context="get_cvp_evpn")
 
 
 @mcp.tool()
@@ -854,8 +866,7 @@ def get_cvp_vxlan(device_id: str) -> dict:
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("get_cvp_vxlan: %s", e)
-        return {"error": str(e)}
+        return client_error("vxlan_failed", log_exc=e, context="get_cvp_vxlan")
 
 
 @mcp.tool()
@@ -869,8 +880,9 @@ def get_cvp_system_health(device_id: str) -> dict:
             case "http":
                 return {"error": "grpc_only"}
     except Exception as e:
-        logging.error("get_cvp_system_health: %s", e)
-        return {"error": str(e)}
+        return client_error(
+            "system_health_failed", log_exc=e, context="get_cvp_system_health"
+        )
 
 
 # ===================================================
@@ -914,7 +926,13 @@ def main(args):
         sys.exit(1)
     if mcp_transport == "http":
         mcp.settings.port = mcp_port
-        logging.info(f"Streamable HTTP Server listening on port {mcp_port}")
+        mcp.settings.host = args.host
+        if args.host == "0.0.0.0":
+            logging.warning(
+                "HTTP bound to all interfaces (0.0.0.0). "
+                "Place an authenticated reverse proxy in front for remote access."
+            )
+        logging.info(f"Streamable HTTP Server listening on {args.host}:{mcp_port}")
         mcp.run(transport="streamable-http")
     else:
         mcp.run(transport="stdio")
@@ -927,7 +945,7 @@ if __name__ == "__main__":
         "--transport",
         type=str,
         help="MCP Transport method",
-        default="http",
+        default="stdio",
         choices=["http", "stdio"],
         required=False,
     )
@@ -937,6 +955,13 @@ if __name__ == "__main__":
         type=int,
         help="Port to run the Streamable HTTP Server",
         default=8000,
+        required=False,
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        help="Bind address for Streamable HTTP (default 127.0.0.1; use 0.0.0.0 only behind auth proxy)",
+        default="127.0.0.1",
         required=False,
     )
     parser.add_argument(

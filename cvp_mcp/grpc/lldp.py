@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
@@ -616,7 +617,7 @@ def parse_lldp_flat_to_items(flat: dict[str, Any]) -> list[dict[str, Any]]:
             key=lambda r: (r.get("local_interface") or "", r.get("neighbor_key") or "")
         )
         return l2
-    leaf = _parse_l2discovery_remote_leaf(flat)
+    leaf = _parse_lldp_remote_leaf(flat)
     if leaf:
         return leaf
     work = _unwrap_lldp_container(flat)
@@ -633,7 +634,328 @@ def parse_lldp_flat_to_items(flat: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
-def grpc_get_lldp_neighbors(
+def _infer_ethernet_port_count(model: str) -> int:
+    """Best-effort Ethernet port cap from CVP model string (for bulk LLDP sweeps)."""
+    m = (model or "").upper()
+    if re.search(r"720XP-48|48TXH|CCS-720XP-48", m):
+        return 48
+    if re.search(r"720XP-24|-24ZY4|CCS-720XP-24", m):
+        return 24
+    if re.search(r"710P|710-P|16P", m):
+        return 16
+    if re.search(r"AWE-5310|5310", m):
+        return 32
+    if "7050" in m or "7160" in m or "7280" in m:
+        return 52
+    if "O-235" in m or "OUTDOOR" in m:
+        return 8
+    return 48
+
+
+def _local_interface_from_path_hint(path_hint: str) -> str:
+    """Extract ``EthernetN`` from a Connector path hint when rows lack ``local_interface``."""
+    parts = (path_hint or "").split("/")
+    try:
+        idx = parts.index("portStatus")
+    except ValueError:
+        return ""
+    if idx + 1 < len(parts):
+        return parts[idx + 1]
+    return ""
+
+
+def _dedupe_lldp_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, ...]] = set()
+    out: list[dict[str, Any]] = []
+    for row in items:
+        key = (
+            str(row.get("local_interface") or ""),
+            str(row.get("neighbor_key") or ""),
+            str(row.get("eth_addr") or ""),
+            str(row.get("system_name") or ""),
+            str(row.get("remote_chassis_id") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    out.sort(
+        key=lambda r: (r.get("local_interface") or "", r.get("neighbor_key") or "")
+    )
+    return out
+
+
+def _lldp_full_tree_candidate_paths(device_id: str) -> tuple[list[Any], ...]:
+    """Wildcard paths that may return the entire ``portStatus`` tree in one Get."""
+    return (
+        [
+            device_id,
+            "Sysdb",
+            "l2discovery",
+            "lldp",
+            "status",
+            "local",
+            Wildcard(),
+            "portStatus",
+            Wildcard(),
+        ],
+        [
+            device_id,
+            "Sysdb",
+            "l2discovery",
+            "lldp",
+            "status",
+            "local",
+            Wildcard(),
+            "portStatus",
+            Wildcard(),
+            "remoteSystem",
+            Wildcard(),
+        ],
+        [
+            device_id,
+            "Sysdb",
+            "l2discovery",
+            "lldp",
+            "status",
+            "local",
+            Wildcard(),
+            "portStatus",
+            Wildcard(),
+            "remoteSystemByMsap",
+            Wildcard(),
+        ],
+        *_lldp_l2discovery_literal_local_paths(device_id),
+    )
+
+
+def _lldp_bulk_port_names(
+    datadict: dict[str, Any],
+    device_id: str,
+    *,
+    device_model: str = "",
+    _shared_client: Any = None,
+) -> tuple[list[str], list[str]]:
+    """Candidate local ports for a bulk LLDP sweep (oper-up first, then model range)."""
+    from cvp_mcp.grpc.interfaces import grpc_list_oper_up_physical_ports_for_lldp
+
+    warnings: list[str] = []
+    cap = _infer_ethernet_port_count(device_model)
+    raw_ports, port_warns = grpc_list_oper_up_physical_ports_for_lldp(
+        datadict, device_id, _shared_client=_shared_client
+    )
+    warnings.extend(port_warns)
+    oper_up = [
+        p
+        for p in raw_ports
+        if p.startswith("Ethernet")
+        or p.startswith("Management")
+        or p.startswith("Port-Channel")
+    ]
+    if oper_up:
+        ethernet = [p for p in oper_up if p.startswith("Ethernet")]
+        if ethernet:
+            return ethernet[:cap], warnings
+        return oper_up, warnings
+    warnings.append("bulk_lldp_fallback_ethernet_range")
+    return [f"Ethernet{i}" for i in range(1, cap + 1)], warnings
+
+
+def _fetch_lldp_snapshot(
+    datadict: dict[str, Any],
+    device_id: str,
+    candidate_paths: tuple[list[Any], ...],
+    *,
+    _shared_client: Any = None,
+) -> tuple[dict[str, Any], str]:
+    flat: dict[str, Any] = {}
+    path_used = ""
+    for p in candidate_paths:
+        path_line = _path_for_log(p)
+        try:
+            if _shared_client is not None:
+                snap = _get_path_with_client(_shared_client, device_id, list(p))
+            else:
+                snap = _get_path(datadict, device_id, list(p))
+            n = len(snap) if isinstance(snap, dict) else 0
+            preview = list(snap.keys())[:12] if isinstance(snap, dict) and snap else []
+            logging.info(
+                "lldp connector: device=%s path=%s key_count=%s keys=%s",
+                device_id,
+                path_line,
+                n,
+                preview,
+            )
+            if snap:
+                flat = snap
+                path_used = path_line
+                break
+        except Exception as e:
+            if _is_expected_probe_not_found(e):
+                logging.debug(
+                    "lldp connector probe miss: device=%s path=%s (not found)",
+                    device_id,
+                    path_line,
+                )
+            else:
+                logging.warning(
+                    "lldp connector: device=%s path=%s failed: %s",
+                    device_id,
+                    path_line,
+                    e,
+                )
+    return flat, path_used
+
+
+def _envelope_from_lldp_snapshot(
+    device_id: str,
+    flat: dict[str, Any],
+    path_used: str,
+    *,
+    default_local_interface: str = "",
+) -> dict[str, Any]:
+    warnings: list[str] = []
+    items = parse_lldp_flat_to_items(flat)
+    if default_local_interface:
+        for row in items:
+            if not row.get("local_interface"):
+                row["local_interface"] = default_local_interface
+    elif path_used:
+        inferred = _local_interface_from_path_hint(path_used)
+        if inferred:
+            for row in items:
+                if not row.get("local_interface"):
+                    row["local_interface"] = inferred
+    obj: dict[str, Any] = {"path_hint": path_used, "raw_key_count": len(flat)}
+    if flat and not items:
+        warnings.append("lldp_data_unparsed")
+        obj["next_steps"] = [
+            "retry_with_port_name: use a concrete interface (for example Ethernet6)",
+            "if_unparsed_persists: use map_cvp_network_topology with batched device_serial_allowlist",
+            "merge_topology_batches: dedupe by local_serial+local_port+remote_eth_addr_or_remote_chassis_id",
+        ]
+    if not items and not flat:
+        warnings.append("no_lldp_data_at_known_paths")
+    logging.info(
+        "lldp result: device=%s path_used=%s items=%s warnings=%s",
+        device_id,
+        path_used or "(none)",
+        len(items),
+        warnings,
+    )
+    cov = "full" if items else ("partial" if flat else "none")
+    return tool_envelope(
+        device_id=device_id,
+        data_source=LLDP_DATA_SOURCE,
+        coverage=cov,
+        items=items,
+        obj=obj,
+        warnings=warnings,
+    )
+
+
+def _parse_lldp_remote_leaf(flat: dict[str, Any]) -> list[dict[str, Any]]:
+    """Handle a Get that returns only one remoteSystem object (no portStatus wrapper)."""
+    return _parse_l2discovery_remote_leaf(flat)
+
+
+def _grpc_get_lldp_neighbors_bulk(
+    datadict: dict[str, Any],
+    device_id: str,
+    *,
+    device_model: str = "",
+    _shared_client: Any = None,
+) -> dict[str, Any]:
+    """Sweep all candidate ports; avoid first-path-wins on a single ``remoteLeaf`` neighbor."""
+    warnings: list[str] = []
+
+    flat, path_used = _fetch_lldp_snapshot(
+        datadict,
+        device_id,
+        _lldp_full_tree_candidate_paths(device_id),
+        _shared_client=_shared_client,
+    )
+    tree_items = parse_lldp_flat_to_items(flat)
+    local_ports = {
+        r.get("local_interface") for r in tree_items if r.get("local_interface")
+    }
+    if len(local_ports) > 1:
+        return _envelope_from_lldp_snapshot(device_id, flat, path_used)
+
+    ports, port_warns = _lldp_bulk_port_names(
+        datadict,
+        device_id,
+        device_model=device_model,
+        _shared_client=_shared_client,
+    )
+    warnings.extend(port_warns)
+    merged: list[dict[str, Any]] = []
+    paths_used: list[str] = []
+    ports_with_neighbors = 0
+
+    def _collect_port(port: str, client: Any) -> None:
+        nonlocal ports_with_neighbors
+        sub = _grpc_get_lldp_neighbors_probe(
+            datadict,
+            device_id,
+            port_name=port,
+            remote_neighbor_key="",
+            _shared_client=client,
+        )
+        sub_items = sub.get("items") if isinstance(sub, dict) else None
+        if not sub_items:
+            return
+        ports_with_neighbors += 1
+        hint = (sub.get("object") or {}).get("path_hint") or ""
+        if hint:
+            paths_used.append(hint)
+        for row in sub_items:
+            if not isinstance(row, dict):
+                continue
+            if not row.get("local_interface"):
+                row = {**row, "local_interface": port}
+            merged.append(row)
+
+    if _shared_client is not None:
+        for port in ports:
+            _collect_port(port, _shared_client)
+    else:
+        with _make_lldp_client(datadict) as client:
+            for port in ports:
+                _collect_port(port, client)
+
+    items = _dedupe_lldp_items(merged)
+    obj: dict[str, Any] = {
+        "bulk_sweep": True,
+        "ports_probed": len(ports),
+        "ports_with_neighbors": ports_with_neighbors,
+        "path_hints": paths_used[:20],
+    }
+    if not items:
+        warnings.append("no_lldp_data_at_known_paths")
+        cov = "none"
+    elif ports_with_neighbors <= 1 and len(ports) > 1:
+        cov = "partial"
+    else:
+        cov = "full"
+    logging.info(
+        "lldp bulk sweep: device=%s ports_probed=%s ports_with_neighbors=%s items=%s",
+        device_id,
+        len(ports),
+        ports_with_neighbors,
+        len(items),
+    )
+    return tool_envelope(
+        device_id=device_id,
+        data_source=LLDP_DATA_SOURCE,
+        coverage=cov,
+        items=items,
+        obj=obj,
+        warnings=warnings,
+    )
+
+
+def _grpc_get_lldp_neighbors_probe(
     datadict: dict[str, Any],
     device_id: str,
     port_name: str = "",
@@ -641,38 +963,9 @@ def grpc_get_lldp_neighbors(
     *,
     _shared_client: Any = None,
 ) -> dict[str, Any]:
-    warnings: list[str] = []
-    device_id = (device_id or "").strip()
-    if not device_id:
-        return tool_envelope(
-            device_id=None,
-            data_source=LLDP_DATA_SOURCE,
-            coverage="none",
-            items=[],
-            warnings=["missing_device_id"],
-        )
-    cred_miss = cvp_credentials_missing_reasons(datadict)
-    if cred_miss:
-        return tool_envelope(
-            device_id=device_id,
-            data_source=LLDP_DATA_SOURCE,
-            coverage="none",
-            items=[],
-            warnings=cred_miss
-            + [
-                "mcp_server_missing_cloudvision_credentials",
-            ],
-            obj={
-                "hint": "Set CVP (apiserver host:port) and CVPTOKEN on the MCP server "
-                "process environment. MCP clients and remote agents cannot inject these; "
-                "use --env-file, container env, or systemd Environment=.",
-            },
-        )
+    """Probe LLDP for one device/port using the first matching Connector path."""
     explicit = _lldp_paths_for_port_name(device_id, port_name, remote_neighbor_key)
     port_filter = (port_name or "").strip()
-    # When ``port_name`` is set, do not fall through to other ports' probe paths or
-    # ``portStatus/*`` wildcards — otherwise the first non-empty snapshot (often
-    # Ethernet6) wins and every per-port query looks identical.
     if port_filter:
         candidate_paths = (
             *explicit,
@@ -688,7 +981,6 @@ def grpc_get_lldp_neighbors(
             *_lldp_paths_sysdb_first_no_serial(),
             *_lldp_telemetry_browser_leaf_paths(device_id),
             *_lldp_l2discovery_literal_local_paths(device_id),
-            # Full per-port blob (remoteSystem + remoteSystemByMsap, e.g. Ethernet6 / rpi4-0 MAC)
             [
                 device_id,
                 "Sysdb",
@@ -742,66 +1034,68 @@ def grpc_get_lldp_neighbors(
             [device_id, "Sysdb", "lldp", "config", Wildcard()],
             [device_id, "Smash", "lldp", Wildcard()],
         )
-    flat: dict[str, Any] = {}
-    path_used = ""
-    for p in candidate_paths:
-        path_line = _path_for_log(p)
-        try:
-            if _shared_client is not None:
-                snap = _get_path_with_client(_shared_client, device_id, list(p))
-            else:
-                snap = _get_path(datadict, device_id, list(p))
-            n = len(snap) if isinstance(snap, dict) else 0
-            preview = list(snap.keys())[:12] if isinstance(snap, dict) and snap else []
-            logging.info(
-                "lldp connector: device=%s path=%s key_count=%s keys=%s",
-                device_id,
-                path_line,
-                n,
-                preview,
-            )
-            if snap:
-                flat = snap
-                path_used = path_line
-                break
-        except Exception as e:
-            if _is_expected_probe_not_found(e):
-                logging.debug(
-                    "lldp connector probe miss: device=%s path=%s (not found)",
-                    device_id,
-                    path_line,
-                )
-            else:
-                logging.warning(
-                    "lldp connector: device=%s path=%s failed: %s",
-                    device_id,
-                    path_line,
-                    e,
-                )
-    items = parse_lldp_flat_to_items(flat)
-    obj: dict[str, Any] = {"path_hint": path_used, "raw_key_count": len(flat)}
-    if flat and not items:
-        warnings.append("lldp_data_unparsed")
-        obj["next_steps"] = [
-            "retry_with_port_name: use a concrete interface (for example Ethernet6)",
-            "if_unparsed_persists: use map_cvp_network_topology with batched device_serial_allowlist",
-            "merge_topology_batches: dedupe by local_serial+local_port+remote_eth_addr_or_remote_chassis_id",
-        ]
-    if not items and not flat:
-        warnings.append("no_lldp_data_at_known_paths")
-    logging.info(
-        "lldp result: device=%s path_used=%s items=%s warnings=%s",
+    flat, path_used = _fetch_lldp_snapshot(
+        datadict,
         device_id,
-        path_used or "(none)",
-        len(items),
-        warnings,
+        candidate_paths,
+        _shared_client=_shared_client,
     )
-    cov = "full" if items else ("partial" if flat else "none")
-    return tool_envelope(
-        device_id=device_id,
-        data_source=LLDP_DATA_SOURCE,
-        coverage=cov,
-        items=items,
-        obj=obj,
-        warnings=warnings,
+    return _envelope_from_lldp_snapshot(
+        device_id,
+        flat,
+        path_used,
+        default_local_interface=port_filter,
+    )
+
+
+def grpc_get_lldp_neighbors(
+    datadict: dict[str, Any],
+    device_id: str,
+    port_name: str = "",
+    remote_neighbor_key: str = "",
+    *,
+    device_model: str = "",
+    _shared_client: Any = None,
+) -> dict[str, Any]:
+    device_id = (device_id or "").strip()
+    if not device_id:
+        return tool_envelope(
+            device_id=None,
+            data_source=LLDP_DATA_SOURCE,
+            coverage="none",
+            items=[],
+            warnings=["missing_device_id"],
+        )
+    cred_miss = cvp_credentials_missing_reasons(datadict)
+    if cred_miss:
+        return tool_envelope(
+            device_id=device_id,
+            data_source=LLDP_DATA_SOURCE,
+            coverage="none",
+            items=[],
+            warnings=cred_miss
+            + [
+                "mcp_server_missing_cloudvision_credentials",
+            ],
+            obj={
+                "hint": "Set CVP (apiserver host:port) and CVPTOKEN on the MCP server "
+                "process environment. MCP clients and remote agents cannot inject these; "
+                "use --env-file, container env, or systemd Environment=.",
+            },
+        )
+    port_filter = (port_name or "").strip()
+    remote_key = (remote_neighbor_key or "").strip()
+    if not port_filter and not remote_key:
+        return _grpc_get_lldp_neighbors_bulk(
+            datadict,
+            device_id,
+            device_model=device_model,
+            _shared_client=_shared_client,
+        )
+    return _grpc_get_lldp_neighbors_probe(
+        datadict,
+        device_id,
+        port_name=port_name,
+        remote_neighbor_key=remote_neighbor_key,
+        _shared_client=_shared_client,
     )

@@ -1,5 +1,6 @@
-# pre-commit install && pre-commit run --all-files
-# Requires: brew install pre-commit gitleaks
+# Setup: uv sync --dev && pre-commit install
+# Manual run: pre-commit run --all-files
+# Requires: uv (project dev deps include pre-commit); gitleaks on PATH for secret scan hook
 
 repos:
   - repo: https://github.com/gitleaks/gitleaks
@@ -7,13 +8,33 @@ repos:
     hooks:
       - id: gitleaks
         args: [--config, .gitleaks.toml, --redact, --log-opts, main]
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=500]
-      - id: check-merge-conflict
       - id: detect-private-key
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: name-tests-test
+        args: [--pytest-test-first]
+
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check
+        language: system
+        types: [python]
+      - id: black
+        name: black
+        entry: uv run black
+        language: system
+        types: [python]

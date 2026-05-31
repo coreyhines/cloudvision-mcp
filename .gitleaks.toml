@@ -4,11 +4,14 @@ title = "cloudvision-mcp"
 useDefault = true
 
 [allowlist]
-description = "Env var placeholders and gitleaks artifacts"
+description = "Env var placeholders, examples, and gitleaks artifacts"
 paths = [
   '''\.gitleaks-baseline\.json$''',
   '''gitleaks-report\.json$''',
+  '''^deploy/environment\.example$''',
+  '''\.pre-commit-config\.yaml$''',
 ]
 regexes = [
   '''\$\{[A-Z][A-Z0-9_]+\}''',
+  '''\$\{env:[A-Z][A-Z0-9_]+\}''',
 ]

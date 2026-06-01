@@ -16,7 +16,11 @@ from cvp_mcp.grpc.bugs import grpc_all_bug_exposure
 from cvp_mcp.grpc.capability import probe_arista_v1_packages
 from cvp_mcp.grpc.config import grpc_get_device_config
 from cvp_mcp.grpc.connector import conn_get_info_bugs
-from cvp_mcp.grpc.device_resolve import resolve_device_to_serial
+from cvp_mcp.grpc.device_resolve import (
+    resolve_device_to_serial,
+    search_inventory_candidates,
+    summarize_inventory_candidates,
+)
 from cvp_mcp.grpc.endpoint import (
     grpc_all_endpoint_locations,
     grpc_endpoints_by_filter,
@@ -147,26 +151,63 @@ def _resolve_device_serial(
     device_id: str,
     *,
     channel: grpc.Channel | None = None,
-) -> tuple[str | None, dict | None, list[str]]:
+) -> tuple[str | None, dict | None, list[str], list[dict]]:
     return resolve_device_to_serial(datadict, device_id, channel=channel)
+
+
+def _device_resolution_failure_envelope(
+    device_id: str,
+    data_source: str,
+    warnings: list[str] | None = None,
+    candidates: list | None = None,
+) -> dict:
+    inp = (device_id or "").strip()
+    warns = list(warnings or [])
+    ambiguous = "device_ambiguous" in warns
+    primary = "device_ambiguous" if ambiguous else "device_not_found"
+    if primary not in warns:
+        warns.insert(0, primary)
+    candidate_rows = summarize_inventory_candidates(candidates)
+    hint = (
+        "Multiple inventory devices match this shorthand. Pick one serial_number "
+        "from candidates and re-call with device_id=<serial_number>."
+        if ambiguous and candidate_rows
+        else (
+            "No device matched. Run search_cvp_inventory or get_cvp_all_inventory "
+            "first, then pass device_id as the CloudVision serial_number "
+            "(not a model name like 720xp)."
+        )
+    )
+    if candidate_rows and not ambiguous:
+        hint = (
+            "No exact device match. Partial inventory matches are listed in "
+            "candidates — re-call with device_id=<serial_number>."
+        )
+    obj: dict = {
+        "device_id_input": inp,
+        "hint": hint,
+        "next_step": "search_cvp_inventory(query) -> get_cvp_lldp_neighbors(serial_number)",
+    }
+    if candidate_rows:
+        obj["candidates"] = candidate_rows
+    return tool_envelope(
+        device_id=inp or None,
+        data_source=data_source,
+        coverage="none",
+        items=[],
+        warnings=warns,
+        obj=obj,
+    )
 
 
 def _device_not_found_envelope(
     device_id: str,
     data_source: str,
     warnings: list[str] | None = None,
+    candidates: list | None = None,
 ) -> dict:
-    inp = (device_id or "").strip()
-    return tool_envelope(
-        device_id=inp or None,
-        data_source=data_source,
-        coverage="none",
-        items=[],
-        warnings=["device_not_found", *(warnings or [])],
-        obj={
-            "device_id_input": inp,
-            "hint": "Use get_cvp_all_inventory to list serial numbers and hostnames.",
-        },
+    return _device_resolution_failure_envelope(
+        device_id, data_source, warnings, candidates
     )
 
 
@@ -213,18 +254,23 @@ def get_cvp_one_device(device_id) -> str:
             case "grpc":
                 connCreds = createConnection(datadict)
                 with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, device, warns = _resolve_device_serial(
+                    serial, device, warns, candidates = _resolve_device_serial(
                         datadict, device_id, channel=channel
                     )
                     if not serial:
-                        return json.dumps(
-                            {
-                                "error": "device_not_found",
-                                "device_id_input": (device_id or "").strip(),
-                                "warnings": ["device_not_found", *warns],
-                            },
-                            indent=2,
-                        )
+                        err = {
+                            "error": (
+                                "device_ambiguous"
+                                if "device_ambiguous" in warns
+                                else "device_not_found"
+                            ),
+                            "device_id_input": (device_id or "").strip(),
+                            "warnings": warns,
+                        }
+                        rows = summarize_inventory_candidates(candidates)
+                        if rows:
+                            err["candidates"] = rows
+                        return json.dumps(err, indent=2)
                     if device is None:
                         device = grpc_one_inventory_serial(channel, serial)
             case "http":
@@ -265,6 +311,59 @@ def get_cvp_all_inventory() -> dict:
     logging.debug(json.dumps(all_devices))
     # return(json.dumps(all_devices, indent=2))
     return all_devices
+
+
+@mcp.tool()
+@rate_limited_tool("search_cvp_inventory")
+def search_cvp_inventory(query: str) -> dict:
+    """
+    Search CloudVision inventory by hostname, model substring, serial, FQDN, or MAC fragment.
+
+    Use this **before** ``get_cvp_lldp_neighbors`` when the user names a model family
+    (e.g. ``720xp``) or partial hostname. Each match includes ``serial_number`` — pass
+    that value as ``device_id`` on per-device tools.
+
+    Requires at least three characters in ``query``.
+    """
+    datadict = get_env_vars()
+    q = (query or "").strip()
+    if len(q) < 3:
+        return tool_envelope(
+            data_source="inventory:search",
+            coverage="none",
+            items=[],
+            warnings=["query_too_short"],
+            obj={
+                "query": q,
+                "hint": "Provide at least 3 characters (e.g. 720xp, spine-1).",
+            },
+        )
+    try:
+        match CVP_TRANSPORT:
+            case "grpc":
+                connCreds = createConnection(datadict)
+                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
+                    matches, warns = search_inventory_candidates(
+                        datadict, q, channel=channel
+                    )
+                    items = summarize_inventory_candidates(matches)
+                    return tool_envelope(
+                        data_source="inventory:search",
+                        coverage="full" if items else "none",
+                        items=items,
+                        warnings=warns,
+                        obj={
+                            "query": q,
+                            "match_count": len(items),
+                            "next_step": "get_cvp_lldp_neighbors(device_id=<serial_number>)",
+                        },
+                    )
+            case "http":
+                return {"error": "grpc_only"}
+    except Exception as e:
+        return client_error(
+            "inventory_search_failed", log_exc=e, context="search_cvp_inventory"
+        )
 
 
 # ===================================================
@@ -562,15 +661,23 @@ def get_cvp_endpoint_locations_filtered(
             connCreds = createConnection(datadict)
             with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
                 if filter_device_id:
-                    serial, _info, warns = _resolve_device_serial(
+                    serial, _info, warns, candidates = _resolve_device_serial(
                         datadict, filter_device_id, channel=channel
                     )
                     if not serial:
-                        return {
-                            "error": "device_not_found",
+                        err = {
+                            "error": (
+                                "device_ambiguous"
+                                if "device_ambiguous" in warns
+                                else "device_not_found"
+                            ),
                             "device_id_input": (filter_device_id or "").strip(),
-                            "warnings": ["device_not_found", *warns],
+                            "warnings": warns,
                         }
+                        rows = summarize_inventory_candidates(candidates)
+                        if rows:
+                            err["candidates"] = rows
+                        return err
                     filter_device_id = serial
                 all_endpoints = grpc_endpoints_by_filter(
                     channel, filter_device_id, interface, vlan_id
@@ -645,7 +752,7 @@ def get_cvp_interfaces(device_id: str) -> dict:
             case "grpc":
                 connCreds = createConnection(datadict)
                 with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns = _resolve_device_serial(
+                    serial, _info, warns, candidates = _resolve_device_serial(
                         datadict, device_id, channel=channel
                     )
                     if not serial:
@@ -653,6 +760,7 @@ def get_cvp_interfaces(device_id: str) -> dict:
                             device_id,
                             "connector:device:Sysdb/interface",
                             warns,
+                            candidates,
                         )
                     result = grpc_get_interfaces(datadict, serial)
                     return _attach_device_resolution(result, device_id, serial, warns)
@@ -676,7 +784,7 @@ def get_cvp_vlans(device_id: str) -> dict:
             case "grpc":
                 connCreds = createConnection(datadict)
                 with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns = _resolve_device_serial(
+                    serial, _info, warns, candidates = _resolve_device_serial(
                         datadict, device_id, channel=channel
                     )
                     if not serial:
@@ -684,6 +792,7 @@ def get_cvp_vlans(device_id: str) -> dict:
                             device_id,
                             "connector:device:Sysdb/bridging",
                             warns,
+                            candidates,
                         )
                     result = grpc_get_vlans(datadict, serial)
                     return _attach_device_resolution(result, device_id, serial, warns)
@@ -705,7 +814,7 @@ def get_cvp_ip_interfaces(device_id: str) -> dict:
             case "grpc":
                 connCreds = createConnection(datadict)
                 with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns = _resolve_device_serial(
+                    serial, _info, warns, candidates = _resolve_device_serial(
                         datadict, device_id, channel=channel
                     )
                     if not serial:
@@ -713,6 +822,7 @@ def get_cvp_ip_interfaces(device_id: str) -> dict:
                             device_id,
                             "connector:device:Sysdb/ip",
                             warns,
+                            candidates,
                         )
                     result = grpc_get_ip_interfaces(datadict, serial)
                     return _attach_device_resolution(result, device_id, serial, warns)
@@ -809,7 +919,7 @@ def get_cvp_bgp_status(device_id: str) -> dict:
             case "grpc":
                 connCreds = createConnection(datadict)
                 with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns = _resolve_device_serial(
+                    serial, _info, warns, candidates = _resolve_device_serial(
                         datadict, device_id, channel=channel
                     )
                     if not serial:
@@ -817,6 +927,7 @@ def get_cvp_bgp_status(device_id: str) -> dict:
                             device_id,
                             "connector:device:Sysdb/routing/bgp",
                             warns,
+                            candidates,
                         )
                     result = grpc_get_bgp_status(datadict, serial)
                     return _attach_device_resolution(result, device_id, serial, warns)
@@ -841,7 +952,7 @@ def get_cvp_routes(device_id: str, vrf: str = "default") -> dict:
             case "grpc":
                 connCreds = createConnection(datadict)
                 with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns = _resolve_device_serial(
+                    serial, _info, warns, candidates = _resolve_device_serial(
                         datadict, device_id, channel=channel
                     )
                     if not serial:
@@ -849,6 +960,7 @@ def get_cvp_routes(device_id: str, vrf: str = "default") -> dict:
                             device_id,
                             "connector:device:Sysdb/routing",
                             warns,
+                            candidates,
                         )
                     result = grpc_get_routes(datadict, serial, vrf=vrf)
                     return _attach_device_resolution(result, device_id, serial, warns)
@@ -867,7 +979,12 @@ def get_cvp_lldp_neighbors(
 ) -> dict:
     """LLDP neighbor table from EOS Sysdb via Connector (best-effort; requires LLDP enabled on device).
 
-    ``device_id``: serial, hostname, FQDN, or system MAC (resolved to serial before Connector queries).
+    **Agent workflow:** When the user names a switch by model or nickname (e.g. ``720xp``), call
+    ``search_cvp_inventory`` or ``get_cvp_all_inventory`` first, then pass ``device_id`` as the
+    CloudVision **serial_number** — not a model name. Model shorthands that match multiple devices
+    return ``device_ambiguous`` with a ``candidates`` list instead of querying Connector.
+
+    ``device_id``: CloudVision serial (preferred), or hostname, FQDN, or system MAC.
 
     By default, virtual/lab devices (vEOS, cEOS) and inactive devices are excluded.
     Pass ``include_lab_devices=True`` to query a virtual device explicitly.
@@ -885,7 +1002,7 @@ def get_cvp_lldp_neighbors(
             case "grpc":
                 connCreds = createConnection(datadict)
                 with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, device_info, res_warns = _resolve_device_serial(
+                    serial, device_info, res_warns, candidates = _resolve_device_serial(
                         datadict, device_id, channel=channel
                     )
                     if not serial:
@@ -893,6 +1010,7 @@ def get_cvp_lldp_neighbors(
                             device_id,
                             LLDP_DATA_SOURCE,
                             res_warns,
+                            candidates,
                         )
                     if not include_lab_devices and _is_lab_device(device_info):
                         return tool_envelope(
@@ -1017,7 +1135,7 @@ def get_cvp_features(device_id: str) -> dict:
             case "grpc":
                 connCreds = createConnection(datadict)
                 with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns = _resolve_device_serial(
+                    serial, _info, warns, candidates = _resolve_device_serial(
                         datadict, device_id, channel=channel
                     )
                     if not serial:
@@ -1025,6 +1143,7 @@ def get_cvp_features(device_id: str) -> dict:
                             device_id,
                             "connector:device:Sysdb/feature",
                             warns,
+                            candidates,
                         )
                     result = grpc_get_features(datadict, serial)
                     return _attach_device_resolution(result, device_id, serial, warns)
@@ -1046,7 +1165,7 @@ def get_cvp_evpn(device_id: str) -> dict:
             case "grpc":
                 connCreds = createConnection(datadict)
                 with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns = _resolve_device_serial(
+                    serial, _info, warns, candidates = _resolve_device_serial(
                         datadict, device_id, channel=channel
                     )
                     if not serial:
@@ -1054,6 +1173,7 @@ def get_cvp_evpn(device_id: str) -> dict:
                             device_id,
                             "connector:device:Sysdb/evpn",
                             warns,
+                            candidates,
                         )
                     result = grpc_get_evpn(datadict, serial)
                     return _attach_device_resolution(result, device_id, serial, warns)
@@ -1075,7 +1195,7 @@ def get_cvp_vxlan(device_id: str) -> dict:
             case "grpc":
                 connCreds = createConnection(datadict)
                 with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns = _resolve_device_serial(
+                    serial, _info, warns, candidates = _resolve_device_serial(
                         datadict, device_id, channel=channel
                     )
                     if not serial:
@@ -1083,6 +1203,7 @@ def get_cvp_vxlan(device_id: str) -> dict:
                             device_id,
                             "connector:device:Sysdb/vxlan",
                             warns,
+                            candidates,
                         )
                     result = grpc_get_vxlan(datadict, serial)
                     return _attach_device_resolution(result, device_id, serial, warns)
@@ -1104,7 +1225,7 @@ def get_cvp_system_health(device_id: str) -> dict:
             case "grpc":
                 connCreds = createConnection(datadict)
                 with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns = _resolve_device_serial(
+                    serial, _info, warns, candidates = _resolve_device_serial(
                         datadict, device_id, channel=channel
                     )
                     if not serial:
@@ -1112,6 +1233,7 @@ def get_cvp_system_health(device_id: str) -> dict:
                             device_id,
                             "connector:device:Sysdb/sys+environment",
                             warns,
+                            candidates,
                         )
                     result = grpc_get_system_health(datadict, serial)
                     return _attach_device_resolution(result, device_id, serial, warns)
@@ -1144,14 +1266,24 @@ def get_cvp_flow_data(
     filter_serial = device_id
     resolution: dict[str, str] = {}
     if filter_serial:
-        serial, _info, warns = _resolve_device_serial(datadict, filter_serial)
+        serial, _info, warns, candidates = _resolve_device_serial(
+            datadict, filter_serial
+        )
         if not serial:
-            return {
-                "error": "device_not_found",
+            err = {
+                "error": (
+                    "device_ambiguous"
+                    if "device_ambiguous" in warns
+                    else "device_not_found"
+                ),
                 "device_id_input": (filter_serial or "").strip(),
-                "warnings": ["device_not_found", *warns],
+                "warnings": warns,
                 "flows": [],
             }
+            rows = summarize_inventory_candidates(candidates)
+            if rows:
+                err["candidates"] = rows
+            return err
         if serial != (filter_serial or "").strip():
             resolution = {
                 "device_id_input": (filter_serial or "").strip(),

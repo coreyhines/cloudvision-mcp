@@ -33,7 +33,7 @@ def test_resolve_passthrough_serial():
     with patch.object(
         device_resolve, "grpc_one_inventory_serial", return_value=_PHYSICAL
     ) as get_one:
-        serial, info, warns = device_resolve.resolve_device_to_serial(
+        serial, info, warns, candidates = device_resolve.resolve_device_to_serial(
             {"cvp": "cvp.example:443", "cvtoken": "tok"},
             "JPE19151499",
             channel=channel,
@@ -42,6 +42,7 @@ def test_resolve_passthrough_serial():
     assert serial == "JPE19151499"
     assert info == _PHYSICAL
     assert warns == []
+    assert candidates == []
 
 
 def test_resolve_hostname_to_serial():
@@ -52,7 +53,7 @@ def test_resolve_hostname_to_serial():
             "grpc_one_device_by_hostname",
             return_value=_PHYSICAL,
         ) as by_host:
-            serial, info, warns = device_resolve.resolve_device_to_serial(
+            serial, info, warns, candidates = device_resolve.resolve_device_to_serial(
                 {"cvp": "cvp.example:443", "cvtoken": "tok"},
                 "720xp-24",
                 channel=channel,
@@ -61,6 +62,7 @@ def test_resolve_hostname_to_serial():
     assert serial == "JPE19151499"
     assert info == _PHYSICAL
     assert warns == []
+    assert candidates == []
 
 
 def test_resolve_fqdn_uses_short_hostname():
@@ -71,7 +73,7 @@ def test_resolve_fqdn_uses_short_hostname():
             "grpc_one_device_by_hostname",
             side_effect=[None, _PHYSICAL],
         ) as by_host:
-            serial, info, _warns = device_resolve.resolve_device_to_serial(
+            serial, info, _warns, candidates = device_resolve.resolve_device_to_serial(
                 {"cvp": "cvp.example:443", "cvtoken": "tok"},
                 "720xp-24.example.com",
                 channel=channel,
@@ -79,6 +81,7 @@ def test_resolve_fqdn_uses_short_hostname():
     assert by_host.call_count >= 2
     assert serial == "JPE19151499"
     assert info == _PHYSICAL
+    assert candidates == []
 
 
 def test_resolve_unknown_device():
@@ -97,21 +100,25 @@ def test_resolve_unknown_device():
                     "grpc_all_inventory",
                     return_value=([], []),
                 ):
-                    serial, info, warns = device_resolve.resolve_device_to_serial(
-                        {"cvp": "cvp.example:443", "cvtoken": "tok"},
-                        "missing-switch",
-                        channel=channel,
+                    serial, info, warns, candidates = (
+                        device_resolve.resolve_device_to_serial(
+                            {"cvp": "cvp.example:443", "cvtoken": "tok"},
+                            "missing-switch",
+                            channel=channel,
+                        )
                     )
     assert serial is None
     assert info is None
     assert warns == []
+    assert candidates == []
 
 
 def test_resolve_empty_device_id():
-    serial, info, warns = device_resolve.resolve_device_to_serial({}, "")
+    serial, info, warns, candidates = device_resolve.resolve_device_to_serial({}, "")
     assert serial is None
     assert info is None
     assert warns == ["missing_device_id"]
+    assert candidates == []
 
 
 def test_resolve_inventory_scan_by_mac():
@@ -130,13 +137,84 @@ def test_resolve_inventory_scan_by_mac():
                     "grpc_all_inventory",
                     return_value=([_PHYSICAL], []),
                 ):
-                    serial, info, _warns = device_resolve.resolve_device_to_serial(
-                        {"cvp": "cvp.example:443", "cvtoken": "tok"},
-                        "aa:bb:cc:dd:ee:01",
-                        channel=channel,
+                    serial, info, _warns, candidates = (
+                        device_resolve.resolve_device_to_serial(
+                            {"cvp": "cvp.example:443", "cvtoken": "tok"},
+                            "aa:bb:cc:dd:ee:01",
+                            channel=channel,
+                        )
                     )
     assert serial == "JPE19151499"
     assert info == _PHYSICAL
+    assert candidates == []
+
+
+_PHYSICAL_48 = {
+    **_PHYSICAL,
+    "hostname": "720xp-48",
+    "model": "CCS-720XP-48TXH-2C-S",
+    "serial_number": "JPE19151498",
+    "fqdn": "720xp-48.example.com",
+}
+
+
+def test_resolve_model_shorthand_ambiguous():
+    channel = MagicMock()
+    inventory = [_PHYSICAL, _PHYSICAL_48]
+    with patch.object(device_resolve, "grpc_one_inventory_serial", return_value=None):
+        with patch.object(
+            device_resolve, "grpc_one_device_by_hostname", return_value=None
+        ):
+            with patch.object(
+                device_resolve,
+                "_inventory_lookup_device",
+                return_value=({}, "not_found"),
+            ):
+                with patch.object(
+                    device_resolve,
+                    "grpc_all_inventory",
+                    return_value=(inventory, []),
+                ):
+                    serial, info, warns, candidates = (
+                        device_resolve.resolve_device_to_serial(
+                            {"cvp": "cvp.example:443", "cvtoken": "tok"},
+                            "720xp",
+                            channel=channel,
+                        )
+                    )
+    assert serial is None
+    assert info is None
+    assert "device_ambiguous" in warns
+    assert len(candidates) == 2
+
+
+def test_resolve_model_shorthand_single_match():
+    channel = MagicMock()
+    with patch.object(device_resolve, "grpc_one_inventory_serial", return_value=None):
+        with patch.object(
+            device_resolve, "grpc_one_device_by_hostname", return_value=None
+        ):
+            with patch.object(
+                device_resolve,
+                "_inventory_lookup_device",
+                return_value=({}, "not_found"),
+            ):
+                with patch.object(
+                    device_resolve,
+                    "grpc_all_inventory",
+                    return_value=([_PHYSICAL], []),
+                ):
+                    serial, info, warns, candidates = (
+                        device_resolve.resolve_device_to_serial(
+                            {"cvp": "cvp.example:443", "cvtoken": "tok"},
+                            "720xp",
+                            channel=channel,
+                        )
+                    )
+    assert serial == "JPE19151499"
+    assert info == _PHYSICAL
+    assert "resolved_via_inventory_partial_match" in warns
+    assert candidates == []
 
 
 @patch("cloudvision_mcp._resolve_device_serial")
@@ -158,7 +236,7 @@ def test_lldp_tool_resolves_hostname_before_connector(
     ctx = MagicMock()
     mock_channel.return_value.__enter__ = MagicMock(return_value=ctx)
     mock_channel.return_value.__exit__ = MagicMock(return_value=False)
-    mock_resolve.return_value = ("JPE19151499", _PHYSICAL, [])
+    mock_resolve.return_value = ("JPE19151499", _PHYSICAL, [], [])
     mock_lldp.return_value = {
         "device_id": "JPE19151499",
         "coverage": "full",
@@ -193,9 +271,15 @@ def test_lldp_tool_unknown_device(
     ctx = MagicMock()
     mock_channel.return_value.__enter__ = MagicMock(return_value=ctx)
     mock_channel.return_value.__exit__ = MagicMock(return_value=False)
-    mock_resolve.return_value = (None, None, [])
+    mock_resolve.return_value = (
+        None,
+        None,
+        ["device_ambiguous"],
+        [_PHYSICAL, _PHYSICAL_48],
+    )
 
-    result = get_cvp_lldp_neighbors("unknown-host")
+    result = get_cvp_lldp_neighbors("720xp")
 
-    assert "device_not_found" in result.get("warnings", [])
+    assert "device_ambiguous" in result.get("warnings", [])
     assert result["coverage"] == "none"
+    assert len(result["object"]["candidates"]) == 2

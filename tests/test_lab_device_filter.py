@@ -153,7 +153,7 @@ def test_lldp_blocks_virtual_eos_by_default(
         "hostname": "lab-sw1",
         "serial_number": "VEOS1",
     }
-    mock_resolve.return_value = ("VEOS1", device_info, [])
+    mock_resolve.return_value = ("VEOS1", device_info, [], [])
 
     result = get_cvp_lldp_neighbors("VEOS1")
 
@@ -182,7 +182,7 @@ def test_lldp_allows_virtual_eos_when_flag_set(
         "hostname": "lab-sw1",
         "serial_number": "VEOS1",
     }
-    mock_resolve.return_value = ("VEOS1", device_info, [])
+    mock_resolve.return_value = ("VEOS1", device_info, [], [])
 
     with patch("cloudvision_mcp.grpc_get_lldp_neighbors") as mock_lldp:
         mock_lldp.return_value = {"coverage": "full", "items": [], "warnings": []}
@@ -213,7 +213,7 @@ def test_lldp_blocks_inactive_device(
         "hostname": "phys-sw1",
         "serial_number": "PHYS1",
     }
-    mock_resolve.return_value = ("PHYS1", device_info, [])
+    mock_resolve.return_value = ("PHYS1", device_info, [], [])
 
     result = get_cvp_lldp_neighbors("PHYS1")
 
@@ -236,7 +236,7 @@ def test_lldp_returns_not_found_when_resolution_fails(
     mock_env.return_value = {"cvp": "test.example:443", "cvtoken": "tok"}
     mock_conn.return_value = MagicMock()
     mock_channel.return_value = _make_channel_mock()
-    mock_resolve.return_value = (None, None, [])
+    mock_resolve.return_value = (None, None, [], [])
 
     with patch("cloudvision_mcp.grpc_get_lldp_neighbors") as mock_lldp:
         result = get_cvp_lldp_neighbors("UNKNOWN1")

@@ -26,6 +26,7 @@ from cvp_mcp.grpc.endpoint import (
     grpc_endpoints_for_search_keys,
     grpc_one_endpoint_location,
 )
+from cvp_mcp.grpc.endpoint_seed import seed_endpoint_search_keys
 from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.events import grpc_get_cvp_events, grpc_search_cvp_events
 from cvp_mcp.grpc.flow import conn_get_flow_data
@@ -604,19 +605,21 @@ def get_cvp_endpoint_location(search_term: str) -> dict:
 
 @mcp.tool()
 def get_cvp_all_endpoint_locations() -> dict:
-    """Streams all endpoint locations from CVP. Returns all known endpoints
-    with MAC, IP, hostname, and their switch attachment locations (device + interface + VLAN).
+    """LLDP-seeded endpoint locations from CVP via GetSome/GetOne lookups.
+
+    Seeds search keys from LLDP neighbors on switches, then resolves endpoint
+    locations. Returns endpoints with MAC, IP, hostname, and their switch
+    attachment locations (device + interface + VLAN).
     """
     datadict = get_env_vars()
     all_devices = {}
-    all_data = {}
     logging.info("CVP Get All Endpoint Locations")
-    all_endpoints = []
     match CVP_TRANSPORT:
         case "grpc":
             connCreds = createConnection(datadict)
             with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                lookup = grpc_endpoints_for_search_keys(channel, [])
+                seed = seed_endpoint_search_keys(datadict, channel)
+                lookup = grpc_endpoints_for_search_keys(channel, seed["search_keys"])
                 all_endpoints = lookup["endpoints"]
                 for _endpoint in all_endpoints:
                     for _device in _endpoint["location_list"]:
@@ -625,12 +628,22 @@ def get_cvp_all_endpoint_locations() -> dict:
                             all_devices[serial_number] = grpc_one_inventory_serial(
                                 channel, serial_number
                             )
+                seed_stats = {
+                    **seed["seed_stats"],
+                    "getsome_hits": lookup["hits"],
+                    "getsome_misses": lookup["misses"],
+                    "lookup_method": lookup["method"],
+                }
+                warnings = seed["warnings"] + lookup["warnings"]
+                return {
+                    "devices": all_devices,
+                    "endpoints": all_endpoints,
+                    "seed_stats": seed_stats,
+                    "warnings": warnings,
+                }
         case "http":
             logging.info("CVP HTTP Request for all devices")
-            all_devices = ""
-    all_data["devices"] = all_devices
-    all_data["endpoints"] = all_endpoints
-    return all_data
+            return {"error": "grpc_only", "warnings": []}
 
 
 @mcp.tool()
@@ -639,14 +652,13 @@ def get_cvp_endpoint_locations_filtered(
     interface: str | None = None,
     vlan_id: int | None = None,
 ) -> dict:
-    """Filters endpoint locations by switch serial number, interface name (e.g. 'Ethernet1'),
-    or VLAN ID. Provide at least one filter. Filtering is applied client-side.
+    """Filters LLDP-seeded endpoint locations by switch, interface, or VLAN.
 
     ``device_id``: optional; serial, hostname, FQDN, or system MAC (resolved to serial).
+    Provide at least one filter; results are narrowed client-side after GetSome/GetOne lookup.
     """
     datadict = get_env_vars()
     all_devices = {}
-    all_data = {}
     logging.info(
         f"CVP Get Filtered Endpoint Locations: device={device_id} intf={interface} vlan={vlan_id}"
     )
@@ -655,7 +667,6 @@ def get_cvp_endpoint_locations_filtered(
             "get_cvp_endpoint_locations_filtered called with no filters; "
             "this may return a large result set."
         )
-    all_endpoints = []
     filter_device_id = device_id
     match CVP_TRANSPORT:
         case "grpc":
@@ -680,7 +691,12 @@ def get_cvp_endpoint_locations_filtered(
                             err["candidates"] = rows
                         return err
                     filter_device_id = serial
-                lookup = grpc_endpoints_for_search_keys(channel, [])
+                seed = seed_endpoint_search_keys(
+                    datadict,
+                    channel,
+                    device_serials=[filter_device_id] if filter_device_id else None,
+                )
+                lookup = grpc_endpoints_for_search_keys(channel, seed["search_keys"])
                 all_endpoints = [
                     ep
                     for ep in lookup["endpoints"]
@@ -698,12 +714,22 @@ def get_cvp_endpoint_locations_filtered(
                             all_devices[serial_number] = grpc_one_inventory_serial(
                                 channel, serial_number
                             )
+                seed_stats = {
+                    **seed["seed_stats"],
+                    "getsome_hits": lookup["hits"],
+                    "getsome_misses": lookup["misses"],
+                    "lookup_method": lookup["method"],
+                }
+                warnings = seed["warnings"] + lookup["warnings"]
+                return {
+                    "devices": all_devices,
+                    "endpoints": all_endpoints,
+                    "seed_stats": seed_stats,
+                    "warnings": warnings,
+                }
         case "http":
             logging.info("CVP HTTP Request for all devices")
-            all_devices = ""
-    all_data["devices"] = all_devices
-    all_data["endpoints"] = all_endpoints
-    return all_data
+            return {"error": "grpc_only", "warnings": []}
 
 
 # ===================================================

@@ -1,8 +1,8 @@
 from .bugs import grpc_all_bug_exposure
 from .connector import conn_get_info_bugs
 from .endpoint import (
-    grpc_all_endpoint_locations,
-    grpc_endpoints_by_filter,
+    endpoint_location_matches_filters,
+    grpc_endpoints_for_search_keys,
     grpc_one_endpoint_location,
 )
 from .flow import conn_get_flow_data
@@ -14,6 +14,7 @@ from .models import (
     DeviceLifecycleSummary,
     DeviceSoftwareEoL,
     EndpointLocation,
+    EndpointLookupResult,
     SwitchInfo,
 )
 from .monitor import grpc_all_probe_status, grpc_one_probe_status

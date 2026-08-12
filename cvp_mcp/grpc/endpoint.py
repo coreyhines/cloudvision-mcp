@@ -3,6 +3,7 @@ import logging
 from arista.endpointlocation.v1 import models, services
 from google.protobuf import wrappers_pb2 as wrappers
 
+from .models import EndpointLookupResult
 from .utils import RPC_TIMEOUT, convert_response_to_endpoint_location
 
 
@@ -10,6 +11,18 @@ def _device_map_entries(endpoint_location):
     if not endpoint_location.HasField("device_map"):
         return []
     return list(endpoint_location.device_map.values.items())
+
+
+def _dedupe_endpoints(endpoints: list) -> list:
+    seen: set[tuple] = set()
+    out: list = []
+    for ep in endpoints:
+        key = (ep.get("mac_address"), ep.get("ip_address"), ep.get("hostname"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(ep)
+    return out
 
 
 def grpc_one_endpoint_location(channel, query):
@@ -34,48 +47,98 @@ def grpc_one_endpoint_location(channel, query):
         return []
 
 
-def grpc_all_endpoint_locations(channel):
-    all_endpoints = []
+def _grpc_endpoints_via_getsome(stub, keys: list[str]) -> EndpointLookupResult:
+    req = services.EndpointLocationSomeRequest(
+        keys=[
+            models.EndpointLocationKey(search_term=wrappers.StringValue(value=k))
+            for k in keys
+        ]
+    )
+    endpoints: list = []
+    hits = 0
+    misses = 0
+    warnings: list[str] = []
+    for resp in stub.GetSome(req, timeout=RPC_TIMEOUT):
+        if resp.HasField("error") and resp.error.value:
+            misses += 1
+            warnings.append(f"getsome_key_error:{resp.error.value}")
+            continue
+        if not resp.HasField("value"):
+            misses += 1
+            continue
+        batch = []
+        for _k, device in _device_map_entries(resp.value):
+            batch.append(convert_response_to_endpoint_location(device))
+        if batch:
+            hits += 1
+            endpoints.extend(batch)
+        else:
+            misses += 1
+    return {
+        "endpoints": _dedupe_endpoints(endpoints),
+        "hits": hits,
+        "misses": misses,
+        "warnings": warnings,
+        "method": "getsome",
+    }
+
+
+def grpc_endpoints_for_search_keys(
+    channel, search_keys: list[str]
+) -> EndpointLookupResult:
+    keys = [k for k in (search_keys or []) if k]
+    if not keys:
+        return {
+            "endpoints": [],
+            "hits": 0,
+            "misses": 0,
+            "warnings": ["no_search_keys"],
+            "method": "getsome",
+        }
     stub = services.EndpointLocationServiceStub(channel)
-    stream_req = services.EndpointLocationStreamRequest()
     try:
-        for response in stub.GetAll(stream_req, timeout=RPC_TIMEOUT):
-            for _key, device in _device_map_entries(response.value):
-                _endpoint = convert_response_to_endpoint_location(device)
-                all_endpoints.append(_endpoint)
+        return _grpc_endpoints_via_getsome(stub, keys)
     except Exception as e:
-        logging.error(f"Error streaming all endpoint locations: {e}")
-    return all_endpoints
+        logging.error("EndpointLocation GetSome failed: %s", e)
+        warnings = [f"getsome_failed:{e}"]
+        endpoints: list = []
+        hits = 0
+        for key in keys:
+            found = grpc_one_endpoint_location(channel, key)
+            if found:
+                hits += 1
+                endpoints.extend(found)
+        return {
+            "endpoints": _dedupe_endpoints(endpoints),
+            "hits": hits,
+            "misses": len(keys) - hits,
+            "warnings": warnings + ["fell_back_to_getone"],
+            "method": "getone",
+        }
 
 
-def _location_matches_filter(loc, device_id, interface, vlan_id):
-    if device_id:
-        if not loc.HasField("device_id") or loc.device_id.value != device_id:
-            return False
-    if interface:
-        if not loc.HasField("interface") or loc.interface.value != interface:
-            return False
-    if vlan_id is not None:
-        if not loc.HasField("vlan_id") or loc.vlan_id.value != vlan_id:
-            return False
-    return True
-
-
-def grpc_endpoints_by_filter(channel, device_id=None, interface=None, vlan_id=None):
-    all_endpoints = []
-    stub = services.EndpointLocationServiceStub(channel)
-    stream_req = services.EndpointLocationStreamRequest()
-    try:
-        for response in stub.GetAll(stream_req, timeout=RPC_TIMEOUT):
-            for _key, device in _device_map_entries(response.value):
-                if not device.HasField("location_list"):
-                    continue
-                matched = any(
-                    _location_matches_filter(loc, device_id, interface, vlan_id)
-                    for loc in device.location_list.values
-                )
-                if matched:
-                    all_endpoints.append(convert_response_to_endpoint_location(device))
-    except Exception as e:
-        logging.error(f"Error filtering endpoint locations: {e}")
-    return all_endpoints
+def endpoint_location_matches_filters(
+    endpoint: dict,
+    *,
+    device_id: str | None = None,
+    interface: str | None = None,
+    vlan_id: int | None = None,
+) -> bool:
+    locs = endpoint.get("location_list") or []
+    if not locs:
+        return not device_id and not interface and vlan_id is None
+    for loc in locs:
+        if device_id:
+            did = (loc.get("device_id") or {}).get("value")
+            if did != device_id:
+                continue
+        if interface:
+            iface = (loc.get("interface") or {}).get("value")
+            if iface != interface:
+                continue
+        if vlan_id is not None:
+            vid = (loc.get("vlan_id") or {}).get("value")
+            if vid != vlan_id:
+                continue
+        return True
+    return False

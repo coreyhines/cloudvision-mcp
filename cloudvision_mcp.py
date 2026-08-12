@@ -22,8 +22,8 @@ from cvp_mcp.grpc.device_resolve import (
     summarize_inventory_candidates,
 )
 from cvp_mcp.grpc.endpoint import (
-    grpc_all_endpoint_locations,
-    grpc_endpoints_by_filter,
+    endpoint_location_matches_filters,
+    grpc_endpoints_for_search_keys,
     grpc_one_endpoint_location,
 )
 from cvp_mcp.grpc.envelope import tool_envelope
@@ -616,7 +616,8 @@ def get_cvp_all_endpoint_locations() -> dict:
         case "grpc":
             connCreds = createConnection(datadict)
             with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                all_endpoints = grpc_all_endpoint_locations(channel)
+                lookup = grpc_endpoints_for_search_keys(channel, [])
+                all_endpoints = lookup["endpoints"]
                 for _endpoint in all_endpoints:
                     for _device in _endpoint["location_list"]:
                         serial_number = _device["device_id"]["value"]
@@ -679,9 +680,17 @@ def get_cvp_endpoint_locations_filtered(
                             err["candidates"] = rows
                         return err
                     filter_device_id = serial
-                all_endpoints = grpc_endpoints_by_filter(
-                    channel, filter_device_id, interface, vlan_id
-                )
+                lookup = grpc_endpoints_for_search_keys(channel, [])
+                all_endpoints = [
+                    ep
+                    for ep in lookup["endpoints"]
+                    if endpoint_location_matches_filters(
+                        ep,
+                        device_id=filter_device_id,
+                        interface=interface,
+                        vlan_id=vlan_id,
+                    )
+                ]
                 for _endpoint in all_endpoints:
                     for _device in _endpoint["location_list"]:
                         serial_number = _device["device_id"]["value"]

@@ -76,6 +76,14 @@ class EndpointLocation(TypedDict):
     location_list: list[dict]
 
 
+class EndpointLookupResult(TypedDict):
+    endpoints: list[EndpointLocation]
+    hits: int
+    misses: int
+    warnings: list[str]
+    method: str
+
+
 class FlowRecord(TypedDict, total=False):
     device_id: str
     src_ip: str

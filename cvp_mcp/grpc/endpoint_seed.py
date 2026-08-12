@@ -73,11 +73,12 @@ def extract_endpoint_search_keys(lldp_rows: list[dict]) -> list[str]:
 def _is_eligible_switch(dev: dict[str, Any], *, include_lab_devices: bool) -> bool:
     if dev.get("streaming_status") != "Active":
         return False
-    if dev.get("device_type") != "EOS":
-        return False
-    if not include_lab_devices and _is_lab_device(dev):
-        return False
-    return True
+    device_type = dev.get("device_type")
+    if device_type == "EOS":
+        return True
+    if _is_lab_device(dev):
+        return include_lab_devices
+    return False
 
 
 def _inventory_by_serial(

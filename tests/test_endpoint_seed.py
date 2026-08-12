@@ -2,6 +2,7 @@
 from unittest.mock import MagicMock, patch
 
 from cvp_mcp.grpc.endpoint_seed import (
+    _is_eligible_switch,
     extract_endpoint_search_keys,
     normalize_endpoint_search_key,
     seed_endpoint_search_keys,
@@ -87,6 +88,26 @@ def test_seed_endpoint_search_keys_from_lldp_inventory():
     assert result["seed_stats"]["switches_scanned"] == 1
     assert result["seed_stats"]["lldp_neighbor_rows"] == 1
     assert result["seed_stats"]["unique_search_keys"] == 3
+
+
+def test_is_eligible_switch_virtual_eos_respects_include_lab_devices_flag():
+    virtual = {
+        "streaming_status": "Active",
+        "device_type": "Virtual EOS",
+    }
+    assert _is_eligible_switch(virtual, include_lab_devices=False) is False
+    assert _is_eligible_switch(virtual, include_lab_devices=True) is True
+
+
+def test_is_eligible_switch_rejects_inactive_ap_and_other_types():
+    active_eos = {"streaming_status": "Active", "device_type": "EOS"}
+    assert _is_eligible_switch(active_eos, include_lab_devices=False) is True
+
+    inactive_eos = {"streaming_status": "Inactive", "device_type": "EOS"}
+    assert _is_eligible_switch(inactive_eos, include_lab_devices=True) is False
+
+    ap = {"streaming_status": "Active", "device_type": "Access Point"}
+    assert _is_eligible_switch(ap, include_lab_devices=True) is False
 
 
 def test_seed_respects_device_serials_allowlist():

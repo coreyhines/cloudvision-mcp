@@ -110,7 +110,9 @@ def test_endpoint_location_matches_filters():
 
 def test_get_cvp_all_endpoint_locations_pipeline(monkeypatch):
     monkeypatch.setattr(mcp_mod, "CVP_TRANSPORT", "grpc")
-    monkeypatch.setattr(mcp_mod, "get_env_vars", lambda: {"cvp": "h:443", "cvtoken": "t"})
+    monkeypatch.setattr(
+        mcp_mod, "get_env_vars", lambda: {"cvp": "h:443", "cvtoken": "t"}
+    )
     monkeypatch.setattr(mcp_mod, "createConnection", lambda d: MagicMock())
 
     fake_channel = MagicMock()

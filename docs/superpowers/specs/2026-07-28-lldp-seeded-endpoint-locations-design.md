@@ -1,7 +1,7 @@
 # Design: LLDP-seeded EndpointLocation (replace GetAll)
 
 **Date:** 2026-07-28  
-**Status:** Approved — implementation plan at `docs/superpowers/plans/2026-07-31-lldp-seeded-endpoint-locations.md` (not yet implemented)  
+**Status:** Implemented (see `docs/superpowers/plans/2026-07-31-lldp-seeded-endpoint-locations.md`)  
 **Repo:** `cloudvision-mcp`
 
 ## Problem

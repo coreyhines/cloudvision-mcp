@@ -131,8 +131,24 @@ Responses for the newer tools use a common envelope: `device_id`, `collected_at`
 | `get_cvp_evpn` | EVPN Sysdb | `connector:device:Sysdb/evpn` |
 | `get_cvp_vxlan` | VxLAN Sysdb | `connector:device:Sysdb/vxlan` |
 | `get_cvp_system_health` | Version / environment / platform | `connector:device:Sysdb/sys+environment` |
+| `get_cvp_endpoint_location` | Single endpoint lookup by IP, MAC, or hostname (DNS-resolve FQDN → IP when needed) | `resource_api:endpointlocation.v1` (`GetOne`) |
+| `get_cvp_all_endpoint_locations` | **LLDP-seeded** bulk endpoint locations: inventory → LLDP neighbors → deduped search keys → `GetSome` (with `GetOne` fallback). Returns `devices`, `endpoints`, `seed_stats`, `warnings`. | `inventory+connector:lldp` → `resource_api:endpointlocation.v1` |
+| `get_cvp_endpoint_locations_filtered` | Same LLDP-seeded pipeline as above, scoped to one switch when `device_id` resolves; client-side filter by serial, interface, and/or VLAN after lookup. | same as bulk |
 
 Connector-based tools are best-effort: EOS paths differ by release, so `coverage` may be `partial` and `warnings` may explain empty results.
+
+### Endpoint locations
+
+CloudVision rejects bulk `GetAll` on EndpointLocation (gRPC UNIMPLEMENTED). The bulk and filtered tools above **do not** call `GetAll`; they seed search keys from LLDP on active EOS switches, then resolve each key via **`GetSome`** (falling back to batched **`GetOne`** when needed).
+
+**Coverage limits:** only hosts that appear as LLDP neighbors (or otherwise show up in LLDP Sysdb) are discoverable. Silent DHCP/Wi‑Fi clients without LLDP are excluded — use DHCP/OPNsense sources for those. LLDP sweeps follow the same bounded oper-up physical-port pattern as topology (active EOS only).
+
+**Response fields (bulk/filtered):** in addition to `devices` and `endpoints`, responses include:
+
+- `seed_stats` — e.g. `switches_scanned`, `lldp_neighbor_rows`, `unique_search_keys`, `getsome_hits`, `getsome_misses`, `lookup_method`
+- `warnings` — partial LLDP, no keys seeded, GetSome fallback, lookup misses, etc.
+
+Hard failures (missing credentials, device not found for filter) return `error` plus `warnings` instead of a silent empty success.
 
 ## Simple LLDP strategy for agents
 

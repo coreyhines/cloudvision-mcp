@@ -1,5 +1,6 @@
 import logging
 
+import grpc
 from arista.endpointlocation.v1 import models, services
 from google.protobuf import wrappers_pb2 as wrappers
 
@@ -84,7 +85,10 @@ def _grpc_endpoints_via_getsome(stub, keys: list[str]) -> EndpointLookupResult:
 
 
 def grpc_endpoints_for_search_keys(
-    channel, search_keys: list[str]
+    channel,
+    search_keys: list[str],
+    *,
+    max_getone_keys: int = 50,
 ) -> EndpointLookupResult:
     keys = [k for k in (search_keys or []) if k]
     if not keys:
@@ -98,12 +102,15 @@ def grpc_endpoints_for_search_keys(
     stub = services.EndpointLocationServiceStub(channel)
     try:
         return _grpc_endpoints_via_getsome(stub, keys)
-    except Exception as e:
+    except grpc.RpcError as e:
         logging.error("EndpointLocation GetSome failed: %s", e)
         warnings = [f"getsome_failed:{e}"]
         endpoints: list = []
         hits = 0
-        for key in keys:
+        keys_to_try = keys[:max_getone_keys]
+        if len(keys) > max_getone_keys:
+            warnings.append(f"getone_truncated:{len(keys) - max_getone_keys}")
+        for key in keys_to_try:
             found = grpc_one_endpoint_location(channel, key)
             if found:
                 hits += 1

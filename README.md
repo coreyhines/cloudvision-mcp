@@ -143,6 +143,8 @@ CloudVision rejects bulk `GetAll` on EndpointLocation (gRPC UNIMPLEMENTED). The 
 
 **Coverage limits:** only hosts that appear as LLDP neighbors (or otherwise show up in LLDP Sysdb) are discoverable. Silent DHCP/Wi‑Fi clients without LLDP are excluded — use DHCP/OPNsense sources for those. LLDP sweeps follow the same bounded oper-up physical-port pattern as topology (active EOS only).
 
+**Single-location conversion:** `convert_response_to_endpoint_location` currently keeps only the **first** attachment location per endpoint. Filtered lookups (`device_id`, `interface`, `vlan_id`) match against that first location only — endpoints with multiple switch attachments may be missed when the filter targets a secondary attachment.
+
 **Response fields (bulk/filtered):** in addition to `devices` and `endpoints`, responses include:
 
 - `seed_stats` — e.g. `switches_scanned`, `lldp_neighbor_rows`, `unique_search_keys`, `getsome_hits`, `getsome_misses`, `lookup_method`

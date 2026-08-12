@@ -10,7 +10,7 @@ import sys
 import grpc
 from mcp.server.fastmcp import FastMCP
 
-from cvp_mcp.env import env_datadict_from_os
+from cvp_mcp.env import cvp_credentials_missing_reasons, env_datadict_from_os
 from cvp_mcp.errors import client_error
 from cvp_mcp.grpc.bugs import grpc_all_bug_exposure
 from cvp_mcp.grpc.capability import probe_arista_v1_packages
@@ -604,43 +604,70 @@ def get_cvp_endpoint_location(search_term: str) -> dict:
 
 
 @mcp.tool()
-def get_cvp_all_endpoint_locations() -> dict:
+def get_cvp_all_endpoint_locations(
+    device_serial_allowlist: list[str] | None = None,
+    max_search_keys: int | None = None,
+) -> dict:
     """LLDP-seeded endpoint locations from CVP via GetSome/GetOne lookups.
 
     Seeds search keys from LLDP neighbors on switches, then resolves endpoint
     locations. Returns endpoints with MAC, IP, hostname, and their switch
     attachment locations (device + interface + VLAN).
+
+    Optional ``device_serial_allowlist`` limits LLDP seeding to those switch
+    serials. ``max_search_keys`` caps how many deduped keys are looked up.
     """
     datadict = get_env_vars()
+    cred_miss = cvp_credentials_missing_reasons(datadict)
+    if cred_miss:
+        return {"error": "missing_cloudvision_credentials", "warnings": cred_miss}
     all_devices = {}
     logging.info("CVP Get All Endpoint Locations")
     match CVP_TRANSPORT:
         case "grpc":
             connCreds = createConnection(datadict)
-            with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                seed = seed_endpoint_search_keys(datadict, channel)
-                lookup = grpc_endpoints_for_search_keys(channel, seed["search_keys"])
-                all_endpoints = lookup["endpoints"]
-                for _endpoint in all_endpoints:
-                    for _device in _endpoint["location_list"]:
-                        serial_number = _device["device_id"]["value"]
-                        if serial_number not in all_devices:
-                            all_devices[serial_number] = grpc_one_inventory_serial(
-                                channel, serial_number
-                            )
-                seed_stats = {
-                    **seed["seed_stats"],
-                    "getsome_hits": lookup["hits"],
-                    "getsome_misses": lookup["misses"],
-                    "lookup_method": lookup["method"],
-                }
-                warnings = seed["warnings"] + lookup["warnings"]
-                return {
-                    "devices": all_devices,
-                    "endpoints": all_endpoints,
-                    "seed_stats": seed_stats,
-                    "warnings": warnings,
-                }
+            warnings: list[str] = []
+            try:
+                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
+                    seed = seed_endpoint_search_keys(
+                        datadict,
+                        channel,
+                        device_serials=device_serial_allowlist,
+                    )
+                    warnings.extend(seed["warnings"])
+                    search_keys = seed["search_keys"]
+                    if (
+                        max_search_keys is not None
+                        and len(search_keys) > max_search_keys
+                    ):
+                        truncated = len(search_keys) - max_search_keys
+                        warnings.append(f"search_keys_truncated:{truncated}")
+                        search_keys = search_keys[:max_search_keys]
+                    lookup = grpc_endpoints_for_search_keys(channel, search_keys)
+                    warnings.extend(lookup["warnings"])
+                    all_endpoints = lookup["endpoints"]
+                    for _endpoint in all_endpoints:
+                        for _device in _endpoint["location_list"]:
+                            serial_number = _device["device_id"]["value"]
+                            if serial_number not in all_devices:
+                                all_devices[serial_number] = grpc_one_inventory_serial(
+                                    channel, serial_number
+                                )
+                    seed_stats = {
+                        **seed["seed_stats"],
+                        "getsome_hits": lookup["hits"],
+                        "getsome_misses": lookup["misses"],
+                        "lookup_method": lookup["method"],
+                    }
+                    return {
+                        "devices": all_devices,
+                        "endpoints": all_endpoints,
+                        "seed_stats": seed_stats,
+                        "warnings": warnings,
+                    }
+            except Exception as e:
+                logging.error("Endpoint location pipeline failed: %s", e)
+                return {"error": f"seed_failed:{e}", "warnings": warnings}
         case "http":
             logging.info("CVP HTTP Request for all devices")
             return {"error": "grpc_only", "warnings": []}
@@ -658,6 +685,9 @@ def get_cvp_endpoint_locations_filtered(
     Provide at least one filter; results are narrowed client-side after GetSome/GetOne lookup.
     """
     datadict = get_env_vars()
+    cred_miss = cvp_credentials_missing_reasons(datadict)
+    if cred_miss:
+        return {"error": "missing_cloudvision_credentials", "warnings": cred_miss}
     all_devices = {}
     logging.info(
         f"CVP Get Filtered Endpoint Locations: device={device_id} intf={interface} vlan={vlan_id}"
@@ -671,62 +701,70 @@ def get_cvp_endpoint_locations_filtered(
     match CVP_TRANSPORT:
         case "grpc":
             connCreds = createConnection(datadict)
-            with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                if filter_device_id:
-                    serial, _info, warns, candidates = _resolve_device_serial(
-                        datadict, filter_device_id, channel=channel
+            warnings: list[str] = []
+            try:
+                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
+                    if filter_device_id:
+                        serial, _info, warns, candidates = _resolve_device_serial(
+                            datadict, filter_device_id, channel=channel
+                        )
+                        if not serial:
+                            err = {
+                                "error": (
+                                    "device_ambiguous"
+                                    if "device_ambiguous" in warns
+                                    else "device_not_found"
+                                ),
+                                "device_id_input": (filter_device_id or "").strip(),
+                                "warnings": warns,
+                            }
+                            rows = summarize_inventory_candidates(candidates)
+                            if rows:
+                                err["candidates"] = rows
+                            return err
+                        filter_device_id = serial
+                    seed = seed_endpoint_search_keys(
+                        datadict,
+                        channel,
+                        device_serials=[filter_device_id] if filter_device_id else None,
                     )
-                    if not serial:
-                        err = {
-                            "error": (
-                                "device_ambiguous"
-                                if "device_ambiguous" in warns
-                                else "device_not_found"
-                            ),
-                            "device_id_input": (filter_device_id or "").strip(),
-                            "warnings": warns,
-                        }
-                        rows = summarize_inventory_candidates(candidates)
-                        if rows:
-                            err["candidates"] = rows
-                        return err
-                    filter_device_id = serial
-                seed = seed_endpoint_search_keys(
-                    datadict,
-                    channel,
-                    device_serials=[filter_device_id] if filter_device_id else None,
-                )
-                lookup = grpc_endpoints_for_search_keys(channel, seed["search_keys"])
-                all_endpoints = [
-                    ep
-                    for ep in lookup["endpoints"]
-                    if endpoint_location_matches_filters(
-                        ep,
-                        device_id=filter_device_id,
-                        interface=interface,
-                        vlan_id=vlan_id,
+                    warnings.extend(seed["warnings"])
+                    lookup = grpc_endpoints_for_search_keys(
+                        channel, seed["search_keys"]
                     )
-                ]
-                for _endpoint in all_endpoints:
-                    for _device in _endpoint["location_list"]:
-                        serial_number = _device["device_id"]["value"]
-                        if serial_number not in all_devices:
-                            all_devices[serial_number] = grpc_one_inventory_serial(
-                                channel, serial_number
-                            )
-                seed_stats = {
-                    **seed["seed_stats"],
-                    "getsome_hits": lookup["hits"],
-                    "getsome_misses": lookup["misses"],
-                    "lookup_method": lookup["method"],
-                }
-                warnings = seed["warnings"] + lookup["warnings"]
-                return {
-                    "devices": all_devices,
-                    "endpoints": all_endpoints,
-                    "seed_stats": seed_stats,
-                    "warnings": warnings,
-                }
+                    warnings.extend(lookup["warnings"])
+                    all_endpoints = [
+                        ep
+                        for ep in lookup["endpoints"]
+                        if endpoint_location_matches_filters(
+                            ep,
+                            device_id=filter_device_id,
+                            interface=interface,
+                            vlan_id=vlan_id,
+                        )
+                    ]
+                    for _endpoint in all_endpoints:
+                        for _device in _endpoint["location_list"]:
+                            serial_number = _device["device_id"]["value"]
+                            if serial_number not in all_devices:
+                                all_devices[serial_number] = grpc_one_inventory_serial(
+                                    channel, serial_number
+                                )
+                    seed_stats = {
+                        **seed["seed_stats"],
+                        "getsome_hits": lookup["hits"],
+                        "getsome_misses": lookup["misses"],
+                        "lookup_method": lookup["method"],
+                    }
+                    return {
+                        "devices": all_devices,
+                        "endpoints": all_endpoints,
+                        "seed_stats": seed_stats,
+                        "warnings": warnings,
+                    }
+            except Exception as e:
+                logging.error("Filtered endpoint location pipeline failed: %s", e)
+                return {"error": f"seed_failed:{e}", "warnings": warnings}
         case "http":
             logging.info("CVP HTTP Request for all devices")
             return {"error": "grpc_only", "warnings": []}

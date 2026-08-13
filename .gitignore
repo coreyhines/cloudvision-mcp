@@ -13,5 +13,4 @@ CODE_REVIEW.md
 headroom_memory.db
 *.db
 
-# Local superpowers implementation plans (not shipped)
-docs/superpowers/
+# Keep docs/superpowers/ tracked for approved design specs and plans.

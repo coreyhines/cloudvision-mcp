@@ -1,6 +1,5 @@
 cert.pem
 cvp-mcp.env
-uv.lock
 .venv/
 cvp_mcp.egg-info
 __pycache__

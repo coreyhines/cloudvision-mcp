@@ -286,6 +286,7 @@ collect_image_settings() {
 
   if [[ "${interactive}" -eq 1 ]]; then
     local _default="${IMAGE_REPO:-${CLOUDVISION_MCP_IMAGE_REPO:-}}"
+    local _repo=""
     read -r -p "Container registry/image (e.g. hub.example.com/cloudvision_mcp) [${_default}]: " _repo <"${tty_device}" || true
     if [[ -n "${_repo}" ]]; then
       IMAGE_REPO="${_repo}"
@@ -306,6 +307,7 @@ collect_image_settings() {
     local suggested
     suggested="$(resolve_next_image_tag "${IMAGE_REPO}")"
     if [[ "${interactive}" -eq 1 ]]; then
+      local _tag=""
       read -r -p "Container image tag [${suggested}]: " _tag <"${tty_device}" || true
       if [[ -n "${_tag}" ]]; then
         IMAGE_TAG="${_tag}"

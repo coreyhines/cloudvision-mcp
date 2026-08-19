@@ -3,11 +3,14 @@
 set -euo pipefail
 
 is_interactive_shell() {
+  if [[ -n "${CLOUDVISION_MCP_NONINTERACTIVE:-}" ]]; then
+    return 1
+  fi
+  if [[ ! -t 0 ]]; then
+    return 1
+  fi
   local tty_device=/dev/tty
   if [[ -e "${tty_device}" && -r "${tty_device}" ]]; then
-    return 0
-  fi
-  if [[ -t 0 ]]; then
     return 0
   fi
   return 1

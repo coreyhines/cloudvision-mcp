@@ -11,7 +11,7 @@ Coordination skill: Parallel Buckets (Cursor adapter)
 | Status | **`approved`** (scope: all, granted: 2026-08-20T03:48Z) |
 | Approved by | user (AskQuestion: Approve schedule) |
 | Approved waves | Wave 1 + Wave 2 |
-| Notes | Read-only spec review. No product-code edits. Wave 1 is five parallel reviewers; Wave 2 is coordinator synthesis. |
+| Notes | Wave 1+2 complete. R3/R4 rerouted to Cursor after CLI farm failures. |
 
 **Do not farm or dispatch until status is `approved` or `approved_wave_N`.**
 
@@ -37,7 +37,7 @@ Coordination skill: Parallel Buckets (Cursor adapter)
 | **Level** | **YELLOW** (Claude OAuth usage unreadable; Cursor GREEN 6% total / 10% API) |
 | **Updated** | 2026-08-19 22:47 CDT |
 | **Claude session / week %** | unavailable (`no_oauth_token`; burnbar anthropic not logged in) |
-| **Cursor total / API %** | 6% / 10% (burnbar, live) |
+| **Cursor total / API %** | 6% / 13% after (burnbar) |
 | **Codex / ChatGPT Plus week %** | 0% (`chatgpt.json`) |
 | **Ollama Cloud** | session 0%, week 26% |
 | **Capacity probe** | `burnbar_primary` |
@@ -50,8 +50,8 @@ Coordination skill: Parallel Buckets (Cursor adapter)
 |------|-----|-------|---------|-----------|-------|---------|-------|------|-------------|------------|-------------------|
 | 1 | R1 | API facts, dual config APIs, token/auth | `pure_logic` | opus | ollama-local | ollama-local | qwen3.8:27b-mlx | — | `docs/research/studios-support-review-R1.md` | — | yes |
 | 1 | R2 | Phase 1 read tools completeness | `read_tools` | none | cursor-auto | cursor-auto | auto | **subagent** | `docs/research/studios-support-review-R2.md` | — | yes |
-| 1 | R3 | Phase 2 writes vs Arista REST + EOS safety | `pure_logic` | **opus** | claude-opus | claude-cli | opus | — | `docs/research/studios-support-review-R3.md` | — | yes |
-| 1 | R4 | Caller info, gates, dry-run/confirm/submit | `pure_logic` | none | codex-default | codex-cli | gpt-5.6-sol | — | `docs/research/studios-support-review-R4.md` | — | yes |
+| 1 | R3 | Phase 2 writes vs Arista REST + EOS safety | `pure_logic` | **opus** | claude-opus | cursor-named-opus (reroute) | opus | **subagent** | `docs/research/studios-support-review-R3.md` | — | yes |
+| 1 | R4 | Caller info, gates, dry-run/confirm/submit | `pure_logic` | none | codex-default | cursor gpt-5.6-sol (reroute) | gpt-5.6-sol | **subagent** | `docs/research/studios-support-review-R4.md` | — | yes |
 | 1 | R5 | Testing, contradictions, open questions | `pure_logic` | none | cursor-named-sonnet | cursor-cli | sonnet | **subagent** | `docs/research/studios-support-review-R5.md` | — | yes |
 | 2 | RS | Synthesis + recommended spec edits | `integration_merge` | none | coordinator (Cursor) | inline | auto | **inline** | `docs/research/studios-support-review-synthesis.md` | R1–R5 | yes |
 
@@ -91,11 +91,11 @@ No product-code merge. Findings files are independent; RS is the only consumer.
 
 ## Open questions (resolve before approval)
 
-- [ ] If Ollama local is down at farm time, reroute R1 to **ollama-cloud / kimi-k3** (week 26%) or Cursor auto?
-- [ ] Claude CLI has no OAuth usage token in this session — farm R3 anyway, or swap R3 to Cursor opus?
+- [x] Ollama local was up for R1 farm (burnbar later flapped unreachable).
+- [x] Claude CLI farm failed; R3 rerouted to Cursor opus.
 
 ## Session reports
 
 | Date | Chat posted | File |
 |------|-------------|------|
-| 2026-08-19 | bucketize-only (this turn) | _(none until execute)_ |
+| 2026-08-19 | yes (execute) | `docs/research/studios-support-review-session-2026-08-19.md` |

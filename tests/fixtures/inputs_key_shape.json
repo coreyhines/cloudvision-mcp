@@ -1,0 +1,35 @@
+{
+  "first": {
+    "key": {
+      "studioId": "studio-static-configlet",
+      "workspaceId": "7061f456-11c9-429d-b609-c3e757f76210",
+      "path": {}
+    },
+    "value_keys": [
+      "key",
+      "createdAt",
+      "createdBy",
+      "lastModifiedAt",
+      "lastModifiedBy",
+      "inputs"
+    ]
+  },
+  "mainline": {
+    "key": {
+      "studioId": "TOPOLOGY",
+      "workspaceId": "",
+      "path": {}
+    },
+    "value_keys": [
+      "key",
+      "createdAt",
+      "createdBy",
+      "lastModifiedAt",
+      "lastModifiedBy",
+      "inputs"
+    ],
+    "inputs_type": "str",
+    "inputs_len": 99037,
+    "inputs_prefix": "{\"devices\":[{\"inputs\":{\"device\":{\"hostname\":\"720xp-48\",\"macAddress\":\"e0:fa:5b:72:11:9f\",\"interfaces\":[{\"inputs\":{\"interf"
+  }
+}

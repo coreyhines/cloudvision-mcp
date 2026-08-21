@@ -1,0 +1,461 @@
+[
+  {
+    "sources": {
+      "source": [
+        {
+          "source_type": "CONFIG_TYPE_STUDIO",
+          "key": "studio-campus-access-interfaces"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO",
+          "key": "studio-authentication"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO",
+          "key": "studio-avd-campus-fabric"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO",
+          "key": "studio-connectivity"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO",
+          "key": "studio-dns-settings"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO",
+          "key": "studio-date-time"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO",
+          "key": "studio-eos-aliases-pkg"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO",
+          "key": "studio-eos-event-handler-pkg"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO",
+          "key": "studio-flow-monitoring-pkg"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO",
+          "key": "studio-mss-service"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO",
+          "key": "5d78b7ed-76f0-4455-ae76-ca563fa5cf22"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO",
+          "key": "studio-postcard"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO",
+          "key": "studio-telemetry-config"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO_STATIC",
+          "key": "5a900404-306c-4695-b6d3-bf1d3cca9884"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO_STATIC",
+          "key": "d7b40f53-2021-4fec-b8ff-472a77634615"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO_STATIC",
+          "key": "f239139b-96fd-4a7e-b692-fc43ddf3abc8"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO_STATIC",
+          "key": "f239139b-96fd-4a7e-b692-fc43ddf3abc8"
+        },
+        {
+          "source_type": "CONFIG_TYPE_STUDIO_STATIC",
+          "key": "avd-JPE19151499"
+        }
+      ]
+    }
+  },
+  {
+    "config": "<truncated 19918 chars>"
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 16,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 16
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 18,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 18
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 29,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 29
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 31,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 31
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 42,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 42
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 44,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 44
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 52,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 52
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 54,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 54
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 65,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 65
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 67,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 67
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 99,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 99
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 101,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 101
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 126,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 126
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 128,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 128
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 144,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 144
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 155,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 155
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 157,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 157
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 173,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 173
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 175,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 175
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 186,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 186
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 188,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 188
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 196,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 196
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 198,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 198
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 210,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 210
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 212,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 212
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 230,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 230
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 232,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 232
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 244,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 244
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 246,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 246
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! VLAN id 3 not found in current VLAN configuration",
+      "line_num": 257,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 257
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! portfast should only be enabled on ports connected to a single host. Connecting hubs, concentrators, switches, bridges, etc. to this interface when portfast is enabled can cause temporary bridging loops. Use with CAUTION.",
+      "line_num": 268,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 268
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 270,
+      "configlet_name": "studio-campus-access-interfaces",
+      "config_line_num": 270
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Flow tracker: tr1 doesn't exist. The configuration will not take effect until the flow tracker is configured.",
+      "line_num": 109,
+      "configlet_name": "studio-avd-campus-fabric",
+      "config_line_num": 408
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Invalid vrf mgmt. Hosts will not be operational.",
+      "line_num": 3,
+      "configlet_name": "studio-connectivity",
+      "config_line_num": 503
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Invalid vrf mgmt. Hosts will not be operational.",
+      "line_num": 9,
+      "configlet_name": "studio-connectivity",
+      "config_line_num": 509
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Invalid vrf mgmt. Hosts will not be operational.",
+      "line_num": 15,
+      "configlet_name": "studio-connectivity",
+      "config_line_num": 515
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Invalid vrf mgmt. Hosts will not be operational.",
+      "line_num": 21,
+      "configlet_name": "studio-connectivity",
+      "config_line_num": 521
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Invalid vrf mgmt. Hosts will not be operational.",
+      "line_num": 27,
+      "configlet_name": "studio-connectivity",
+      "config_line_num": 527
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Invalid vrf mgmt. Hosts will not be operational.",
+      "line_num": 33,
+      "configlet_name": "studio-connectivity",
+      "config_line_num": 533
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Invalid vrf mgmt. Hosts will not be operational.",
+      "line_num": 39,
+      "configlet_name": "studio-connectivity",
+      "config_line_num": 539
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Invalid vrf mgmt. Hosts will not be operational.",
+      "line_num": 45,
+      "configlet_name": "studio-connectivity",
+      "config_line_num": 545
+    }
+  },
+  {
+    "error": {
+      "error_code": "DEVICEWARNING",
+      "error_msg": "! Change will take effect only after switch reboot.",
+      "line_num": 4,
+      "configlet_name": "f239139b-96fd-4a7e-b692-fc43ddf3abc8",
+      "config_line_num": 773
+    }
+  }
+]

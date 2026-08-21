@@ -1,0 +1,35 @@
+{
+  "result": {
+    "value": {
+      "key": {
+        "workspaceId": "builtin-studios-v0.112-topology"
+      },
+      "createdAt": "2025-05-06T02:17:30.503210815Z",
+      "createdBy": "provisioning",
+      "lastModifiedAt": "2025-05-06T02:17:33.057304794Z",
+      "lastModifiedBy": "provisioning",
+      "state": "WORKSPACE_STATE_SUBMITTED",
+      "lastBuildId": "build-3e099483-7eab-4d27-b442-2a5c1fc6d2d1",
+      "responses": {
+        "values": {
+          "build-3e099483-7eab-4d27-b442-2a5c1fc6d2d1": {
+            "status": "RESPONSE_STATUS_SUCCESS",
+            "message": "Build build-3e099483-7eab-4d27-b442-2a5c1fc6d2d1 finished successfully"
+          },
+          "submit-4669c245-1096-4b44-952d-473fe5fdb70e": {
+            "status": "RESPONSE_STATUS_SUCCESS",
+            "message": "Submitted successfully. No change control was created because no config or software changes were created."
+          }
+        }
+      },
+      "ccIds": {},
+      "needsBuild": false,
+      "needsRebase": false,
+      "displayName": "Add built-in studio topology.yaml, version v0.112",
+      "description": "This is an auto-generated workspace that adds/updates built-in studio from topology.yaml. Review and submit to save these changes.",
+      "excludeNetworkProvisioning": false,
+      "decommissionRequestIds": {}
+    },
+    "type": "INITIAL"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "result": {
+    "value": {
+      "key": {
+        "studioId": "TOPOLOGY",
+        "workspaceId": "",
+        "path": {}
+      },
+      "createdAt": "2025-08-26T16:15:13.504371090Z",
+      "createdBy": "chines",
+      "lastModifiedAt": "2026-07-20T20:45:31.763025043Z",
+      "lastModifiedBy": "chines",
+      "inputs": "{\"devices\":[{\"inputs\":{\"device\":{\"hostname\":\"720xp-48\",\"macAddress\":\"e0:fa:5b:72:11:9f\",\"interfaces\":[{\"inputs\":{\"interface\":{\"neighborDeviceId\":\"00:11:32:57:39:0d\",\"neighborInterfaceName\":\"00:11:32:57:39:0d\"}},\"tags\":{\"query\":\"interface:Ethernet1@HBG254804R6\"}},{\"inputs\":{\"interface\":{\"neighborDeviceId\":\"\",\"neighborInterfaceName\":\"\"}},\"tags\":{\"query\":\"interface:Ethernet2@HBG254804R6\"}},{\"inputs\":{\"interface\":{\"neighborDeviceId\":\"\",\"neighborInterfaceName\":\"\"}},\"tags\":{\"query\":\"interface:Ethernet...<truncated total 99037 chars>"
+    },
+    "type": "INITIAL"
+  }
+}

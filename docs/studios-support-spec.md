@@ -28,8 +28,8 @@ tools yet). Line-level merge of studio + configlet + CLI remains a later phase.
 A second motivation: `get_cvp_device_config` tries configstatus first (403 on this
 homelab’s Resource API), then falls back to compliance GetConfig for **running** config.
 Designed-config read must use the same compliance RPC with `type` parameterized
-(`DESIGNED_CONFIG`), not configstatus URIs. Today `config_async_flow.get_config` **hardcodes
-`RUNNING_CONFIG`**; implementers must add a `type` argument before designed-config tooling.
+(`DESIGNED_CONFIG`), not configstatus URIs. **`get_config` now accepts `config_type=`**
+(`RUNNING_CONFIG` default). Use `extract_designed_sources` for provenance.
 
 ## Implementation phases
 
@@ -90,13 +90,16 @@ sudo podman exec cloudvision-mcp-app printenv CVP
 `Authorization: Bearer <token>`. Note `apiserver.cv-staging.corp.arista.io` from the
 switches' TerminAttr config is the gRPC telemetry ingest address, not the REST API host.
 
-**Studio vs StudioConfig.** `Studio` / `Studio/all` is published metadata (and on this
-tenant the keyed mainline GET). `StudioConfig` / `StudioConfig/all` is the workspace-scoped
-definition stream used for template search. **Verified 2026-08-21:** keyed
-`GET .../Studio?key.studioId=&key.workspaceId=` with mainline `workspaceId=""` returns
-**200** (includes `template` + `inputSchema`). The same query on `StudioConfig` returns
-**404** `studio not found`. Use **Studio** for `get_cvp_studio`; use **StudioConfig/all**
-for `search_cvp_studio_templates`.
+**Studio vs StudioConfig (verified 2026-08-21):**
+
+| Access | Mainline `workspaceId=""` | Notes |
+| --- | --- | --- |
+| `GET Studio?key.studioId=&key.workspaceId=` | **200** | Includes `template` + `inputSchema` |
+| `GET StudioConfig?key…&key.workspaceId=` | **404** | `studio not found` |
+| `GET Studio/all` | includes empty-`workspaceId` rows | List + search source for **mainline** |
+| `GET StudioConfig/all` | **0** empty-`workspaceId` rows (345 nonempty) | Package/workspace copies only |
+
+**Implication:** `search_cvp_studio_templates` walks **`Studio/all`** (or keyed `Studio` GETs), **not** `StudioConfig/all`. The old worked example that implied mainline bodies came from `StudioConfig/all` was wrong; EOS Event Handler mainline is readable via keyed `Studio` (`logging` appears in that body). `StudioConfig` keyed GETs work for **non-empty** package workspace ids (e.g. `eos-event-handler-pkg-v0.0.x-…`).
 
 ### Resource API `/all` NDJSON (phase 1 implementer rules)
 
@@ -115,13 +118,10 @@ Example line:
 5. Yield `row = obj.get("result", {}).get("value")`. Skip if `value` is missing. Do **not**
    require `displayName`.
 6. Dedupe by resource key (`studioId`+`workspaceId` or equivalent): **last occurrence wins**.
-7. Do **not** reuse `fetch_uri_with_bearer` / `fetch_uri_json_object` first-object JSON
-   decode for `/all`. Add a **full-stream NDJSON** helper.
-8. MCP output uses **snake_case** inside `tool_envelope` (match existing `device_id`).
-   Wire responses remain camelCase.
-
-Unit fixtures: blank trailing line; value without `displayName`; two lines same `studioId`
-(update wins).
+7. Do **not** call `get_json_with_bearer` for `/all` (first-line / first-object fallback).
+   Use `get_ndjson_all_values_with_bearer` (default `max_bytes=32_000_000`).
+8. Unit fixtures: blank trailing line; value without `displayName`; two lines same `studioId`
+   (update wins).
 
 ### Envelope and registration (all new tools)
 
@@ -135,7 +135,13 @@ does **not** take `writes=True`. Phase 1 uses that decorator as-is. Phase 2 adds
 **separate** write registry gate (below), not a fictional `writes=` argument on the
 current decorator.
 
-Reuse `fetch_uri_with_bearer` for single-object GET; use the new NDJSON helper for `/all`.
+Reuse `fetch_uri_with_bearer` for raw/keyed single-object GET; use
+`get_ndjson_all_values_with_bearer` for `/all`. Do not use `get_json_with_bearer` on
+`/all` streams.
+
+**Helpers landed (2026-08-21):** `get_config(..., config_type=)` and
+`extract_designed_sources` / `studio_keys_from_sources` in `config_async_flow.py`;
+`get_ndjson_all_values_with_bearer` in `uri_fetch.py`. Fixture-backed unit tests cover both.
 
 ## Endpoint access matrix
 
@@ -157,15 +163,16 @@ where noted).
 | `/api/resources/configstatus/v1/Configuration?key.deviceId=<serial>` | 403 | same |
 | gRPC `configstatus` Summary/Configuration GetOne | PERMISSION_DENIED | same principal as REST |
 
-**Still required before coding Phase 1 poll helpers** — **captured 2026-08-21** in
-`tests/fixtures/workspace_build_enums.json` and `tests/fixtures/designed_config_sources_720xp24.json`:
+**Captured 2026-08-21** (see fixtures; no further probes required for these rows):
 
 | Item | Result |
 | --- | --- |
-| Mainline `workspaceId` | `""` (empty string); 27 studios on mainline in Studio/all |
-| Keyed Studio vs StudioConfig | **Studio** wins on mainline (200); StudioConfig keyed mainline **404** |
-| `GET Workspace` / `WorkspaceBuild` | 200 via `/all`; keyed shape `{workspaceId, buildId}` |
-| Build / workspace / response enums | See fixture; terminal build = `BUILD_STATE_{SUCCESS,FAIL,CANCELED}` |
+| Mainline `workspaceId` | `""` |
+| Keyed Studio vs StudioConfig | **Studio** 200; StudioConfig keyed mainline **404** |
+| `StudioConfig/all` mainline rows | **None** (empty `workspaceId` count = 0) |
+| `GET Workspace` / `WorkspaceBuild` | Sample bodies in `tests/fixtures/workspace_*_sample.json` |
+| Build / workspace / response enums | `tests/fixtures/workspace_build_enums.json` |
+| Inputs shape | `key` includes `path: {}`; `inputs` is a JSON **string**; v1 read = filter `Inputs/all` |
 
 ### Write access (same token, 2026-08-19)
 
@@ -195,23 +202,19 @@ Official REST write flow documented by Arista:
 
 ### Compliance GetConfig (shared contract)
 
-Existing running-config code POSTs to
-`/api/v3/services/compliancecheck.Compliance/GetConfig` with
-`{"request":{"device_id":...,"timestamp": RFC3339 UTC, "type":"RUNNING_CONFIG"}}`
-and retries 502/503/504. **Parameterize `type`** (`RUNNING_CONFIG` |
-`DESIGNED_CONFIG`) before implementing `get_cvp_designed_config`. Do not add a
-second copy of the POST client.
+**Live `DESIGNED_CONFIG` wire fixture (2026-08-21):**
+`tests/fixtures/designed_config_response_720xp24.json` — literal JSON **array** response
+(config strings truncated). Analyst summary (optional): 
+`tests/fixtures/designed_config_sources_720xp24.json`.
 
-**Live `DESIGNED_CONFIG` fixture (2026-08-21):**
-`tests/fixtures/designed_config_sources_720xp24.json` (serial `JPE19151499` / 720xp-24).
-
-Important wire facts:
+Important wire facts (diffed against raw capture):
 
 - HTTP 200 body is a **JSON array** of message objects (not a single object, not NDJSON).
 - One message is `{"sources":{"source":[...]}}`; a later message is `{"config":"<designed CLI>"}`.
-- Each source entry is `{"source_type":"CONFIG_TYPE_STUDIO"|"CONFIG_TYPE_STUDIO_STATIC","key":"<studioId string>"}`.
-  **`key` is a string**, not a nested `{studio_id:...}` object.
-- Observed on 720xp-24: 13× `CONFIG_TYPE_STUDIO`, 5× `CONFIG_TYPE_STUDIO_STATIC` (includes AVD static ids).
+- Each source entry uses **snake_case** on this RPC:
+  `{"source_type":"CONFIG_TYPE_STUDIO"|"CONFIG_TYPE_STUDIO_STATIC","key":"<studioId string>"}`.
+  Field name is `source_type` (not `sourceType`); `key` is a **string**, not a nested object.
+- Observed on 720xp-24: both `CONFIG_TYPE_STUDIO` and `CONFIG_TYPE_STUDIO_STATIC`.
 
 ```json
 [
@@ -227,7 +230,12 @@ Important wire facts:
 ]
 ```
 
-Normalize in the envelope: `studio_keys` from every `source.key` string; keep `source_type`.
+Normalize via `extract_designed_sources` / `studio_keys_from_sources` (dedupe, preserve order).
+
+Existing running-config code POSTs to
+`/api/v3/services/compliancecheck.Compliance/GetConfig`. **`get_config` now accepts
+`config_type=`** (`RUNNING_CONFIG` default | `DESIGNED_CONFIG`). Do not add a second POST
+client.
 
 #### `get_cvp_designed_config`
 
@@ -274,9 +282,12 @@ Current **instance** values (schema ≠ values). Required so later writes are no
 
 | | |
 | --- | --- |
-| **Endpoint** | `GET /api/resources/studio/v1/Inputs/all` filtered client-side by `studio_id` + `workspace_id`, or keyed GET if the live API documents query params |
-| **Parameters** | `studio_id: str`, `workspace_id: str \| None = None` (same mainline default as `get_cvp_studio`) |
-| **Returns** | `object`: `{studio_id, workspace_id, path_values, inputs}` (`inputs` parsed JSON object, not a double-encoded string) |
+| **Endpoint (v1)** | `GET /api/resources/studio/v1/Inputs/all` then **client-filter** by `studio_id` + `workspace_id` (and optional path) |
+| **Why not keyed GET** | Keyed `GET .../Inputs?key.studioId=&key.workspaceId=` returns **400** `path cannot be nil`. Live keys include `"path": {}`. Encoding an empty path for keyed GET is unresolved (`key.path.values=` → 404). Ship filter-`/all` first. |
+| **Parameters** | `studio_id: str`, `workspace_id: str \| None = None` (mainline default `""`) |
+| **Wire** | `inputs` is a **JSON string** on the resource; parse once to an object for the envelope |
+| **Returns** | Prefer `items[]` when multiple path rows match; if only the root `path: {}` row exists, still return `items` of length 1. Each item: `{studio_id, workspace_id, path_values, inputs}` |
+| **Fixture** | `tests/fixtures/inputs_mainline_topology_sample.json` (truncated) |
 
 #### `search_cvp_studio_templates`
 
@@ -285,14 +296,15 @@ Finds studios whose **source** (template body and/or input schema) mentions a pa
 
 | | |
 | --- | --- |
-| **Endpoint** | `GET /api/resources/studio/v1/StudioConfig/all` |
+| **Endpoint** | `GET /api/resources/studio/v1/Studio/all` (mainline + others). **Do not** use `StudioConfig/all` for mainline search — that stream has **no** empty-`workspaceId` rows on this tenant. |
 | **Parameters** | `pattern: str` (literal substring, case-sensitive v1), `include_input_schema: bool = True`, `max_hits: int = 100` |
-| **Walk** | Recursive strings on parsed `result.value`; `json_path` uses dotted keys + `[n]` for lists. Do not search the raw NDJSON string. |
+| **Walk** | Recursive strings on parsed `result.value` via NDJSON helper; `json_path` uses dotted keys + `[n]` for lists. |
 | **Returns** | `items[]`: `{studio_id, workspace_id, display_name, json_path, snippet, in_template: bool}` |
 
-Worked example: searching `logging` matched only the *EOS Event Handler* studio, at paths
-like `inputSchema.fields.values.inputfield_onLoggingConfig.label`. No studio template
-emits `logging host`. JSON path is mandatory so that result is not a false positive.
+Worked example (re-verified 2026-08-21): keyed mainline
+`Studio?key.studioId=studio-eos-event-handler-pkg&key.workspaceId=` returns display name
+*EOS Event Handler* and the body contains `logging` (often in input-schema labels). Use
+JSON paths so UI labels are not mistaken for rendered CLI.
 
 #### `get_cvp_workspaces`
 
@@ -345,6 +357,10 @@ Polling is **only** in read tools / the agent loop — never inside a write tool
 
 ## Phase 2 — Write tools
 
+> **Design only / gated.** Phase 2 does **not** ship in the first MCP release. Tables below
+> are the allowed design if writes are later enabled — not an implementation checklist for
+> the Phase 1 PR.
+
 ### Ship decision
 
 **Resolved:** Phase 2 write tools **do not ship in the first MCP release.** Phase 1 is
@@ -383,17 +399,37 @@ change.
 7. No compound tools: never create → inputs → build → submit in one MCP invocation.
 8. Audit log (INFO): tool name, `workspace_id`, `studio_id`, `request_id`, outcome.
    **Never** log token, Authorization, full inputs, template body, or input schema.
-
-POST bodies accept **snake_case or camelCase** keys; responses are **camelCase** (Arista).
-Shared helper: `post_resource_config(path, body) -> dict` using existing bearer + host
-allowlist; parse a single JSON object (writes are not NDJSON `/all`).
+9. **Non-empty `workspace_id` on every write.** After `strip()`, refuse empty
+   (`error="workspace_id_required"`). `""` is **mainline**; MCP never writes to mainline
+   directly (client-side control; server behaviour for mainline InputsConfig writes is
+   unverified — refuse either way).
+10. **`^builtin-` denylist on every write**, not only delete.
 
 **Hard-coded `request` enum per tool.** Never pass `Workspace.Request` through from the
 model. Do **not** expose `REQUEST_SUBMIT_FORCE` or `REQUEST_ROLLBACK`. Do **not** send
 `start` / `schedule` on ChangeControlConfig (CC write tools are out of v1 entirely).
 
-**`builtin-` denylist on every write**, not only delete: refuse `workspace_id` matching
-`^builtin-` (after strip). Prefer `StudioSummary.immutable` / `from_package` for studios.
+### Field-level dangers (write helper contract)
+
+`post_resource_config(path, body)` MUST enforce, independently of any caller:
+
+1. **Path allowlist** — exactly
+   `{workspace/v1/WorkspaceConfig, studio/v1/InputsConfig, studio/v1/AssignedTagsConfig,
+   studio/v1/StudioConfig}`. Any other path raises before the request is built.
+   `changecontrol/*` and `configlet/*` are not on the list in v1.
+2. **`request` allowlist** — if the body contains a `request` key, its value must be in
+   `{REQUEST_START_BUILD, REQUEST_SUBMIT}`. Reject every other value, including
+   `REQUEST_SUBMIT_FORCE` and `REQUEST_ROLLBACK`.
+3. **Body key denylist** — reject any body containing `start`, `schedule`, or `change` at
+   any depth.
+4. **Non-empty `key.workspace_id`** — same as global gate 9.
+
+These are backstops. Each tool still constructs its own literal enum.
+
+POST bodies accept **snake_case or camelCase** keys; responses are **camelCase** (Arista).
+Shared helper: `post_resource_config(path, body) -> dict` using existing bearer + host
+allowlist **plus** the field-level contract above; parse a single JSON object (writes are
+not NDJSON `/all`). Prefer `StudioSummary.immutable` / `from_package` for studio refusals.
 
 Dry-run precedence:
 
@@ -449,25 +485,28 @@ submit.
 | | |
 | --- | --- |
 | **Endpoint** | `POST /api/resources/studio/v1/InputsConfig` |
-| **Parameters** | `studio_id: str`, `workspace_id: str`, `inputs: dict`, `path_values: list[str] \| None = None`, `confirm: bool = False` |
+| **Parameters** | `studio_id: str`, `workspace_id: str`, `inputs: dict`, `path_values: list[str] \| None = None`, `replace_all_inputs: bool = False`, `confirm: bool = False` |
 | **Body** | `{"key":{"studio_id","workspace_id","path":{"values": <path_values or []>}},"inputs":"<JSON string>"}` |
-| **Serialize** | `inputs` is a **JSON-encoded string** on the wire. Accept **dict only** in the tool; `json.dumps` **once**. Do not accept a string (avoids double encoding). Normalize `path_values is None` to `[]`. Never `path_values: list = []`. |
-| **Replace semantics (critical)** | Studio Inputs at a **higher path overwrite prior sets at lower paths**. The root path (`values: []`) **replaces the entire input tree** for that studio in the workspace. A “set this VLAN” call that posts root path **wipes** all other inputs. Nested `path_values` only replace that subtree. Dry-run **must** state: path, whether this is a full-tree replace, and a preview of current inputs from `get_cvp_studio_inputs` (read-only). |
+| **Serialize** | `inputs` is a **JSON-encoded string** on the wire. Accept **dict only**; `json.dumps` **once**. Never `path_values: list = []` as a Python default. |
+| **Refuse** | Empty/`None` `path_values` without `replace_all_inputs=True` → `error="root_path_requires_replace_all_inputs"`. Empty `workspace_id` → `workspace_id_required`. |
+| **Path syntax** | e.g. `["ntpServers", "[ip=10.10.10.10]", "vrf"]` per studio.v1; match against `get_cvp_studio` schema. |
+| **Replace semantics (critical)** | Higher paths overwrite lower. Root (`values: []`) wipes the tree. Prefer read-modify-write via `get_cvp_studio_inputs` with before/after in dry-run. |
 | **Caller must supply** | Schema from `get_cvp_studio` **and** current values from `get_cvp_studio_inputs`. Wrong shape fails at **build** time, not POST time. |
 | **Returns** | `studio_id`, `workspace_id`, `path_values`, `full_tree_replace: bool`, `time` |
 
-Refuse writes into `immutable` / `from_package` studios.
+Refuse writes into `immutable` / `from_package` studios. Lint `inputs` for the same
+disruptive EOS primitives as templates (`create_cvp_studio`) — preferred path is inputs/tags.
 
 #### `assign_cvp_studio_tags`
 
 | | |
 | --- | --- |
 | **Endpoint** | `POST /api/resources/studio/v1/AssignedTagsConfig` |
-| **Parameters** | `studio_id: str`, `workspace_id: str`, `query: str`, `confirm: bool = False` |
+| **Parameters** | `studio_id: str`, `workspace_id: str`, `query: str`, `confirm: bool = False`, `unassign_all: bool = False`, `expected_current_query: str \| None = None` |
 | **Body** | `{"key":{"studio_id","workspace_id"},"query":"datacenter:NY"}` |
-| **Replace semantics (critical)** | `query` is **one string** for the studio assignment. Setting `device:lab-switch` **unassigns the studio from every other device**. Empty string unassigns all (studio delete flow) — treat as destructive, not “just another query.” |
-| **Dry-run** | Resolve the query to a **target preview**: device ids + count (inventory/tag read). State that this **replaces** the previous assignment. |
-| **Returns** | `studio_id`, `workspace_id`, `query`, `target_device_ids`, `time` |
+| **Replace semantics (critical)** | `query` replaces the entire assignment. Empty query requires `unassign_all=True` or refuse. |
+| **Preflight** | Add Phase 1 `get_cvp_studio_assigned_tags` before this write ships. If `expected_current_query` is set, refuse on mismatch. Dry-run shows previous query + device preview when resolvable; else `target_preview_unresolved` warning. |
+| **Returns** | `studio_id`, `workspace_id`, `query`, `target_device_ids` (nullable), `time` |
 
 #### `build_cvp_workspace`
 
@@ -489,7 +528,7 @@ Refuse if workspace missing, builtin, or a build is already in progress (once li
 | **Body** | `{"key":{"workspace_id":"..."},"request":"REQUEST_SUBMIT","request_params":{"request_id":"<uuid>"}}` only — never `REQUEST_SUBMIT_FORCE` |
 | **Parameters** | `workspace_id: str`, `request_id: str \| None = None`, `confirm: bool = False`, `allow_submit: bool = False`, `build_id: str`, `build_proof: str` |
 | **Gates** | Env `CLOUDVISION_MCP_ALLOW_WRITES=1` **and** `CLOUDVISION_MCP_ALLOW_SUBMIT=1`; `confirm=True`; `allow_submit=True`; proof-of-review (below). |
-| **Proof-of-review** | Caller passes `build_id` and `build_proof` (build hash or `last_modified` from `get_cvp_workspace_build`). Tool **re-fetches** that build and refuses if missing, not success, `errors` non-empty, or the proof does not match (Arista `ApproveConfig.version` staleness pattern). Refuse if workspace contents changed after that build. |
+| **Proof-of-review** | Caller passes `build_id` plus a **workspace** staleness token from `get_cvp_workspace` after review (`lastModifiedAt` or equivalent — **not** a field from the immutable `WorkspaceBuild` record alone; re-fetching a terminal build always matches). Tool re-fetches workspace + build; refuse if build not `BUILD_STATE_SUCCESS`, workspace token mismatch, or contents changed after that build. Until a live staleness field is confirmed, keep submit **unregistered** even when both env vars are set. |
 | **Returns** | `outcome: "accepted"`, `operation: "submit"`, `done: false`, `workspace_id`, `request_id`, `cc_ids: null` unless IDs are in the **immediate** POST body, `next_action` telling the caller to poll `get_cvp_workspace` until a **terminal submit state**. Empty `ccIds` before terminal means **unknown**, not “no CC.” HTTP 200 must **never** be `outcome: "succeeded"`. **Do not poll** inside this tool. Do not create/approve/execute a CC. |
 
 #### `create_cvp_studio`
@@ -575,20 +614,23 @@ description and another inside a template body; assert JSON paths differ.
 
 Add fixtures under `tests/fixtures/`:
 
-- `designed_config_sources_720xp24.json` — live DESIGNED_CONFIG array shape + sources
-- `workspace_build_enums.json` — mainline `""`, build/workspace/response enums, poll contract
+- `designed_config_response_720xp24.json` — **literal** DESIGNED_CONFIG array (wire-shaped)
+- `designed_config_sources_720xp24.json` — analyst summary (optional companion)
+- `workspace_response_sample.json` / `workspace_build_response_sample.json` — poll mocks
+- `workspace_build_enums.json` — enum tallies + mainline notes
+- `inputs_mainline_topology_sample.json` — Inputs `path: {}` + string `inputs`
 
-Unit-test GetConfig `type` parameter (`RUNNING_CONFIG` vs `DESIGNED_CONFIG`) and array
-parse (sources message + config message).
+Unit-test GetConfig `config_type` and `extract_designed_sources` against the wire fixture.
+Unit-test `get_ndjson_all_values_with_bearer` last-wins / invalid-line behaviour.
 
 ### Tool inventory (quick reference)
 
 | Tool | Phase | HTTP (summary) |
 | --- | --- | --- |
 | `get_cvp_studios` | 1 | GET Studio/all (full NDJSON) |
-| `get_cvp_studio` | 1 | GET Studio or StudioConfig (keyed; confirm) |
-| `get_cvp_studio_inputs` | 1 | GET Inputs/all or keyed Inputs |
-| `search_cvp_studio_templates` | 1 | GET StudioConfig/all + client search |
+| `get_cvp_studio` | 1 | GET Studio keyed (mainline `workspaceId=""`) |
+| `get_cvp_studio_inputs` | 1 | GET Inputs/all + client filter |
+| `search_cvp_studio_templates` | 1 | GET Studio/all + client search |
 | `get_cvp_workspaces` | 1 | GET Workspace/all |
 | `get_cvp_workspace` | 1 | GET Workspace keyed |
 | `get_cvp_workspace_build` | 1 | GET WorkspaceBuild keyed |
@@ -609,9 +651,9 @@ No MCP tools for ChangeControlConfig POST/DELETE in v1. No configlet tools in v1
 1. Which **service account display name** in CVP UI corresponds to `sid=019d4bab-9d59-7376-9ed2-fd66a69748a3`?
 2. Correct keyed GET for `ConfigletConfig` (workspace + configlet id) — only if configlets
    enter a later phase.
-3. ~~Exact mainline `workspaceId` string and live WorkspaceBuild state enums~~
-   **Done 2026-08-21:** mainline `""`; enums in `tests/fixtures/workspace_build_enums.json`.
-4. ~~Does this staging tenant auto-execute CCs created by workspace submit?~~
-   **No (2026-08-20).** CCs remain pending approval; humans approve/execute in CVP UI.
-5. SHA-256 vs another hash for omitted template bodies — SHA-256 is the v1 choice unless
-   CVP already exposes a content hash.
+3. ~~Exact mainline `workspaceId` / build enums / Studio vs StudioConfig~~ **Done.**
+4. ~~Auto-execute CCs?~~ **No — pending approval (2026-08-20).**
+5. ~~SHA-256 for omitted templates~~ — v1 choice is SHA-256 of UTF-8 Mako source.
+6. Tag-query → device-id resolution endpoint for assign dry-run previews.
+7. Workspace staleness field for submit proof-of-review (beyond immutable WorkspaceBuild).
+8. Keyed `Inputs` empty-path encoding (v1 uses Inputs/all filter).

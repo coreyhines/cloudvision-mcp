@@ -1,0 +1,468 @@
+{
+  "value": {
+    "key": {
+      "studioId": "studio-eos-event-handler-pkg",
+      "workspaceId": ""
+    },
+    "displayName": "EOS Event Handler",
+    "description": "Configure EOS event handlers for device sets",
+    "inputSchema": {
+      "fields": {
+        "values": {
+          "inputfield_actionCommand": {
+            "id": "inputfield_actionCommand",
+            "type": "INPUT_FIELD_TYPE_STRING",
+            "name": "actionCommand",
+            "label": "Action Command",
+            "description": "The bash command or script to run when triggered. For single-line: e.g. touch /tmp/test. For CLI: e.g. FastCli -p 15 -c \"copy running-config startup-config\"",
+            "required": false,
+            "stringProps": {
+              "isSecret": false,
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_advancedConfig": {
+            "id": "inputfield_advancedConfig",
+            "type": "INPUT_FIELD_TYPE_GROUP",
+            "name": "advancedConfig",
+            "label": "Advanced Settings",
+            "description": "Optional advanced settings for timeout, asynchronous mode, threshold, and repeat interval.",
+            "required": false,
+            "groupProps": {
+              "members": {
+                "values": [
+                  "inputfield_timeout",
+                  "inputfield_timeoutTerminate",
+                  "inputfield_asynchronous",
+                  "inputfield_thresholdWindow",
+                  "inputfield_thresholdCount",
+                  "inputfield_repeatInterval",
+                  "inputfield_repeatCount"
+                ]
+              }
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_asynchronous": {
+            "id": "inputfield_asynchronous",
+            "type": "INPUT_FIELD_TYPE_BOOLEAN",
+            "name": "asynchronous",
+            "label": "Asynchronous",
+            "description": "Run the action immediately instead of queuing. WARNING: Use with caution \u2014 disables the built-in queuing mechanism. Not recommended with on-logging triggers.",
+            "required": false,
+            "booleanProps": {
+              "defaultValue": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_conditionExpr": {
+            "id": "inputfield_conditionExpr",
+            "type": "INPUT_FIELD_TYPE_STRING",
+            "name": "conditionExpr",
+            "label": "Condition Expression",
+            "description": "Counter condition expression using Python-style operators (e.g. Fap*.Ddp2BuffCrcErrCnt.delta > 100). Use bashCmd.\"<command>\" for custom bash counters.",
+            "required": false,
+            "stringProps": {
+              "isSecret": false,
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_config": {
+            "id": "inputfield_config",
+            "type": "INPUT_FIELD_TYPE_GROUP",
+            "name": "config",
+            "label": "Event Handler Configuration",
+            "description": "",
+            "required": false,
+            "groupProps": {
+              "members": {
+                "values": [
+                  "inputfield_eventHandlers"
+                ]
+              }
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_countersPollInterval": {
+            "id": "inputfield_countersPollInterval",
+            "type": "INPUT_FIELD_TYPE_INTEGER",
+            "name": "countersPollInterval",
+            "label": "Poll Interval (seconds)",
+            "description": "How often to evaluate the counter condition.",
+            "required": false,
+            "integerProps": {
+              "range": "1..1000000",
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_customConditionScript": {
+            "id": "inputfield_customConditionScript",
+            "type": "INPUT_FIELD_TYPE_STRING",
+            "name": "customConditionScript",
+            "label": "Condition Script",
+            "description": "Multi-line bash or python script for the custom condition. Use exit $EVENT_DETECTED or exit $EVENT_NOT_DETECTED for return codes. Do not include the leading 'condition bash' or trailing 'EOF' \u2014 those are generated automatically.",
+            "required": false,
+            "stringProps": {
+              "isSecret": false,
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_customPollInterval": {
+            "id": "inputfield_customPollInterval",
+            "type": "INPUT_FIELD_TYPE_INTEGER",
+            "name": "customPollInterval",
+            "label": "Poll Interval (seconds)",
+            "description": "How often to run the custom condition script.",
+            "required": false,
+            "integerProps": {
+              "range": "1..1000000",
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_delay": {
+            "id": "inputfield_delay",
+            "type": "INPUT_FIELD_TYPE_INTEGER",
+            "name": "delay",
+            "label": "Delay (seconds)",
+            "description": "Delay in seconds between the event and the action. EOS default is 20 seconds.",
+            "required": false,
+            "integerProps": {
+              "range": "0..3000000",
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_deviceSets": {
+            "id": "inputfield_deviceSets",
+            "type": "INPUT_FIELD_TYPE_RESOLVER",
+            "name": "deviceSets",
+            "label": "Event Handler Device Sets",
+            "description": "Assign event handlers to a set of devices.",
+            "required": false,
+            "resolverProps": {
+              "baseFieldId": "inputfield_config",
+              "displayMode": "RESOLVER_FIELD_DISPLAY_MODE_SPARSE",
+              "inputMode": "RESOLVER_FIELD_INPUT_MODE_MULTI_DEVICE_TAG"
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_eventHandler": {
+            "id": "inputfield_eventHandler",
+            "type": "INPUT_FIELD_TYPE_GROUP",
+            "name": "eventHandler",
+            "label": "Event Handler",
+            "description": "",
+            "required": false,
+            "groupProps": {
+              "members": {
+                "values": [
+                  "inputfield_handlerName",
+                  "inputfield_triggerType",
+                  "inputfield_actionCommand",
+                  "inputfield_delay",
+                  "inputfield_triggerOnConfigDisabled",
+                  "inputfield_onLoggingConfig",
+                  "inputfield_onIntfConfig",
+                  "inputfield_onCountersConfig",
+                  "inputfield_onCustomConditionConfig",
+                  "inputfield_advancedConfig"
+                ]
+              }
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_eventHandlers": {
+            "id": "inputfield_eventHandlers",
+            "type": "INPUT_FIELD_TYPE_COLLECTION",
+            "name": "eventHandlers",
+            "label": "Event Handlers",
+            "description": "Define one or more event handlers.",
+            "required": false,
+            "collectionProps": {
+              "baseFieldId": "inputfield_eventHandler",
+              "key": "inputfield_handlerName"
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_handlerName": {
+            "id": "inputfield_handlerName",
+            "type": "INPUT_FIELD_TYPE_STRING",
+            "name": "handlerName",
+            "label": "Handler Name",
+            "description": "Unique name for this event handler.",
+            "required": false,
+            "stringProps": {
+              "isSecret": false,
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_intfName": {
+            "id": "inputfield_intfName",
+            "type": "INPUT_FIELD_TYPE_STRING",
+            "name": "intfName",
+            "label": "Interface Name or Range",
+            "description": "Interface name or range (e.g. Ethernet1, Ethernet1-36, Port-Channel1).",
+            "required": false,
+            "stringProps": {
+              "isSecret": false,
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_intfTriggerOn": {
+            "id": "inputfield_intfTriggerOn",
+            "type": "INPUT_FIELD_TYPE_STRING",
+            "name": "intfTriggerOn",
+            "label": "Interface Trigger On",
+            "description": "What interface change triggers the handler.",
+            "required": false,
+            "stringProps": {
+              "defaultValue": "operstatus",
+              "staticOptions": {
+                "values": [
+                  "operstatus",
+                  "ip",
+                  "operstatus ip"
+                ]
+              },
+              "isSecret": false,
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_loggingPollInterval": {
+            "id": "inputfield_loggingPollInterval",
+            "type": "INPUT_FIELD_TYPE_INTEGER",
+            "name": "loggingPollInterval",
+            "label": "Poll Interval (seconds)",
+            "description": "How often to poll for the logging event.",
+            "required": false,
+            "integerProps": {
+              "range": "1..1000000",
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_loggingRegex": {
+            "id": "inputfield_loggingRegex",
+            "type": "INPUT_FIELD_TYPE_STRING",
+            "name": "loggingRegex",
+            "label": "Syslog Regex",
+            "description": "Regular expression to match against syslog messages (e.g. BGP, %REDUNDANCY-5-OTHER_STANDBY).",
+            "required": false,
+            "stringProps": {
+              "isSecret": false,
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_onCountersConfig": {
+            "id": "inputfield_onCountersConfig",
+            "type": "INPUT_FIELD_TYPE_GROUP",
+            "name": "onCountersConfig",
+            "label": "on-counters Settings",
+            "description": "Settings for the on-counters trigger type. Only used when Trigger Type is on-counters.",
+            "required": false,
+            "groupProps": {
+              "members": {
+                "values": [
+                  "inputfield_conditionExpr",
+                  "inputfield_countersPollInterval"
+                ]
+              }
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_onCustomConditionConfig": {
+            "id": "inputfield_onCustomConditionConfig",
+            "type": "INPUT_FIELD_TYPE_GROUP",
+            "name": "onCustomConditionConfig",
+            "label": "on-custom-condition Settings",
+            "description": "Settings for the on-custom-condition trigger type. Requires EOS 4.33.0F+. Only used when Trigger Type is on-custom-condition.",
+            "required": false,
+            "groupProps": {
+              "members": {
+                "values": [
+                  "inputfield_customConditionScript",
+                  "inputfield_customPollInterval"
+                ]
+              }
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_onIntfConfig": {
+            "id": "inputfield_onIntfConfig",
+            "type": "INPUT_FIELD_TYPE_GROUP",
+            "name": "onIntfConfig",
+            "label": "on-intf Settings",
+            "description": "Settings for the on-intf trigger type. Only used when Trigger Type is on-intf.",
+            "required": false,
+            "groupProps": {
+              "members": {
+                "values": [
+                  "inputfield_intfName",
+                  "inputfield_intfTriggerOn"
+                ]
+              }
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_onLoggingConfig": {
+            "id": "inputfield_onLoggingConfig",
+            "type": "INPUT_FIELD_TYPE_GROUP",
+            "name": "onLoggingConfig",
+            "label": "on-logging Settings",
+            "description": "Settings for the on-logging trigger type. Only used when Trigger Type is on-logging.",
+            "required": false,
+            "groupProps": {
+              "members": {
+                "values": [
+                  "inputfield_loggingRegex",
+                  "inputfield_loggingPollInterval"
+                ]
+              }
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_repeatCount": {
+            "id": "inputfield_repeatCount",
+            "type": "INPUT_FIELD_TYPE_INTEGER",
+            "name": "repeatCount",
+            "label": "Repeat Count",
+            "description": "Maximum number of action triggers within the repeat interval. Default is 1 if not specified.",
+            "required": false,
+            "integerProps": {
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_repeatInterval": {
+            "id": "inputfield_repeatInterval",
+            "type": "INPUT_FIELD_TYPE_INTEGER",
+            "name": "repeatInterval",
+            "label": "Repeat Interval (seconds)",
+            "description": "Time window in seconds to limit action triggers. No more than the repeat count actions will fire within this window.",
+            "required": false,
+            "integerProps": {
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_thresholdCount": {
+            "id": "inputfield_thresholdCount",
+            "type": "INPUT_FIELD_TYPE_INTEGER",
+            "name": "thresholdCount",
+            "label": "Threshold Count",
+            "description": "Number of events required within the threshold window to trigger the action.",
+            "required": false,
+            "integerProps": {
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_thresholdWindow": {
+            "id": "inputfield_thresholdWindow",
+            "type": "INPUT_FIELD_TYPE_INTEGER",
+            "name": "thresholdWindow",
+            "label": "Threshold Window (seconds)",
+            "description": "Sliding time window in seconds for the threshold. Action only triggers if the event count is met within this window.",
+            "required": false,
+            "integerProps": {
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_timeout": {
+            "id": "inputfield_timeout",
+            "type": "INPUT_FIELD_TYPE_INTEGER",
+            "name": "timeout",
+            "label": "Timeout (seconds)",
+            "description": "Maximum action duration in seconds. Default/minimum is 10 seconds.",
+            "required": false,
+            "integerProps": {
+              "range": "10..3000000",
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_timeoutTerminate": {
+            "id": "inputfield_timeoutTerminate",
+            "type": "INPUT_FIELD_TYPE_BOOLEAN",
+            "name": "timeoutTerminate",
+            "label": "Terminate on Timeout",
+            "description": "Terminate the action if it exceeds the timeout. Requires EOS 4.33.1F+.",
+            "required": false,
+            "booleanProps": {
+              "defaultValue": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_triggerOnConfigDisabled": {
+            "id": "inputfield_triggerOnConfigDisabled",
+            "type": "INPUT_FIELD_TYPE_BOOLEAN",
+            "name": "triggerOnConfigDisabled",
+            "label": "Disable Trigger on Config",
+            "description": "Prevent the action from running when the event handler configuration is applied. Requires EOS 4.26.0F+.",
+            "required": false,
+            "booleanProps": {
+              "defaultValue": false
+            },
+            "autoFillActionId": ""
+          },
+          "inputfield_triggerType": {
+            "id": "inputfield_triggerType",
+            "type": "INPUT_FIELD_TYPE_STRING",
+            "name": "triggerType",
+            "label": "Trigger Type",
+            "description": "The event type that triggers this handler. Must be explicitly selected.",
+            "required": false,
+            "stringProps": {
+              "staticOptions": {
+                "values": [
+                  "on-boot",
+                  "on-startup-config",
+                  "on-logging",
+                  "on-intf",
+                  "on-counters",
+                  "on-custom-condition"
+                ]
+              },
+              "isSecret": false,
+              "extraValuesAllowed": false
+            },
+            "autoFillActionId": ""
+          },
+          "root": {
+            "id": "root",
+            "type": "INPUT_FIELD_TYPE_GROUP",
+            "name": "",
+            "label": "",
+            "description": "",
+            "required": false,
+            "groupProps": {
+              "members": {
+                "values": [
+                  "inputfield_deviceSets"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "layout": {
+        "value": "{\"inputfield_deviceSets\":{\"key\":\"inputfield_deviceSets\",\"showDefaultRow\":false,\"type\":\"INPUT\"},\"inputfield_eventHandlers\":{\"isPageLayout\":true,\"key\":\"inputfield_eventHandlers\",\"type\":\"INPUT\"},\"inputfield_onCountersConfig\":{\"dependency\":{\"inputfield_triggerType\":{\"mode\":\"SHOW\",\"value\":[\"on-counters\"]}},\"key\":\"inputfield_onCountersConfig\",\"type\":\"INPUT\"},\"inputfield_onCustomConditionConfig\":{\"dependency\":{\"inputfield_triggerType\":{\"mode\":\"SHOW\",\"value\":[\"on-custom-condition\"]}},\"key\":\"inputfield_onCustomConditionConfig\",\"type\":\"INPUT\"},\"inputfield_onIntfConfig\":{\"dependency\":{\"inputfield_triggerType\":{\"mode\":\"SHOW\",\"value\":[\"on-intf\"]}},\"key\":\"inputfield_onIntfConfig\",\"type\":\"INPUT\"},\"inputfield_onLoggingConfig\":{\"dependency\":{\"inputfield_triggerType\":{\"mode\":\"SHOW\",\"value\":[\"on-logging\"]}},\"key\":\"inputfield_onLoggingConfig\",\"type\":\"INPUT\"}}"
+      }
+    },
+    "template": {
+      "type": "TEMPLATE_TYPE_MAKO",
+      "body": "<str 5264 chars>"
+    },
+    "_note": "Live keyed Studio mainline GET includes template+inputSchema; use Studio/all or keyed Studio for search, not StudioConfig/all (no mainline rows)."
+  }
+}

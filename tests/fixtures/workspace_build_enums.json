@@ -34,7 +34,8 @@
       "BUILD_STATE_FAIL",
       "BUILD_STATE_CANCELED"
     ],
-    "success_build_state": "BUILD_STATE_SUCCESS"
+    "success_build_state": "BUILD_STATE_SUCCESS",
+    "workspace_staleness": "Submit proof-of-review must use Workspace lastModifiedAt (or similar), not immutable WorkspaceBuild alone"
   },
   "keyed_get": {
     "mainline_workspace_id": "",
@@ -45,6 +46,22 @@
     "mainline_example_key": {
       "studioId": "TOPOLOGY",
       "workspaceId": ""
-    }
+    },
+    "StudioConfig_all_mainline": false
+  },
+  "studioconfig_all": {
+    "empty_workspaceId_rows": 0,
+    "nonempty_workspaceId_rows": 345,
+    "note": "StudioConfig/all has no mainline rows; search mainline via Studio/all or keyed Studio GET."
+  },
+  "inputs": {
+    "v1": "GET Inputs/all + client filter",
+    "key_shape": {
+      "studioId": "...",
+      "workspaceId": "",
+      "path": {}
+    },
+    "inputs_field": "JSON string",
+    "keyed_get": "400 path cannot be nil without path; empty path encoding unresolved"
   }
 }

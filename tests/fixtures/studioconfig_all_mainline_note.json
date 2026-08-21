@@ -1,0 +1,7 @@
+{
+  "empty_workspaceId_rows": 0,
+  "nonempty_workspaceId_rows": 345,
+  "mainline_samples": [],
+  "event_handler_rows": [],
+  "conclusion": "No empty workspaceId rows in StudioConfig/all; search worked example needs update."
+}

@@ -189,13 +189,83 @@ _GET_CONFIG_RETRY_STATUSES = frozenset({502, 503, 504})
 _GET_CONFIG_MAX_ATTEMPTS = 3
 
 
+_GET_CONFIG_TYPES = frozenset({"RUNNING_CONFIG", "DESIGNED_CONFIG"})
+
+
+def extract_designed_sources(obj: Any) -> list[dict[str, str]]:
+    """
+    Normalize DESIGNED_CONFIG ``sources.source`` entries from a GetConfig body.
+
+    Live wire (2026-08-21): HTTP body is a JSON **array** of messages; one message
+    carries ``sources`` with entries ``{source_type, key}`` where ``key`` is a string
+    studio id (snake_case field names on this RPC).
+    """
+    messages: list[Any]
+    if isinstance(obj, list):
+        messages = obj
+    elif isinstance(obj, dict):
+        messages = [obj]
+    else:
+        return []
+
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        sources = msg.get("sources")
+        if not isinstance(sources, dict):
+            continue
+        rows = sources.get("source")
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            source_type = _as_str(row.get("source_type") or row.get("sourceType"))
+            key = row.get("key")
+            if isinstance(key, dict):
+                studio_id = (
+                    _as_str(key.get("studio_id"))
+                    or _as_str(key.get("studioId"))
+                    or _as_str(key.get("id"))
+                )
+            else:
+                studio_id = _as_str(key)
+            if not studio_id:
+                continue
+            dedupe = f"{source_type}|{studio_id}"
+            if dedupe in seen:
+                continue
+            seen.add(dedupe)
+            out.append({"source_type": source_type, "key": studio_id})
+    return out
+
+
+def studio_keys_from_sources(sources: list[dict[str, str]]) -> list[str]:
+    """Ordered unique studio ids from ``extract_designed_sources`` output."""
+    keys: list[str] = []
+    seen: set[str] = set()
+    for row in sources:
+        studio_id = row.get("key") or ""
+        if not studio_id or studio_id in seen:
+            continue
+        seen.add(studio_id)
+        keys.append(studio_id)
+    return keys
+
+
 async def get_config(
     session: aiohttp.ClientSession,
     url: str,
     device: str,
     timestamp: int,
+    *,
+    config_type: str = "RUNNING_CONFIG",
 ) -> tuple[str | None, str | None]:
     """POST GetConfig; retries on gateway overload / upstream timeouts (502/503/504)."""
+    if config_type not in _GET_CONFIG_TYPES:
+        return None, f"invalid_config_type:{config_type}"
     last_err: str | None = None
     for attempt in range(_GET_CONFIG_MAX_ATTEMPTS):
         ts = now_ns() if attempt else timestamp
@@ -203,7 +273,7 @@ async def get_config(
             "request": {
                 "device_id": device,
                 "timestamp": _rfc3339_utc_from_ns(ts),
-                "type": "RUNNING_CONFIG",
+                "type": config_type,
             }
         }
         try:

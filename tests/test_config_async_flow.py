@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 
 from cvp_mcp.grpc import config_async_flow as caf
 from cvp_mcp.grpc.config_async_flow import (
     _decode_json_maybe_multi,
     _rfc3339_utc_from_ns,
+    extract_designed_sources,
+    studio_keys_from_sources,
 )
 
 
@@ -32,6 +36,75 @@ def test_decode_json_maybe_multi_with_xssi_prefix():
     obj = _decode_json_maybe_multi(')]}\'\n{"config":"cfg"}\n')
     assert isinstance(obj, dict)
     assert obj["config"] == "cfg"
+
+
+def test_extract_designed_sources_from_live_fixture():
+    raw = json.loads(
+        (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "designed_config_response_720xp24.json"
+        ).read_text(encoding="utf-8")
+    )
+    sources = extract_designed_sources(raw)
+    assert sources
+    assert sources[0]["source_type"] == "CONFIG_TYPE_STUDIO"
+    assert sources[0]["key"] == "studio-campus-access-interfaces"
+    types = {row["source_type"] for row in sources}
+    assert "CONFIG_TYPE_STUDIO" in types
+    assert "CONFIG_TYPE_STUDIO_STATIC" in types
+    keys = studio_keys_from_sources(sources)
+    assert "studio-authentication" in keys
+    assert "avd-JPE19151499" in keys
+    # duplicate STATIC key in live response is deduped
+    assert keys.count("f239139b-96fd-4a7e-b692-fc43ddf3abc8") <= 1
+
+
+def test_get_config_passes_config_type():
+    class _Resp:
+        def __init__(self, status: int, body: str):
+            self.status = status
+            self._body = body
+
+        async def text(self):
+            return self._body
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Sess:
+        def __init__(self):
+            self.payloads: list[dict] = []
+
+        def post(self, url, json, timeout=None):  # noqa: A002
+            self.payloads.append(json)
+            return _Resp(
+                200,
+                '[{"sources":{"source":[{"source_type":"CONFIG_TYPE_STUDIO","key":"studio-x"}]}},{"config":"!\\nhostname designed\\n"}]',
+            )
+
+    sess = _Sess()
+    cfg, err = asyncio.run(
+        caf.get_config(sess, "https://x", "dev1", 1, config_type="DESIGNED_CONFIG")
+    )
+    assert err is None
+    assert cfg is not None and "hostname designed" in cfg
+    assert sess.payloads[0]["request"]["type"] == "DESIGNED_CONFIG"
+
+
+def test_get_config_rejects_invalid_type():
+    class _Sess:
+        def post(self, *args, **kwargs):
+            raise AssertionError("should not POST")
+
+    cfg, err = asyncio.run(
+        caf.get_config(_Sess(), "https://x", "dev1", 1, config_type="NOPE")
+    )
+    assert cfg is None
+    assert err == "invalid_config_type:NOPE"
 
 
 def test_get_config_single_payload_path():

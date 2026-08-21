@@ -81,7 +81,12 @@ def get_json_with_bearer(
     max_bytes: int = 5_000_000,
     timeout_sec: float = 60.0,
 ) -> tuple[dict | list | None, str | None]:
-    """GET URI with bearer auth and decode response JSON."""
+    """GET URI with bearer auth and decode response JSON.
+
+    For Resource API ``/all`` NDJSON streams, use
+    :func:`get_ndjson_all_values_with_bearer` instead. This helper's first-line
+    fallback returns only one object and is wrong for list tools.
+    """
     text, err = fetch_uri_with_bearer(
         uri,
         bearer_token,
@@ -117,6 +122,100 @@ def get_json_with_bearer(
     if not isinstance(obj, (dict, list)):
         return None, "unexpected_json_type"
     return obj, None
+
+
+def _resource_dedupe_key(value: dict[str, Any]) -> str | None:
+    key = value.get("key")
+    if isinstance(key, dict) and key:
+        return json.dumps(key, sort_keys=True, default=str)
+    for candidate in (
+        "studioId",
+        "studio_id",
+        "workspaceId",
+        "workspace_id",
+        "deviceId",
+        "device_id",
+        "id",
+    ):
+        if candidate in value and value[candidate] is not None:
+            return f"{candidate}:{value[candidate]}"
+    return None
+
+
+def get_ndjson_all_values_with_bearer(
+    uri: str,
+    bearer_token: str,
+    *,
+    cafile: str | None = None,
+    cvp_endpoint: str | None = None,
+    max_bytes: int = 32_000_000,
+    timeout_sec: float = 180.0,
+) -> tuple[list[dict[str, Any]] | None, str | None, list[str]]:
+    """
+    GET a Resource API ``/all`` NDJSON stream and return every ``result.value``.
+
+    Parses **all** lines (not first-object-only). Skips blank lines and invalid
+    JSON lines. Dedupes by ``value.key`` (or common id fields): last occurrence
+    wins. Returns ``(values, error, warnings)``.
+    """
+    warnings: list[str] = []
+    text, err = fetch_uri_with_bearer(
+        uri,
+        bearer_token,
+        cafile=cafile,
+        cvp_endpoint=cvp_endpoint,
+        max_bytes=max_bytes,
+        timeout_sec=timeout_sec,
+    )
+    if err and not (text and err.startswith("truncated_to_")):
+        return None, err, warnings
+    if err and err.startswith("truncated_to_"):
+        warnings.append(err)
+    if not text:
+        return None, "empty_response", warnings
+
+    body = text.lstrip()
+    if body.startswith(")]}'"):
+        nl = body.find("\n")
+        if nl != -1:
+            body = body[nl + 1 :]
+
+    ordered_keys: list[str] = []
+    by_key: dict[str, dict[str, Any]] = {}
+    no_key: list[dict[str, Any]] = []
+    invalid_lines = 0
+
+    for line in body.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            invalid_lines += 1
+            continue
+        if not isinstance(obj, dict):
+            invalid_lines += 1
+            continue
+        result = obj.get("result")
+        if not isinstance(result, dict):
+            continue
+        value = result.get("value")
+        if not isinstance(value, dict):
+            continue
+        dedupe = _resource_dedupe_key(value)
+        if dedupe is None:
+            no_key.append(value)
+            continue
+        if dedupe not in by_key:
+            ordered_keys.append(dedupe)
+        by_key[dedupe] = value
+
+    if invalid_lines:
+        warnings.append(f"ndjson_skip_invalid_line:{invalid_lines}")
+
+    values = [by_key[k] for k in ordered_keys] + no_key
+    return values, None, warnings
 
 
 def post_json_with_bearer(

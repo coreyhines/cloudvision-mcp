@@ -148,7 +148,7 @@ def get_ndjson_all_values_with_bearer(
     *,
     cafile: str | None = None,
     cvp_endpoint: str | None = None,
-    max_bytes: int = 32_000_000,
+    max_bytes: int = 96_000_000,
     timeout_sec: float = 180.0,
 ) -> tuple[list[dict[str, Any]] | None, str | None, list[str]]:
     """

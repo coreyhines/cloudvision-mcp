@@ -27,7 +27,9 @@ from cvp_mcp.grpc.uri_fetch import (
 )
 
 _MAINLINE_WORKSPACE_ID = ""
-_NDJSON_MAX_BYTES = 32_000_000
+# Live Studio/all on this CVaaS tenant is ~75 MiB (2026-08-21); 32 MiB truncated
+# before mainline (workspaceId="") rows appeared. Keep headroom under 128 MiB.
+_NDJSON_MAX_BYTES = 96_000_000
 _TEMPLATE_BODY_WARN_BYTES = 100_000
 
 

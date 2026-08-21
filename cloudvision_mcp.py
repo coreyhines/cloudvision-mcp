@@ -48,6 +48,30 @@ from cvp_mcp.grpc.overlay import (
     grpc_get_vxlan,
 )
 from cvp_mcp.grpc.routing import grpc_get_bgp_status, grpc_get_routes
+from cvp_mcp.grpc.studios import (
+    get_cvp_designed_config as studios_get_designed_config,
+)
+from cvp_mcp.grpc.studios import (
+    get_cvp_studio as studios_get_studio,
+)
+from cvp_mcp.grpc.studios import (
+    get_cvp_studio_inputs as studios_get_studio_inputs,
+)
+from cvp_mcp.grpc.studios import (
+    get_cvp_studios as studios_get_studios,
+)
+from cvp_mcp.grpc.studios import (
+    get_cvp_workspace as studios_get_workspace,
+)
+from cvp_mcp.grpc.studios import (
+    get_cvp_workspace_build as studios_get_workspace_build,
+)
+from cvp_mcp.grpc.studios import (
+    get_cvp_workspaces as studios_get_workspaces,
+)
+from cvp_mcp.grpc.studios import (
+    search_cvp_studio_templates as studios_search_templates,
+)
 from cvp_mcp.grpc.utils import _is_lab_device, createConnection
 from cvp_mcp.rate_limit import rate_limited_tool
 from cvp_mcp.tool_access import tool_enabled
@@ -1368,6 +1392,121 @@ def get_cvp_flow_data(
     if resolution:
         out.update(resolution)
     return out
+
+
+# ===================================================
+# Studios / workspaces / designed-config (Phase 1 reads)
+# ===================================================
+
+
+@mcp.tool()
+@tool_enabled("get_cvp_studios")
+def get_cvp_studios() -> dict:
+    """List CloudVision studios (ids, names, flags). Omits large template bodies."""
+    datadict = get_env_vars()
+    try:
+        return studios_get_studios(datadict)
+    except Exception as e:
+        return client_error("studios_failed", log_exc=e, context="get_cvp_studios")
+
+
+@mcp.tool()
+@tool_enabled("get_cvp_studio")
+def get_cvp_studio(
+    studio_id: str, workspace_id: str | None = None, body: bool = False
+) -> dict:
+    """One studio by id. Default workspace is mainline (empty string). Set body=True for full Mako."""
+    datadict = get_env_vars()
+    try:
+        return studios_get_studio(datadict, studio_id, workspace_id, body=body)
+    except Exception as e:
+        return client_error("studio_failed", log_exc=e, context="get_cvp_studio")
+
+
+@mcp.tool()
+@tool_enabled("get_cvp_studio_inputs")
+def get_cvp_studio_inputs(studio_id: str, workspace_id: str | None = None) -> dict:
+    """Current studio input document(s) for a studio/workspace (mainline default)."""
+    datadict = get_env_vars()
+    try:
+        return studios_get_studio_inputs(datadict, studio_id, workspace_id)
+    except Exception as e:
+        return client_error(
+            "studio_inputs_failed", log_exc=e, context="get_cvp_studio_inputs"
+        )
+
+
+@mcp.tool()
+@tool_enabled("search_cvp_studio_templates")
+def search_cvp_studio_templates(
+    pattern: str, include_input_schema: bool = True, max_hits: int = 100
+) -> dict:
+    """Search studio templates/schemas for a literal substring; returns JSON paths of hits."""
+    datadict = get_env_vars()
+    try:
+        return studios_search_templates(
+            datadict,
+            pattern,
+            include_input_schema=include_input_schema,
+            max_hits=max_hits,
+        )
+    except Exception as e:
+        return client_error(
+            "studio_search_failed", log_exc=e, context="search_cvp_studio_templates"
+        )
+
+
+@mcp.tool()
+@tool_enabled("get_cvp_workspaces")
+def get_cvp_workspaces() -> dict:
+    """List CloudVision workspaces (state, cc ids, build/response ids)."""
+    datadict = get_env_vars()
+    try:
+        return studios_get_workspaces(datadict)
+    except Exception as e:
+        return client_error(
+            "workspaces_failed", log_exc=e, context="get_cvp_workspaces"
+        )
+
+
+@mcp.tool()
+@tool_enabled("get_cvp_workspace")
+def get_cvp_workspace(workspace_id: str) -> dict:
+    """One workspace by id, including responses map for build/submit polling."""
+    datadict = get_env_vars()
+    try:
+        return studios_get_workspace(datadict, workspace_id)
+    except Exception as e:
+        return client_error("workspace_failed", log_exc=e, context="get_cvp_workspace")
+
+
+@mcp.tool()
+@tool_enabled("get_cvp_workspace_build")
+def get_cvp_workspace_build(workspace_id: str, build_id: str) -> dict:
+    """Workspace build status (BUILD_STATE_*) for poll-after-build workflows."""
+    datadict = get_env_vars()
+    try:
+        return studios_get_workspace_build(datadict, workspace_id, build_id)
+    except Exception as e:
+        return client_error(
+            "workspace_build_failed", log_exc=e, context="get_cvp_workspace_build"
+        )
+
+
+@mcp.tool()
+@tool_enabled("get_cvp_designed_config")
+def get_cvp_designed_config(device_id: str) -> dict:
+    """Designed-config studio sources for a device (compliance GetConfig DESIGNED_CONFIG).
+
+    Prefer device serial; hostname is resolved via inventory when possible.
+    """
+    datadict = get_env_vars()
+    try:
+        return studios_get_designed_config(datadict, device_id)
+    except Exception as e:
+        return client_error(
+            "designed_config_failed", log_exc=e, context="get_cvp_designed_config"
+        )
 
 
 def main(args):

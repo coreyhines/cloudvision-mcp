@@ -255,15 +255,15 @@ def studio_keys_from_sources(sources: list[dict[str, str]]) -> list[str]:
     return keys
 
 
-async def get_config(
+async def get_config_payload(
     session: aiohttp.ClientSession,
     url: str,
     device: str,
     timestamp: int,
     *,
     config_type: str = "RUNNING_CONFIG",
-) -> tuple[str | None, str | None]:
-    """POST GetConfig; retries on gateway overload / upstream timeouts (502/503/504)."""
+) -> tuple[Any | None, str | None]:
+    """POST GetConfig and return decoded JSON (object or list) plus error."""
     if config_type not in _GET_CONFIG_TYPES:
         return None, f"invalid_config_type:{config_type}"
     last_err: str | None = None
@@ -291,11 +291,7 @@ async def get_config(
                         await asyncio.sleep(2**attempt)
                         continue
                     return None, err
-                data = _decode_json_maybe_multi(raw)
-                cfg = _extract_config_from_response(data)
-                if cfg:
-                    return cfg, None
-                return None, "no_config_in_response"
+                return _decode_json_maybe_multi(raw), None
         except Exception as e:  # noqa: BLE001
             last_err = str(e)
             if attempt < _GET_CONFIG_MAX_ATTEMPTS - 1:
@@ -303,6 +299,26 @@ async def get_config(
                 continue
             return None, last_err
     return None, last_err or "no_config_in_response"
+
+
+async def get_config(
+    session: aiohttp.ClientSession,
+    url: str,
+    device: str,
+    timestamp: int,
+    *,
+    config_type: str = "RUNNING_CONFIG",
+) -> tuple[str | None, str | None]:
+    """POST GetConfig; retries on gateway overload / upstream timeouts (502/503/504)."""
+    data, err = await get_config_payload(
+        session, url, device, timestamp, config_type=config_type
+    )
+    if err:
+        return None, err
+    cfg = _extract_config_from_response(data)
+    if cfg:
+        return cfg, None
+    return None, "no_config_in_response"
 
 
 async def save_config(

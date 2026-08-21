@@ -110,7 +110,9 @@ Example line:
 {"result":{"value":{"key":{"studioId":"..."},"displayName":"...","template":{...}},"time":"...","type":"INITIAL"}}
 ```
 
-1. GET the URI with bearer + host allowlist; read the **full** body (size cap e.g. 32 MiB).
+1. GET the URI with bearer + host allowlist; read the **full** body. Studios Phase 1
+   uses a **96 MiB** cap (live `Studio/all` on this tenant was ~75 MiB on 2026-08-21;
+   a 32 MiB cap truncated before mainline `workspaceId=""` rows).
 2. Split on newlines. Skip empty / whitespace-only lines.
 3. If the body starts with `)]}'`, drop that XSSI prefix line (same as existing URI fetch).
 4. `json.loads` **each** line. Skip decode failures; increment `warnings` count
@@ -119,7 +121,7 @@ Example line:
    require `displayName`.
 6. Dedupe by resource key (`studioId`+`workspaceId` or equivalent): **last occurrence wins**.
 7. Do **not** call `get_json_with_bearer` for `/all` (first-line / first-object fallback).
-   Use `get_ndjson_all_values_with_bearer` (default `max_bytes=32_000_000`).
+   Use `get_ndjson_all_values_with_bearer` (default / studios callers: `max_bytes=96_000_000`).
 8. Unit fixtures: blank trailing line; value without `displayName`; two lines same `studioId`
    (update wins).
 

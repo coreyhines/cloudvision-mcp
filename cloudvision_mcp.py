@@ -72,10 +72,23 @@ from cvp_mcp.grpc.studios import (
 from cvp_mcp.grpc.studios import (
     search_cvp_studio_templates as studios_search_templates,
 )
+from cvp_mcp.grpc.studios_write import (
+    build_cvp_workspace as studios_build_workspace,
+)
+from cvp_mcp.grpc.studios_write import (
+    create_cvp_workspace as studios_create_workspace,
+)
+from cvp_mcp.grpc.studios_write import (
+    delete_cvp_workspace as studios_delete_workspace,
+)
+from cvp_mcp.grpc.studios_write import (
+    set_cvp_access_interface_description as studios_set_access_description,
+)
 from cvp_mcp.grpc.utils import _is_lab_device, createConnection
 from cvp_mcp.rate_limit import rate_limited_tool
 from cvp_mcp.tool_access import tool_enabled
 from cvp_mcp.transport_security_config import build_transport_security
+from cvp_mcp.write_access import writes_enabled
 
 CVP_TRANSPORT = "grpc"
 
@@ -1507,6 +1520,120 @@ def get_cvp_designed_config(device_id: str) -> dict:
         return client_error(
             "designed_config_failed", log_exc=e, context="get_cvp_designed_config"
         )
+
+
+# ===================================================
+# Studios Phase 2.0 writes (registered only when ALLOW_WRITES=1)
+# ===================================================
+
+
+if writes_enabled():
+
+    @mcp.tool()
+    @tool_enabled("create_cvp_workspace")
+    def create_cvp_workspace(
+        workspace_id: str,
+        display_name: str,
+        description: str = "",
+        confirm: bool = False,
+        preview_token: str | None = None,
+    ) -> dict:
+        """Create a draft workspace. Dry-run unless confirm=True and preview_token matches."""
+        datadict = get_env_vars()
+        try:
+            return studios_create_workspace(
+                datadict,
+                workspace_id,
+                display_name,
+                description=description,
+                confirm=confirm,
+                preview_token_value=preview_token,
+            )
+        except Exception as e:
+            return client_error(
+                "create_workspace_failed",
+                log_exc=e,
+                context="create_cvp_workspace",
+            )
+
+    @mcp.tool()
+    @tool_enabled("delete_cvp_workspace")
+    def delete_cvp_workspace(
+        workspace_id: str,
+        confirm: bool = False,
+        preview_token: str | None = None,
+    ) -> dict:
+        """Delete a pending draft workspace. Dry-run unless confirm=True and preview_token matches."""
+        datadict = get_env_vars()
+        try:
+            return studios_delete_workspace(
+                datadict,
+                workspace_id,
+                confirm=confirm,
+                preview_token_value=preview_token,
+            )
+        except Exception as e:
+            return client_error(
+                "delete_workspace_failed",
+                log_exc=e,
+                context="delete_cvp_workspace",
+            )
+
+    @mcp.tool()
+    @tool_enabled("build_cvp_workspace")
+    def build_cvp_workspace(
+        workspace_id: str,
+        request_id: str | None = None,
+        confirm: bool = False,
+        preview_token: str | None = None,
+    ) -> dict:
+        """Start a workspace build (REQUEST_START_BUILD). Poll with get_cvp_workspace_build."""
+        datadict = get_env_vars()
+        try:
+            return studios_build_workspace(
+                datadict,
+                workspace_id,
+                request_id=request_id,
+                confirm=confirm,
+                preview_token_value=preview_token,
+            )
+        except Exception as e:
+            return client_error(
+                "build_workspace_failed",
+                log_exc=e,
+                context="build_cvp_workspace",
+            )
+
+    @mcp.tool()
+    @tool_enabled("set_cvp_access_interface_description")
+    def set_cvp_access_interface_description(
+        workspace_id: str,
+        device_id: str,
+        interface: str,
+        expected_current_description: str,
+        new_description: str,
+        confirm: bool = False,
+        preview_token: str | None = None,
+    ) -> dict:
+        """Compare-and-set one access-studio port description. Does not submit or shut ports."""
+        datadict = get_env_vars()
+        try:
+            return studios_set_access_description(
+                datadict,
+                workspace_id,
+                device_id,
+                interface,
+                expected_current_description,
+                new_description,
+                confirm=confirm,
+                preview_token_value=preview_token,
+            )
+        except Exception as e:
+            return client_error(
+                "set_access_description_failed",
+                log_exc=e,
+                context="set_cvp_access_interface_description",
+            )
 
 
 def main(args):

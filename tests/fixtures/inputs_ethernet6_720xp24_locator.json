@@ -1,0 +1,38 @@
+{
+  "captured_at": "2026-08-22T13:49:43Z",
+  "source": "GET /api/resources/studio/v1/Inputs/all filtered studioId=studio-campus-access-interfaces workspaceId=\"\"",
+  "studio_id": "studio-campus-access-interfaces",
+  "workspace_id": "",
+  "resource_key": {
+    "studioId": "studio-campus-access-interfaces",
+    "workspaceId": "",
+    "path": {}
+  },
+  "path_values": [],
+  "notes": [
+    "This studio stores ALL connected-endpoint rows in one Inputs resource at the root path (path.values empty / path {}).",
+    "A port is identified by tags.query, not by a nested Inputs path.",
+    "Phase 2.0 must GET this document, locate the matching query, change only adapterDetails.description, POST the full tree back at path.values [].",
+    "POST body has not been live-verified; assume inputs is the same JSON string as GET."
+  ],
+  "locator": "interface:Ethernet6@JPE19151499",
+  "row_excerpt": {
+    "inputs": {
+      "adapterDetails": {
+        "description": "pi5 - dns",
+        "enabled": "Yes",
+        "portChannel": {},
+        "portProfile": "vl 2",
+        "vlans": {"vlans": null}
+      }
+    },
+    "tags": {
+      "query": "interface:Ethernet6@JPE19151499"
+    }
+  },
+  "description_wire_path": "adapterDetails.description",
+  "devices_live_2026-08-22": {
+    "720xp-24": "JPE19151499",
+    "720xp-48": "HBG254804R6"
+  }
+}

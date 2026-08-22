@@ -8,7 +8,7 @@ Coordination skill: Parallel Buckets (Cursor adapter)
 
 | Field | Value |
 |-------|-------|
-| Status | **`approved`** |
+| Status | **`approved`** (executing wave 1) |
 | Approved by | user (2026-08-22; AskQuestion: approve as posted) |
 | Approved waves | all (wave 1: T ∥ I ∥ D) |
 | Notes | Probe spread kept: T claude-opus, I codex-default, D cursor-auto. |
@@ -139,8 +139,18 @@ REPO=$REPO BASE=$BASE BUCKET=D SLUG=$SLUG \
   bash $PARALLEL_BUCKETS_HOME/scripts/farm_cursor_bucket.sh
 ```
 
+## Execution status
+
+| ID | Status | Branch | Commit |
+|----|--------|--------|--------|
+| T | merged | `feat/studios-phase2-followon-fix-bucket-T-claude` | `105bf7f` |
+| I | merged | `feat/studios-phase2-followon-fix-bucket-I-codex` | `399433c` |
+| D | merged | `feat/studios-phase2-followon-fix-bucket-D-cursor` | `7cd83a7` |
+
+Integration HEAD: `62b73c9`. Combined tests: **532 passed**.
+
 ## Session reports
 
 | Date | Chat posted | File |
 |------|-------------|------|
-| | no | `docs/research/studios-phase2-followon-fix-session-*.md` |
+| 2026-08-22 | yes | `docs/research/studios-phase2-followon-fix-session-2026-08-22.md` |

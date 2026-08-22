@@ -1,7 +1,7 @@
 # Spec: Studios Phase 2 — workspace write tools
 
 Status: **2.0 is implementable** (description CAS on Access Interface Configuration).
-2.1 submit and AssignedTags GET remain gated. Revised 2026-08-22 after live
+2.1 submit remains gated. AssignedTags `/all` is live on this tenant. Revised 2026-08-22 after live
 Inputs capture + adversarial review
 (`docs/research/studios-phase2-adversarial-review.md`). Parent:
 `docs/studios-support-spec.md`.
@@ -60,7 +60,7 @@ That job does **not** need: tag replace, studio create/delete, or submit.
 | **2.1** | `assign_cvp_studio_tags` (no unassign-all); generic `set_cvp_studio_inputs`; `submit_cvp_workspace` | Tags: expected-current required. Submit: **unregistered** until Workspace `lastModifiedAt` confirmed |
 | **2.2** | `create_cvp_studio`; `delete_cvp_studio` | After 2.0; templates must never contain interface shutdown; no ChangeControlConfig |
 
-`get_cvp_studio_assigned_tags` can ship with 2.0 as a **best-effort read** (URL still unprobed) but is **not** required for description CAS. Generic `set_cvp_studio_inputs` is **not** 2.0.
+`get_cvp_studio_assigned_tags` can ship with 2.0 as a **best-effort read** (`GET AssignedTags/all` is live; no-row is `query=""`) but is **not** required for description CAS. Generic `set_cvp_studio_inputs` is **not** 2.0.
 
 ## Goals
 
@@ -102,9 +102,11 @@ That job does **not** need: tag replace, studio create/delete, or submit.
 | **Returns** | `tool_envelope` `items[]`: `{studio_id, workspace_id, query}` |
 | **Why** | 2.1 assign **replaces** the query. Ship this read even if writes stay off. |
 
-`GET AssignedTags/all` is still **unprobed**. If 404 or empty, return
-`coverage="none"` and `assigned_tags_unavailable`. Do not invent a query. Not on
-the 2.0 critical path.
+`GET AssignedTags/all` is live (HTTP 200) on this tenant. HTTP 404 or an empty
+**body** still returns `coverage="none"` and `assigned_tags_unavailable`. A
+complete 200 with 0 rows for this studio+workspace is `query=""` and
+`coverage="full"`. Incomplete `/all` (truncation or skipped NDJSON) is
+`assigned_tags_read_failed`, not `query=""`. Not on the 2.0 description CAS path.
 
 ## HTTP helper (all write slices)
 
@@ -292,7 +294,7 @@ Normative codes: `writes_disabled`, `submit_disabled`, `workspace_id_required`,
 `workspace_read_failed`, `studio_not_found`, `studio_immutable`,
 `studio_from_package`, `inputs_path_unresolved`, `inputs_path_not_found`,
 `current_description_mismatch`, `tree_diff_not_description_only`,
-`root_path_forbidden`, `tag_query_mismatch`,
+`root_path_forbidden`, `current_query_mismatch`,
 `preview_required`, `preflight_failed`,
 `invalid_request_id`, `disruptive_content_forbidden`, `resource_write_failed`.
 
@@ -345,7 +347,9 @@ document; refuse `input_key_not_allowed` if any **changed leaf** is not in
 (`enabled`, `disabled`, `shutdown`, `vlan`, `poe`, `profile`, `mode`) are never
 allowed here — that is how a studio emits `shutdown` without the word appearing.
 **No** `replace_all_inputs` until a later
-explicit revision. Empty `path_values` → `root_path_forbidden`.
+explicit revision. Empty `path_values` → `root_path_forbidden`. Resource
+`path.values` is not a JSON key path into `inputs`. Access Interfaces' only
+Resource row is `[]` and stays 2.0 `set_cvp_access_interface_description`.
 
 ### `build_cvp_workspace` (2.0)
 
@@ -366,9 +370,9 @@ On this tenant `responses.values` is keyed by `request_id` ≈ `buildId`. Confir
 | | |
 | --- | --- |
 | **Endpoint** | `POST /api/resources/studio/v1/AssignedTagsConfig` |
-| **Parameters** | `studio_id`, `workspace_id`, `query`, `expected_current_query: str` (**required**), `confirm` |
-| **Replace** | Whole query. Empty query is **forbidden** in 2.1 (no unassign-all). |
-| **Preflight** | `get_cvp_studio_assigned_tags`; mismatch vs `expected_current_query` → refuse. Dry-run: previous query; device preview or `target_preview_unresolved`. |
+| **Parameters** | `studio_id`, `workspace_id`, `query`, `expected_current_query: str` (**required**; `""` is valid = unassigned), `confirm` |
+| **Replace** | Whole query. Empty **new** query is **forbidden** in 2.1 (no unassign-all). |
+| **Preflight** | Overlay-then-mainline (draft overlay if present, else mainline `""`). Omitted/`None`/non-str `expected_current_query` → `expected_current_query_required`. Mismatch vs resolved current → `current_query_mismatch`. Dry-run: previous query; device preview or `target_preview_unresolved`. |
 
 ### `submit_cvp_workspace` (2.1, unregistered until staleness known)
 
@@ -438,10 +442,11 @@ Tools:
 
 ## Open (blocking)
 
+`GET AssignedTags/all` is **closed**: HTTP 200 on this tenant; no-row is `query=""`.
+
 | Item | Blocks |
 | --- | --- |
 | InputsConfig POST of a patched root tree (read shape captured; POST untried) | First 2.0 dry-run + test workspace |
-| `GET AssignedTags/all` URL | 2.0 optional read; **2.1 tag assign** |
 | Full `Workspace.Request` protobuf enum | Helper allowlist (observed: `REQUEST_START_BUILD`, `REQUEST_SUBMIT`) |
 | Workspace `last_modified_at` | **Captured on Workspace/all.** Phase 1 keyed `get_cvp_workspace` already maps it. 2.1 submit uses `object.last_modified_at`. |
 | Tag query → device serial preview | 2.1 dry-run warning only |
@@ -460,7 +465,7 @@ Tools:
 | Tool | Slice |
 | --- | --- |
 | Phase 1 eight reads | shipped |
-| `get_cvp_studio_assigned_tags` | 2.0 optional read (URL unprobed) |
+| `get_cvp_studio_assigned_tags` | 2.0 optional read (URL probed; no-row is `query=""`) |
 | `create_cvp_workspace` | 2.0 |
 | `delete_cvp_workspace` | 2.0 |
 | `set_cvp_access_interface_description` | 2.0 (path fixture required) |

@@ -104,10 +104,23 @@ def _mocked(workspace=("missing",), inputs=None, post_status=None):
     else:
         nd_result = (list(inputs), None, [])
 
+    studio_env = {
+        "coverage": "full",
+        "object": {
+            "studio_id": STUDIO_ID,
+            "immutable": None,
+            "from_package": None,
+        },
+        "warnings": [],
+    }
     with (
         patch(
             "cvp_mcp.grpc.studios.get_json_with_bearer", return_value=ws_result
         ) as get_ws,
+        patch(
+            "cvp_mcp.grpc.studios_write.get_cvp_studio",
+            return_value=studio_env,
+        ),
         patch(
             "cvp_mcp.grpc.studios_write.get_ndjson_all_values_with_bearer",
             return_value=nd_result,
@@ -371,9 +384,9 @@ def test_build_preview_generates_request_id_and_no_post():
 
 
 def test_build_confirm_posts_start_build_with_supplied_request_id():
-    request_id = "11111111-2222-3333-4444-555555555555"
     with _mocked(workspace=_workspace_value()) as mocks:
         preview = studios_write.build_cvp_workspace(DATADICT, WORKSPACE)
+        request_id = _obj(preview)["request_id"]
         env = studios_write.build_cvp_workspace(
             DATADICT,
             WORKSPACE,
@@ -434,13 +447,26 @@ def test_build_refuses_non_pending_workspace():
     m["urlopen"].assert_not_called()
 
 
+def test_build_confirm_without_request_id_refuses():
+    with _mocked(workspace=_workspace_value()) as mocks:
+        preview = studios_write.build_cvp_workspace(DATADICT, WORKSPACE)
+        env = studios_write.build_cvp_workspace(
+            DATADICT,
+            WORKSPACE,
+            confirm=True,
+            preview_token_value=_obj(preview)["preview_token"],
+        )
+    assert _code(env) == "invalid_request_id"
+    mocks["urlopen"].assert_not_called()
+
+
 # --- description CAS --------------------------------------------------------
 
 
 def _set_description(
     inputs, expected="pi5 - dns", new="pi5 - dns v2", confirm=False, token=None
 ):
-    with _mocked(inputs=inputs) as mocks:
+    with _mocked(workspace=_workspace_value(), inputs=inputs) as mocks:
         env = studios_write.set_cvp_access_interface_description(
             DATADICT,
             WORKSPACE,
@@ -550,13 +576,13 @@ def test_description_null_current_matches_empty_expected():
 
 def test_description_locator_miss_refuses():
     document = _inputs_document()
-    with _mocked(inputs=[_inputs_row("", document)]) as mocks:
+    with _mocked(workspace=_workspace_value(), inputs=[_inputs_row("", document)]) as m:
         env = studios_write.set_cvp_access_interface_description(
             DATADICT, WORKSPACE, DEVICE, "Ethernet7", "x", "y"
         )
     assert _code(env) == "inputs_path_not_found"
     assert _obj(env)["error"]["details"]["matches"] == 0
-    mocks["urlopen"].assert_not_called()
+    m["urlopen"].assert_not_called()
 
 
 def test_description_duplicate_locator_refuses():
@@ -621,6 +647,98 @@ def test_description_inputs_get_failure_refuses():
     urlopen.assert_not_called()
 
 
+def test_description_refuses_non_pending_workspace():
+    document = _inputs_document()
+    with _mocked(
+        workspace=_workspace_value(state="WORKSPACE_STATE_SUBMITTED"),
+        inputs=[_inputs_row("", document)],
+    ) as mocks:
+        env = studios_write.set_cvp_access_interface_description(
+            DATADICT, WORKSPACE, DEVICE, INTERFACE, "pi5 - dns", "pi5 - dns v2"
+        )
+    assert _code(env) == "workspace_not_pending"
+    mocks["urlopen"].assert_not_called()
+
+
+def test_description_refuses_immutable_studio():
+    document = _inputs_document()
+    studio_env = {
+        "coverage": "full",
+        "object": {"studio_id": STUDIO_ID, "immutable": True, "from_package": None},
+        "warnings": [],
+    }
+    with (
+        patch(
+            "cvp_mcp.grpc.studios.get_json_with_bearer",
+            return_value=(_workspace_value(), None),
+        ),
+        patch("cvp_mcp.grpc.studios_write.get_cvp_studio", return_value=studio_env),
+        patch(
+            "cvp_mcp.grpc.studios_write.get_ndjson_all_values_with_bearer",
+            return_value=([_inputs_row("", document)], None, []),
+        ),
+        patch("urllib.request.urlopen") as urlopen,
+    ):
+        env = studios_write.set_cvp_access_interface_description(
+            DATADICT, WORKSPACE, DEVICE, INTERFACE, "pi5 - dns", "pi5 - dns v2"
+        )
+    assert _code(env) == "studio_immutable"
+    urlopen.assert_not_called()
+
+
+def test_description_refuses_packaged_studio():
+    document = _inputs_document()
+    studio_env = {
+        "coverage": "full",
+        "object": {"studio_id": STUDIO_ID, "immutable": None, "from_package": True},
+        "warnings": [],
+    }
+    with (
+        patch(
+            "cvp_mcp.grpc.studios.get_json_with_bearer",
+            return_value=(_workspace_value(), None),
+        ),
+        patch("cvp_mcp.grpc.studios_write.get_cvp_studio", return_value=studio_env),
+        patch(
+            "cvp_mcp.grpc.studios_write.get_ndjson_all_values_with_bearer",
+            return_value=([_inputs_row("", document)], None, []),
+        ),
+        patch("urllib.request.urlopen") as urlopen,
+    ):
+        env = studios_write.set_cvp_access_interface_description(
+            DATADICT, WORKSPACE, DEVICE, INTERFACE, "pi5 - dns", "pi5 - dns v2"
+        )
+    assert _code(env) == "studio_from_package"
+    urlopen.assert_not_called()
+
+
+def test_description_truncated_inputs_stream_refuses():
+    document = _inputs_document()
+    rows = [_inputs_row("", document)]
+    studio_env = {
+        "coverage": "full",
+        "object": {"studio_id": STUDIO_ID, "immutable": None, "from_package": None},
+        "warnings": [],
+    }
+    with (
+        patch(
+            "cvp_mcp.grpc.studios.get_json_with_bearer",
+            return_value=(_workspace_value(), None),
+        ),
+        patch("cvp_mcp.grpc.studios_write.get_cvp_studio", return_value=studio_env),
+        patch(
+            "cvp_mcp.grpc.studios_write.get_ndjson_all_values_with_bearer",
+            return_value=(rows, None, ["truncated_to_32000000_bytes"]),
+        ),
+        patch("urllib.request.urlopen") as urlopen,
+    ):
+        env = studios_write.set_cvp_access_interface_description(
+            DATADICT, WORKSPACE, DEVICE, INTERFACE, "pi5 - dns", "pi5 - dns v2"
+        )
+    assert _code(env) == "preflight_failed"
+    urlopen.assert_not_called()
+
+
 def test_description_confirm_without_token_refuses():
     document = _inputs_document()
     env, urlopen, _ = _set_description([_inputs_row("", document)], confirm=True)
@@ -644,7 +762,17 @@ def test_description_post_failure_reports_resource_write_failed():
     rows = [_inputs_row("", document)]
     env, _, _ = _set_description(rows)
     token = _obj(env)["preview_token"]
+    studio_env = {
+        "coverage": "full",
+        "object": {"studio_id": STUDIO_ID, "immutable": None, "from_package": None},
+        "warnings": [],
+    }
     with (
+        patch(
+            "cvp_mcp.grpc.studios.get_json_with_bearer",
+            return_value=(_workspace_value(), None),
+        ),
+        patch("cvp_mcp.grpc.studios_write.get_cvp_studio", return_value=studio_env),
         patch(
             "cvp_mcp.grpc.studios_write.get_ndjson_all_values_with_bearer",
             return_value=(rows, None, []),

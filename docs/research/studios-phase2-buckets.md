@@ -30,14 +30,16 @@ Coordination skill: Parallel Buckets (Cursor adapter)
 
 | Field | Value |
 |-------|-------|
-| **Level** | GREEN (Cursor 9% total / 18% API; Claude 0%; Codex 0%) |
-| **Updated** | 2026-08-22 10:16 CDT |
-| **Claude session / week %** | 0% / 0% |
+| **Level** | GREEN (Cursor 9% total / 18% API; Claude session 21%; Codex 0%) |
+| **Updated** | 2026-08-22 11:10 CDT |
+| **Claude session / week %** | 21% / 0% (week-all 63%) |
 | **Cursor total / API %** | 9% / 18% |
 | **Codex week %** | 0% |
-| **Ollama cloud session / week %** | 29% / **89% YELLOW** — do not farm R2 here |
+| **Ollama cloud session / week %** | 29% / **89% YELLOW** — R2 stayed on Cursor |
 | **Capacity probe** | burnbar_primary |
 | **Before snapshot** | `docs/research/pb-sessions/studios-phase2/before.json` |
+| **After snapshot** | `docs/research/pb-sessions/studios-phase2/after.json` |
+| **Execute** | Waves 1–4 complete; review edits applied on integration branch |
 
 ## Bucket registry (schedule)
 
@@ -118,4 +120,25 @@ Coordinator: apply review edits
 
 ## Integration health (after execute)
 
-pytest + ruff on owned files; combined `uv run pytest tests/test_write_access.py tests/test_resource_write.py tests/test_studios_write.py tests/test_studios.py -q`
+| Check | Result |
+|-------|--------|
+| Combined pytest | `uv run pytest -q` → **283 passed** (2026-08-22 11:10 CDT) |
+| Write tests | `tests/test_write_access.py` + `test_resource_write.py` + `test_studios_write.py` → **114 passed** |
+| ruff | clean on owned files + `cloudvision_mcp.py` |
+| black | `studios_write.py` reformatted after review edits |
+| Unmerged leftover farm branches | `feat/studios-phase2-bucket-0-ollama`, `-1a-claude`, `-1b-claude` (already merged; safe to delete) |
+| Worktrees | none |
+| Writes in production | **still off** — do not set `CLOUDVISION_MCP_ALLOW_WRITES` on the homelab MCP host until a human asks |
+
+### Execute attribution
+
+| ID | Status | Commit | Notes |
+|----|--------|--------|-------|
+| 0 | merged | `3758f6d` | Ollama local `qwen3.8:27b-mlx` |
+| 1a | merged | `610d8c0` | Claude CLI opus |
+| 1b | merged | `df189f2` | Planned Codex; **rerouted** Claude opus (Codex 401) |
+| 2 | merged | `14d3b87` | Cursor inline wiring |
+| R1 | done | notes `docs/research/studios-phase2-review-R1.md` | Cursor named-sonnet Task |
+| R2 | done | notes `docs/research/studios-phase2-review-R2.md` | Cursor auto Task (not ollama-cloud) |
+| R3 | done | notes `docs/research/studios-phase2-review-R3.md` | Cursor Task (not claude-cli) |
+| RS | inline | review edits on `feat/studios-phase2-impl` | fail-closed Inputs, pending CAS, bound `request_id`, DELETE param allowlist |

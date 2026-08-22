@@ -31,7 +31,7 @@ from cvp_mcp.grpc.resource_write import (
     delete_resource_config,
     post_resource_config,
 )
-from cvp_mcp.grpc.studios import get_cvp_workspace
+from cvp_mcp.grpc.studios import get_cvp_studio, get_cvp_workspace
 from cvp_mcp.grpc.uri_fetch import get_ndjson_all_values_with_bearer
 from cvp_mcp.write_access import (
     check_preview_token,
@@ -280,6 +280,11 @@ def _load_root_inputs(
     if err:
         warnings.append(err)
         return None, "", "preflight_failed", warnings
+    # Spec: a warning is never enough to proceed. Truncation or skipped NDJSON
+    # would POST a partial tree (full-document replace).
+    for warning in warnings:
+        if "truncated_to_" in warning or "ndjson_skip_invalid_line" in warning:
+            return None, "", "preflight_failed", warnings
 
     rows: dict[str, Any] = {}
     for value in values or []:
@@ -687,10 +692,9 @@ def build_cvp_workspace(
     """Start a workspace build (``REQUEST_START_BUILD``, hard-coded here).
 
     The preview generates a UUIDv4 ``request_id`` so the caller can pass the
-    same id back on confirm; ``request_id`` is deliberately **not** part of the
-    preview token, so echoing the previewed id (or omitting it and letting the
-    confirm call generate a fresh one) both validate. HTTP 200 is not build
-    success: poll with the Phase 1 read tools.
+    same id back on confirm. That id is bound into the ``preview_token``;
+    ``confirm=True`` must echo both the token and that ``request_id``. HTTP 200
+    is not build success: poll with the Phase 1 read tools.
     """
     tool = "build_cvp_workspace"
     if not writes_enabled():
@@ -790,13 +794,22 @@ def build_cvp_workspace(
 
     # Generated on preview only so the caller can echo it back; a dry-run id is
     # never reused implicitly on confirm.
+    if confirm and not (request_id or "").strip():
+        return _refused(
+            tool,
+            _WORKSPACE_SOURCE,
+            "invalid_request_id",
+            "confirm=True must pass the request_id from the preview.",
+            workspace_id=workspace,
+            warnings=warnings,
+        )
     effective_request_id = (request_id or "").strip() or str(uuid.uuid4())
     body = {
         "key": {"workspaceId": workspace},
         "request": REQUEST_START_BUILD,
         "requestParams": {"requestId": effective_request_id},
     }
-    token_args = {"workspace_id": workspace}
+    token_args = {"workspace_id": workspace, "request_id": effective_request_id}
     fields: dict[str, Any] = {
         "operation": "build",
         "done": False,
@@ -914,6 +927,61 @@ def set_cvp_access_interface_description(
             workspace_id=workspace,
         )
     locator = f"interface:{port}@{device}"
+
+    summary, ws_status, ws_warnings = _read_workspace(datadict, workspace)
+    if ws_status == "not_found":
+        return _refused(
+            tool,
+            _INPUTS_SOURCE,
+            "workspace_not_found",
+            "Workspace does not exist; create a draft first.",
+            workspace_id=workspace,
+            warnings=ws_warnings,
+        )
+    if ws_status == "read_failed":
+        return _refused(
+            tool,
+            _INPUTS_SOURCE,
+            "workspace_read_failed",
+            "Workspace GET failed; refusing to write Inputs.",
+            workspace_id=workspace,
+            warnings=ws_warnings,
+        )
+    state = (summary or {}).get("state") or ""
+    if state != WORKSPACE_STATE_PENDING:
+        return _refused(
+            tool,
+            _INPUTS_SOURCE,
+            "workspace_not_pending",
+            "Description writes are only allowed on pending draft workspaces.",
+            details={"state": state},
+            workspace_id=workspace,
+            warnings=ws_warnings,
+        )
+
+    studio_env = get_cvp_studio(datadict, ACCESS_INTERFACE_STUDIO_ID, "")
+    studio_obj = studio_env.get("object") or {}
+    if studio_env.get("coverage") != "full" or not isinstance(studio_obj, dict):
+        return _refused(
+            tool,
+            _INPUTS_SOURCE,
+            "preflight_failed",
+            "Studio GET failed; refusing Inputs write.",
+            workspace_id=workspace,
+            warnings=list(studio_env.get("warnings") or []),
+        )
+    if studio_obj.get("immutable") is True or studio_obj.get("from_package") is True:
+        return _refused(
+            tool,
+            _INPUTS_SOURCE,
+            (
+                "studio_from_package"
+                if studio_obj.get("from_package") is True
+                else "studio_immutable"
+            ),
+            "Refusing Inputs write on an immutable or packaged studio.",
+            workspace_id=workspace,
+        )
 
     expected = (
         "" if expected_current_description is None else expected_current_description

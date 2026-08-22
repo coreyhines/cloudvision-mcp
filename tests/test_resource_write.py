@@ -310,7 +310,7 @@ def test_delete_empty_workspace_id_never_calls_urlopen(params):
 
 def test_delete_missing_key_param_never_calls_urlopen():
     (obj, err), mock_open = _delete(WORKSPACE_PATH, {"other": "x"})
-    assert err == "workspace_id_required"
+    assert err == "invalid_params"
     mock_open.assert_not_called()
 
 

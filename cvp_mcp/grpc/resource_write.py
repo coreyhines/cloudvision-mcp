@@ -211,13 +211,18 @@ def delete_resource_config(
     if not isinstance(params, dict) or not params:
         return None, "invalid_params"
 
+    allowed_param_names = {"key.workspaceId", "key.workspace_id"}
     encoded: dict[str, str] = {}
     for name, value in params.items():
+        key_name = str(name)
+        if key_name not in allowed_param_names:
+            logging.error("resource_write: DELETE extra query param %s", key_name)
+            return None, "invalid_params"
         text = "" if value is None else str(value)
         if any(char in text for char in _QUERY_INJECTION_CHARS):
             logging.error("resource_write: DELETE param %s has query separators", name)
             return None, "invalid_workspace_id"
-        encoded[str(name)] = text
+        encoded[key_name] = text
 
     workspace_id = ""
     for field in ("key.workspaceId", "key.workspace_id"):

@@ -57,7 +57,7 @@ def test_extract_designed_sources_from_live_fixture():
     assert "studio-authentication" in keys
     assert "avd-JPE19151499" in keys
     # duplicate STATIC key in live response is deduped
-    assert keys.count("f239139b-96fd-4a7e-b692-fc43ddf3abc8") <= 1
+    assert keys.count("static-studio-id-3") <= 1
 
 
 def test_get_config_passes_config_type():

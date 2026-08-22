@@ -44,7 +44,7 @@
         },
         {
           "source_type": "CONFIG_TYPE_STUDIO",
-          "key": "5d78b7ed-76f0-4455-ae76-ca563fa5cf22"
+          "key": "studio-id-custom-1"
         },
         {
           "source_type": "CONFIG_TYPE_STUDIO",
@@ -56,19 +56,19 @@
         },
         {
           "source_type": "CONFIG_TYPE_STUDIO_STATIC",
-          "key": "5a900404-306c-4695-b6d3-bf1d3cca9884"
+          "key": "static-studio-id-1"
         },
         {
           "source_type": "CONFIG_TYPE_STUDIO_STATIC",
-          "key": "d7b40f53-2021-4fec-b8ff-472a77634615"
+          "key": "static-studio-id-2"
         },
         {
           "source_type": "CONFIG_TYPE_STUDIO_STATIC",
-          "key": "f239139b-96fd-4a7e-b692-fc43ddf3abc8"
+          "key": "static-studio-id-3"
         },
         {
           "source_type": "CONFIG_TYPE_STUDIO_STATIC",
-          "key": "f239139b-96fd-4a7e-b692-fc43ddf3abc8"
+          "key": "static-studio-id-3"
         },
         {
           "source_type": "CONFIG_TYPE_STUDIO_STATIC",
@@ -454,7 +454,7 @@
       "error_code": "DEVICEWARNING",
       "error_msg": "! Change will take effect only after switch reboot.",
       "line_num": 4,
-      "configlet_name": "f239139b-96fd-4a7e-b692-fc43ddf3abc8",
+      "configlet_name": "static-studio-id-3",
       "config_line_num": 773
     }
   }

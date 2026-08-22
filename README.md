@@ -8,6 +8,14 @@ This MCP server can be used to query and interact with Arista CloudVision.
 
 This MCP server holds **full CloudVision service-account credentials** (`CVP`, `CVPTOKEN`) in its process environment. Any client that can invoke MCP tools receives the same access as that token (inventory, configs, routes, BGP, topology, etc.).
 
+**Never commit tokens, private keys, or `.env` files.** Gitleaks runs in CI (`secret-scan.yml`) and as a pre-commit / pre-push hook:
+
+```bash
+uv sync --dev
+pre-commit install --hook-type pre-commit --hook-type pre-push
+pre-commit run --all-files
+```
+
 | Transport | Default bind | Recommended use |
 | --- | --- | --- |
 | **stdio** (default) | N/A | Local desktop agents (Claude Desktop, Cursor) on a trusted host |

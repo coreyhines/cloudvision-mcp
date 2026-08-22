@@ -10,6 +10,9 @@ paths = [
   '''gitleaks-report\.json$''',
   '''^deploy/environment\.example$''',
   '''\.pre-commit-config\.yaml$''',
+  # CloudVision GetConfig source.key / configlet_name are studio ids (slugs or
+  # UUIDs), not credentials. The JSON field name "key" trips generic-api-key.
+  '''(^|/)tests/fixtures/designed_config_(sources|response)_720xp24\.json$''',
 ]
 regexes = [
   '''\$\{[A-Z][A-Z0-9_]+\}''',

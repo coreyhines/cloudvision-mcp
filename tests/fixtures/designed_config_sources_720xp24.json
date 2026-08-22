@@ -13,6 +13,7 @@
     "HTTP 200 body is a JSON array of message objects, not a single object.",
     "First message(s) carry sources; a later message carries config (designed CLI text).",
     "source.key is a string studio id (not a nested object).",
+    "UUID-shaped studio ids from the live capture were replaced with placeholders so gitleaks generic-api-key does not treat JSON field 'key' as a secret.",
     "Observed source_type values listed under source_types_observed."
   ],
   "source_types_observed": {
@@ -63,7 +64,7 @@
       },
       {
         "source_type": "CONFIG_TYPE_STUDIO",
-        "key": "5d78b7ed-76f0-4455-ae76-ca563fa5cf22"
+        "key": "studio-id-custom-1"
       },
       {
         "source_type": "CONFIG_TYPE_STUDIO",
@@ -75,19 +76,19 @@
       },
       {
         "source_type": "CONFIG_TYPE_STUDIO_STATIC",
-        "key": "5a900404-306c-4695-b6d3-bf1d3cca9884"
+        "key": "static-studio-id-1"
       },
       {
         "source_type": "CONFIG_TYPE_STUDIO_STATIC",
-        "key": "d7b40f53-2021-4fec-b8ff-472a77634615"
+        "key": "static-studio-id-2"
       },
       {
         "source_type": "CONFIG_TYPE_STUDIO_STATIC",
-        "key": "f239139b-96fd-4a7e-b692-fc43ddf3abc8"
+        "key": "static-studio-id-3"
       },
       {
         "source_type": "CONFIG_TYPE_STUDIO_STATIC",
-        "key": "f239139b-96fd-4a7e-b692-fc43ddf3abc8"
+        "key": "static-studio-id-3"
       },
       {
         "source_type": "CONFIG_TYPE_STUDIO_STATIC",

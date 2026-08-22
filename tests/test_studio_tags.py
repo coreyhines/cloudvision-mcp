@@ -52,12 +52,15 @@ def _workspace_value(state="WORKSPACE_STATE_PENDING"):
 
 
 @contextmanager
-def _mocked(workspace=None, tags=None, post_status=None):
+def _mocked(workspace=None, tags=None, post_status=None, tag_warnings=None):
     """Mock workspace GET, AssignedTags/all GET and the mutating urlopen.
 
     ``workspace`` defaults to a pending draft; pass ``("missing",)`` for HTTP
     404 or ``("error", code)`` for a failed GET. ``tags`` is a list of raw
     AssignedTags resource values, or ``("error", code)`` to fail the GET.
+    ``tag_warnings`` are the warnings the NDJSON helper returns alongside a
+    200 — ``truncated_to_*`` / ``ndjson_skip_invalid_line`` mark the stream
+    incomplete.
     """
     if workspace is None:
         workspace = _workspace_value()
@@ -71,7 +74,7 @@ def _mocked(workspace=None, tags=None, post_status=None):
     if isinstance(tags, tuple) and tags and tags[0] == "error":
         tag_result = (None, tags[1], [])
     else:
-        tag_result = (list(tags or []), None, [])
+        tag_result = (list(tags or []), None, list(tag_warnings or []))
 
     with (
         patch(
@@ -172,12 +175,124 @@ def test_read_empty_stream_is_unavailable():
     assert "assigned_tags_unavailable" in env["warnings"]
 
 
-def test_read_no_matching_row_is_unavailable():
-    with _mocked(tags=[_tag_row(studio_id="studio-other")]):
+def test_read_no_matching_row_is_an_empty_query():
+    """Complete /all with rows for other studios: this studio is unassigned."""
+    rows = [
+        _tag_row(studio_id="studio-a", workspace_id="", query="device:a"),
+        _tag_row(studio_id="studio-b", workspace_id="", query="device:b"),
+    ]
+    with _mocked(tags=rows) as mocks:
+        env = studio_tags.get_cvp_studio_assigned_tags(DATADICT, STUDIO_ID, WORKSPACE)
+    assert env["coverage"] == "full"
+    assert env["items"] == [
+        {"studio_id": STUDIO_ID, "workspace_id": WORKSPACE, "query": ""}
+    ]
+    assert "assigned_tags_unavailable" not in env["warnings"]
+    mocks["urlopen"].assert_not_called()
+
+
+def test_read_mainline_no_row_is_an_empty_query():
+    with _mocked(tags=[_tag_row(studio_id="studio-other", workspace_id="")]):
+        env = studio_tags.get_cvp_studio_assigned_tags(DATADICT, STUDIO_ID)
+    assert env["coverage"] == "full"
+    assert env["items"] == [{"studio_id": STUDIO_ID, "workspace_id": "", "query": ""}]
+    assert "assigned_tags_unavailable" not in env["warnings"]
+
+
+@pytest.mark.parametrize(
+    "warning",
+    ["truncated_to_96000000_bytes", "ndjson_skip_invalid_line:3"],
+)
+def test_read_incomplete_stream_never_invents_an_empty_query(warning):
+    """A studio absent from a partial stream is unknown, not unassigned."""
+    rows = [_tag_row(studio_id="studio-a", workspace_id="", query="device:a")]
+    with _mocked(tags=rows, tag_warnings=[warning]) as mocks:
         env = studio_tags.get_cvp_studio_assigned_tags(DATADICT, STUDIO_ID, WORKSPACE)
     assert env["coverage"] == "none"
     assert env["items"] == []
-    assert "assigned_tags_unavailable" in env["warnings"]
+    assert warning in env["warnings"]
+    assert "assigned_tags_read_failed" in env["warnings"]
+    assert "assigned_tags_unavailable" not in env["warnings"]
+    mocks["urlopen"].assert_not_called()
+
+
+def test_read_stream_with_no_rows_at_all_is_read_failed():
+    """A 200 that parsed zero AssignedTags rows proves nothing about C."""
+    with _mocked(tags=[]):
+        env = studio_tags.get_cvp_studio_assigned_tags(DATADICT, STUDIO_ID, WORKSPACE)
+    assert env["coverage"] == "none"
+    assert env["items"] == []
+    assert "assigned_tags_read_failed" in env["warnings"]
+    assert "assigned_tags_unavailable" not in env["warnings"]
+
+
+def test_read_matching_row_without_a_query_field_is_read_failed():
+    row = {"key": {"studioId": STUDIO_ID, "workspaceId": WORKSPACE}}
+    with _mocked(tags=[row]):
+        env = studio_tags.get_cvp_studio_assigned_tags(DATADICT, STUDIO_ID, WORKSPACE)
+    assert env["coverage"] == "none"
+    assert env["items"] == []
+    assert "assigned_tags_read_failed" in env["warnings"]
+
+
+def test_read_accepts_the_tag_query_field_alias():
+    row = {
+        "key": {"studioId": STUDIO_ID, "workspaceId": WORKSPACE},
+        "tagQuery": CURRENT_QUERY,
+    }
+    with _mocked(tags=[row]):
+        env = studio_tags.get_cvp_studio_assigned_tags(DATADICT, STUDIO_ID, WORKSPACE)
+    assert env["coverage"] == "full"
+    assert env["items"][0]["query"] == CURRENT_QUERY
+
+
+def test_read_duplicate_rows_are_ambiguous():
+    rows = [_tag_row(), _tag_row(query="device:dup")]
+    with _mocked(tags=rows):
+        env = studio_tags.get_cvp_studio_assigned_tags(DATADICT, STUDIO_ID, WORKSPACE)
+    assert env["coverage"] == "none"
+    assert env["items"] == []
+    assert "assigned_tags_ambiguous" in env["warnings"]
+
+
+def test_read_draft_inherits_the_mainline_row():
+    rows = [_tag_row(workspace_id="", query="device:mainline")]
+    with _mocked(tags=rows):
+        env = studio_tags.get_cvp_studio_assigned_tags(DATADICT, STUDIO_ID, WORKSPACE)
+    assert env["coverage"] == "full"
+    assert env["items"] == [
+        {
+            "studio_id": STUDIO_ID,
+            "workspace_id": WORKSPACE,
+            "query": "device:mainline",
+        }
+    ]
+
+
+def test_read_never_copies_another_workspaces_query():
+    """A UUID workspace's row belongs to neither mainline nor this draft."""
+    rows = [
+        _tag_row(
+            workspace_id="8f1d0c1e-0000-4a00-9c00-000000000001",
+            query="device:someone-else",
+        )
+    ]
+    with _mocked(tags=rows):
+        draft = studio_tags.get_cvp_studio_assigned_tags(DATADICT, STUDIO_ID, WORKSPACE)
+        mainline = studio_tags.get_cvp_studio_assigned_tags(DATADICT, STUDIO_ID)
+    assert draft["items"] == [
+        {"studio_id": STUDIO_ID, "workspace_id": WORKSPACE, "query": ""}
+    ]
+    assert mainline["items"] == [
+        {"studio_id": STUDIO_ID, "workspace_id": "", "query": ""}
+    ]
+
+
+def test_read_mainline_ignores_a_draft_row():
+    """workspace_id=None resolves mainline only; it must not read the draft."""
+    with _mocked(tags=[_tag_row(query="device:draft-only")]):
+        env = studio_tags.get_cvp_studio_assigned_tags(DATADICT, STUDIO_ID)
+    assert env["items"] == [{"studio_id": STUDIO_ID, "workspace_id": "", "query": ""}]
 
 
 def test_read_transport_error_is_not_reported_as_unavailable():
@@ -256,8 +371,9 @@ def test_assign_requires_studio_id():
     mocks["urlopen"].assert_not_called()
 
 
-@pytest.mark.parametrize("expected", ["", None])
+@pytest.mark.parametrize("expected", [None, 0, [], {}])
 def test_assign_requires_expected_current_query(expected):
+    """Missing or non-str is refused before any HTTP; "" is a valid value."""
     with _mocked(tags=[_tag_row()]) as mocks:
         env = _assign(expected_current_query=expected)
     assert _code(env) == "expected_current_query_required"
@@ -338,6 +454,132 @@ def test_assign_refuses_expected_current_mismatch():
     details = _obj(env)["error"]["details"]
     assert details["current_query"] == "device:campus-leaf9"
     assert details["expected_current_query"] == CURRENT_QUERY
+    mocks["urlopen"].assert_not_called()
+
+
+def test_assign_first_assignment_previews_then_posts_once():
+    """No row anywhere + expected "" is the first-assignment CAS."""
+    rows = [_tag_row(studio_id="studio-other", workspace_id="", query="device:a")]
+    token = preview_token(
+        "assign_cvp_studio_tags",
+        {
+            "studio_id": STUDIO_ID,
+            "workspace_id": WORKSPACE,
+            "query": NEW_QUERY,
+            "expected_current_query": "",
+        },
+    )
+    with _mocked(tags=rows) as mocks:
+        preview = _assign(expected_current_query="")
+        obj = _obj(preview)
+        assert obj["outcome"] == "preview"
+        assert obj["before_query"] == ""
+        assert obj["preview_token"] == token
+        mocks["urlopen"].assert_not_called()
+
+        env = _assign(
+            expected_current_query="", confirm=True, preview_token_value=token
+        )
+    assert _obj(env)["outcome"] == "accepted"
+    assert mocks["urlopen"].call_count == 1
+    assert _posted_body(mocks["urlopen"]) == {
+        "key": {"studioId": STUDIO_ID, "workspaceId": WORKSPACE},
+        "query": NEW_QUERY,
+    }
+
+
+def test_assign_preview_token_is_bound_to_an_empty_expected():
+    """A token minted for expected "" must not confirm a non-empty expected."""
+    rows = [_tag_row(studio_id="studio-other", workspace_id="", query="device:a")]
+    with _mocked(tags=rows) as mocks:
+        env = _assign(
+            expected_current_query="",
+            confirm=True,
+            preview_token_value=_preview_token(),
+        )
+    assert _code(env) == "preview_required"
+    mocks["urlopen"].assert_not_called()
+
+
+def test_assign_refuses_non_empty_expected_when_unassigned():
+    rows = [_tag_row(studio_id="studio-other", workspace_id="", query="device:a")]
+    with _mocked(tags=rows) as mocks:
+        env = _assign()
+    assert _code(env) == "current_query_mismatch"
+    details = _obj(env)["error"]["details"]
+    assert details["current_query"] == ""
+    assert details["expected_current_query"] == CURRENT_QUERY
+    mocks["urlopen"].assert_not_called()
+
+
+def test_assign_empty_expected_is_refused_when_mainline_has_a_query():
+    """The draft inherits mainline, so "" is not the current query."""
+    rows = [_tag_row(workspace_id="", query="device:Y")]
+    with _mocked(tags=rows) as mocks:
+        env = _assign(expected_current_query="")
+    assert _code(env) == "current_query_mismatch"
+    assert _obj(env)["error"]["details"]["current_query"] == "device:Y"
+    mocks["urlopen"].assert_not_called()
+
+
+def test_assign_inherits_mainline_and_posts_to_the_draft():
+    """Overlay-then-mainline CAS; the POST key is the draft, never ""."""
+    rows = [_tag_row(workspace_id="", query="device:Y")]
+    token = preview_token(
+        "assign_cvp_studio_tags",
+        {
+            "studio_id": STUDIO_ID,
+            "workspace_id": WORKSPACE,
+            "query": NEW_QUERY,
+            "expected_current_query": "device:Y",
+        },
+    )
+    with _mocked(tags=rows) as mocks:
+        preview = _assign(expected_current_query="device:Y")
+        assert _obj(preview)["outcome"] == "preview"
+        assert _obj(preview)["before_query"] == "device:Y"
+        assert _obj(preview)["preview_token"] == token
+
+        env = _assign(
+            expected_current_query="device:Y",
+            confirm=True,
+            preview_token_value=token,
+        )
+    assert _obj(env)["outcome"] == "accepted"
+    assert mocks["urlopen"].call_count == 1
+    assert _posted_body(mocks["urlopen"])["key"] == {
+        "studioId": STUDIO_ID,
+        "workspaceId": WORKSPACE,
+    }
+
+
+def test_assign_prefers_the_draft_row_over_mainline():
+    rows = [_tag_row(), _tag_row(workspace_id="", query="device:mainline")]
+    with _mocked(tags=rows) as mocks:
+        env = _assign()
+    assert _obj(env)["outcome"] == "preview"
+    assert _obj(env)["before_query"] == CURRENT_QUERY
+    mocks["urlopen"].assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "warning",
+    ["truncated_to_96000000_bytes", "ndjson_skip_invalid_line:3"],
+)
+def test_assign_refuses_an_incomplete_stream(warning):
+    rows = [_tag_row(studio_id="studio-other", workspace_id="", query="device:a")]
+    with _mocked(tags=rows, tag_warnings=[warning]) as mocks:
+        env = _assign(expected_current_query="")
+    assert _code(env) == "assigned_tags_read_failed"
+    assert warning in env["warnings"]
+    mocks["urlopen"].assert_not_called()
+
+
+def test_assign_refuses_a_row_without_a_query_field():
+    row = {"key": {"studioId": STUDIO_ID, "workspaceId": WORKSPACE}}
+    with _mocked(tags=[row]) as mocks:
+        env = _assign(expected_current_query="")
+    assert _code(env) == "assigned_tags_read_failed"
     mocks["urlopen"].assert_not_called()
 
 

@@ -98,19 +98,25 @@ def _mocked(workspace=None, inputs=None, studio=None):
     else:
         inputs_kwargs = {"return_value": inputs}
 
-    studio_env = studio or {
+    studio_env = {
         "coverage": "full",
         "object": {"studio_id": STUDIO_ID, "immutable": None, "from_package": None},
         "warnings": [],
     }
+    if studio is None:
+        studio_kwargs = {"return_value": studio_env}
+    elif isinstance(studio, list):
+        studio_kwargs = {"side_effect": studio}
+    else:
+        studio_kwargs = {"return_value": studio}
 
     with (
         patch(
             "cvp_mcp.grpc.studios.get_json_with_bearer", return_value=ws_result
         ) as get_ws,
         patch(
-            "cvp_mcp.grpc.studio_inputs_generic.get_cvp_studio",
-            return_value=studio_env,
+            "cvp_mcp.grpc.studio_crud.get_cvp_studio",
+            **studio_kwargs,
         ) as get_studio,
         patch(
             "cvp_mcp.grpc.studio_inputs_generic.get_cvp_studio_inputs",
@@ -177,8 +183,10 @@ def test_empty_path_values_refuses_root_path_forbidden(path_values):
     with _mocked(inputs=_inputs_env([_inputs_item(WORKSPACE, _document())])) as mocks:
         env = _call(path_values=path_values)
     assert _code(env) == "root_path_forbidden"
+    assert "set_cvp_access_interface_description" in _obj(env)["error"]["message"]
     assert env["coverage"] == "none"
     mocks["workspace_get"].assert_not_called()
+    mocks["studio_get"].assert_not_called()
     mocks["inputs_get"].assert_not_called()
     mocks["urlopen"].assert_not_called()
 
@@ -438,6 +446,49 @@ def test_row_at_a_different_path_is_not_used():
     with _mocked(inputs=[other, other]) as mocks:
         env = _call()
     assert _code(env) == "inputs_path_not_found"
+    assert _obj(env)["error"]["details"]["available_path_values"] == [
+        ["campus", "other"]
+    ]
+    assert mocks["inputs_get"].call_count == 1
+    mocks["urlopen"].assert_not_called()
+
+
+def test_miss_reports_resource_root_path_and_description_cas_hint():
+    root_document = {"campus": {"connectedEndpoints": {"endpoint-1": _document()}}}
+    root = _inputs_env([_inputs_item(WORKSPACE, root_document, path_values=[])])
+    with _mocked(inputs=root) as mocks:
+        env = _call()
+
+    assert _code(env) == "inputs_path_not_found"
+    details = _obj(env)["error"]["details"]
+    assert details == {
+        "studio_id": STUDIO_ID,
+        "path_values": PATH,
+        "available_path_values": [[]],
+        "hint": (
+            "Use set_cvp_access_interface_description for this studio’s only "
+            "Resource row (path_values []). Generic Inputs cannot POST the root."
+        ),
+    }
+    assert "inputs" not in details
+    assert mocks["inputs_get"].call_count == 1
+    mocks["urlopen"].assert_not_called()
+
+
+def test_available_resource_paths_are_unique_and_capped():
+    items = [
+        _inputs_item(WORKSPACE, {}, path_values=[f"path-{index}"])
+        for index in range(11)
+    ]
+    items.append(_inputs_item(WORKSPACE, {"duplicate": True}, path_values=["path-0"]))
+    with _mocked(inputs=_inputs_env(items)) as mocks:
+        env = _call(path_values=["missing"])
+
+    details = _obj(env)["error"]["details"]
+    assert details["available_path_values"] == [
+        [f"path-{index}"] for index in range(10)
+    ]
+    assert "available_path_values_truncated_to_10" in env["warnings"]
     mocks["urlopen"].assert_not_called()
 
 
@@ -463,6 +514,17 @@ def test_any_inputs_read_warning_fails_closed():
         env = _call()
     assert _code(env) == "preflight_failed"
     assert "truncated_to_96000000" in env["warnings"]
+    mocks["urlopen"].assert_not_called()
+
+
+def test_skipped_invalid_inputs_line_fails_closed():
+    with _mocked(
+        inputs=_inputs_env([], warnings=["ndjson_skip_invalid_line:2"])
+    ) as mocks:
+        env = _call()
+    assert _code(env) == "preflight_failed"
+    assert "ndjson_skip_invalid_line:2" in env["warnings"]
+    assert mocks["inputs_get"].call_count == 1
     mocks["urlopen"].assert_not_called()
 
 
@@ -531,6 +593,53 @@ def test_failed_studio_get_refuses():
     with _mocked(studio=studio_env) as mocks:
         env = _call()
     assert _code(env) == "preflight_failed"
+    mocks["inputs_get"].assert_not_called()
+    mocks["urlopen"].assert_not_called()
+
+
+def test_overlay_studio_get_is_used_without_mainline_fallback():
+    with _mocked(inputs=_inputs_env([_inputs_item(WORKSPACE, _document())])) as mocks:
+        env = _call()
+
+    assert _obj(env)["outcome"] == "preview"
+    assert [call.args[2] for call in mocks["studio_get"].call_args_list] == [WORKSPACE]
+
+
+def test_overlay_studio_404_falls_back_to_mainline():
+    overlay_missing = {
+        "coverage": "none",
+        "object": {},
+        "warnings": ["http_error:404"],
+    }
+    mainline = {
+        "coverage": "full",
+        "object": {"studio_id": STUDIO_ID, "immutable": None, "from_package": None},
+        "warnings": [],
+    }
+    with _mocked(
+        studio=[overlay_missing, mainline],
+        inputs=_inputs_env([_inputs_item(WORKSPACE, _document())]),
+    ) as mocks:
+        env = _call()
+
+    assert _obj(env)["outcome"] == "preview"
+    assert [call.args[2] for call in mocks["studio_get"].call_args_list] == [
+        WORKSPACE,
+        "",
+    ]
+
+
+def test_overlay_studio_read_failure_does_not_fall_back():
+    overlay_failed = {
+        "coverage": "none",
+        "object": {},
+        "warnings": ["http_error:500"],
+    }
+    with _mocked(studio=overlay_failed) as mocks:
+        env = _call()
+
+    assert _code(env) == "preflight_failed"
+    assert [call.args[2] for call in mocks["studio_get"].call_args_list] == [WORKSPACE]
     mocks["inputs_get"].assert_not_called()
     mocks["urlopen"].assert_not_called()
 

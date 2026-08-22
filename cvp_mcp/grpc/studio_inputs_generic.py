@@ -31,7 +31,8 @@ import json
 from typing import Any
 
 from cvp_mcp.grpc.resource_write import post_resource_config
-from cvp_mcp.grpc.studios import get_cvp_studio, get_cvp_studio_inputs
+from cvp_mcp.grpc.studio_crud import _read_studio_anywhere
+from cvp_mcp.grpc.studios import get_cvp_studio_inputs
 from cvp_mcp.grpc.studios_write import (
     _INPUTS_SOURCE,
     INPUTS_CONFIG_PATH,
@@ -74,6 +75,11 @@ FORBIDDEN_LEAF_TOKENS: tuple[str, ...] = (
 # Diff paths reported in a refusal, so a huge accidental diff cannot flood the
 # envelope. ``changed_count`` always reports the true total.
 _MAX_REPORTED_PATHS = 10
+
+_ROOT_INPUTS_HINT = (
+    "Use set_cvp_access_interface_description for this studio’s only Resource "
+    "row (path_values []). Generic Inputs cannot POST the root."
+)
 
 
 def _normalize_key(name: str) -> str:
@@ -167,14 +173,16 @@ def _read_path_document(
     studio_id: str,
     workspace_id: str,
     path_values: list[str],
-) -> tuple[Any, str, str | None, list[str]]:
+) -> tuple[Any, str, str | None, list[str], list[list[Any]]]:
     """GET the Inputs row keyed at exactly ``path_values``.
 
     Prefers the workspace overlay and falls back to mainline (``workspaceId``
     ``""``), matching "first write copies mainline, later writes read the
     overlay". Any warning on the read fails closed: a truncated or partly
     skipped NDJSON stream would diff the proposal against a partial document.
-    Returns ``(document, source_workspace_id, error, warnings)``.
+    Returns ``(document, source_workspace_id, error, warnings,
+    available_path_values)``. Resource paths come only from the selected row
+    set; JSON keys inside an ``inputs`` body are never treated as paths.
     """
     warnings: list[str] = []
     for source in (workspace_id, ""):
@@ -182,21 +190,59 @@ def _read_path_document(
         env_warnings = [w for w in (env.get("warnings") or []) if isinstance(w, str)]
         warnings.extend(env_warnings)
         if env_warnings:
-            return None, "", "preflight_failed", warnings
-        matches = [
-            item
-            for item in (env.get("items") or [])
-            if isinstance(item, dict) and item.get("path_values") == path_values
-        ]
-        if len(matches) > 1:
-            return None, source, "inputs_path_not_found", warnings
-        if not matches:
+            return None, "", "preflight_failed", warnings, []
+        items = [item for item in (env.get("items") or []) if isinstance(item, dict)]
+        if not items:
             continue
+
+        available: list[list[Any]] = []
+        seen: set[str] = set()
+        for item in items:
+            resource_path = item.get("path_values")
+            if not isinstance(resource_path, list):
+                continue
+            identity = json.dumps(resource_path, sort_keys=True, default=str)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            available.append(resource_path)
+        reported_available = available[:_MAX_REPORTED_PATHS]
+        matches = [item for item in items if item.get("path_values") == path_values]
+        if len(matches) > 1:
+            if len(available) > _MAX_REPORTED_PATHS:
+                warnings.append(
+                    f"available_path_values_truncated_to_{_MAX_REPORTED_PATHS}"
+                )
+            return (
+                None,
+                source,
+                "inputs_path_not_found",
+                warnings,
+                reported_available,
+            )
+        if not matches:
+            if len(available) > _MAX_REPORTED_PATHS:
+                warnings.append(
+                    f"available_path_values_truncated_to_{_MAX_REPORTED_PATHS}"
+                )
+            return (
+                None,
+                source,
+                "inputs_path_not_found",
+                warnings,
+                reported_available,
+            )
         document = matches[0].get("inputs")
         if not isinstance(document, (dict, list)):
-            return None, source, "inputs_path_unresolved", warnings
-        return document, source, None, warnings
-    return None, "", "inputs_path_not_found", warnings
+            return (
+                None,
+                source,
+                "inputs_path_unresolved",
+                warnings,
+                reported_available,
+            )
+        return document, source, None, warnings, reported_available
+    return None, "", "inputs_path_not_found", warnings, []
 
 
 def set_cvp_studio_inputs(
@@ -254,7 +300,8 @@ def set_cvp_studio_inputs(
             _INPUTS_SOURCE,
             "root_path_forbidden",
             "Generic Inputs writes require a non-empty path; the root path would "
-            "replace the studio's whole input tree.",
+            "replace the studio's whole input tree. Use "
+            "set_cvp_access_interface_description for the root description CAS.",
             details={"studio_id": studio},
             workspace_id=workspace,
         )
@@ -332,9 +379,10 @@ def set_cvp_studio_inputs(
             warnings=ws_warnings,
         )
 
-    studio_env = get_cvp_studio(datadict, studio, "")
-    studio_obj = studio_env.get("object") or {}
-    if studio_env.get("coverage") != "full" or not isinstance(studio_obj, dict):
+    studio_obj, _, studio_status, studio_warnings = _read_studio_anywhere(
+        datadict, studio, workspace
+    )
+    if studio_status is not None or not isinstance(studio_obj, dict):
         return _refused(
             tool,
             _INPUTS_SOURCE,
@@ -342,7 +390,7 @@ def set_cvp_studio_inputs(
             "Studio GET failed; refusing Inputs write.",
             details={"studio_id": studio},
             workspace_id=workspace,
-            warnings=list(studio_env.get("warnings") or []),
+            warnings=studio_warnings,
         )
     if studio_obj.get("immutable") is True or studio_obj.get("from_package") is True:
         return _refused(
@@ -358,16 +406,21 @@ def set_cvp_studio_inputs(
             workspace_id=workspace,
         )
 
-    current, source_workspace, load_error, warnings = _read_path_document(
-        datadict, studio, workspace, path
+    current, source_workspace, load_error, warnings, available_path_values = (
+        _read_path_document(datadict, studio, workspace, path)
     )
     if load_error:
+        details: dict[str, Any] = {"studio_id": studio, "path_values": path}
+        if load_error == "inputs_path_not_found":
+            details["available_path_values"] = available_path_values
+            if available_path_values == [[]]:
+                details["hint"] = _ROOT_INPUTS_HINT
         return _refused(
             tool,
             _INPUTS_SOURCE,
             load_error,
             "Could not read the current Inputs document at path_values.",
-            details={"studio_id": studio, "path_values": path},
+            details=details,
             workspace_id=workspace,
             warnings=warnings,
         )

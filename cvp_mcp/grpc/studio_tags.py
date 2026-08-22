@@ -5,16 +5,21 @@ Library functions only; nothing here registers an MCP tool. See
 "assign_cvp_studio_tags").
 
 :func:`get_cvp_studio_assigned_tags` is a **read**: it runs without the writes
-env gate. ``GET AssignedTags/all`` is still unprobed on this tenant, so a 404 or
-an empty result is reported as ``coverage="none"`` plus an
-``assigned_tags_unavailable`` warning. No query is ever invented.
+env gate. ``GET AssignedTags/all`` is live on this tenant and many studios simply
+have no row, so a **complete** stream with no matching row resolves to
+``query=""`` (unassigned) with ``coverage="full"``. A 404 or an empty body is
+still ``coverage="none"`` plus an ``assigned_tags_unavailable`` warning, and an
+incomplete stream (truncated, skipped NDJSON lines, or a helper error) is a
+read failure. ``""`` is never synthesized from a stream we could not trust.
 
 :func:`assign_cvp_studio_tags` **replaces** a studio's whole tag query and so
 follows the same fail-close shape as ``studios_write``:
 
 * refuses with ``writes_disabled`` unless :func:`writes_enabled`,
 * refuses an empty ``query`` (2.1 has no unassign-all),
-* requires ``expected_current_query`` and compares it against a fresh GET —
+* requires ``expected_current_query`` — ``""`` is a **valid** value meaning
+  "the resolver says unassigned"; only a missing or non-``str`` value is
+  ``expected_current_query_required`` — and compares it against a fresh GET —
   any mismatch, or a GET that did not resolve, refuses before the POST body is
   built,
 * returns a ``preview_token`` when ``confirm=False`` (no mutating HTTP at all),
@@ -59,6 +64,19 @@ _QUERY_FIELDS: tuple[str, ...] = ("query", "tagQuery", "tag_query")
 # ndjson helper errors that mean "the endpoint told us nothing", as opposed to
 # a transport/auth failure. Both map to ``assigned_tags_unavailable``.
 _UNAVAILABLE_ERRORS: frozenset[str] = frozenset({"http_error:404", "empty_response"})
+
+# Warning substrings from ``uri_fetch`` that mean the stream we parsed is not
+# the whole stream. A missing row in a partial stream proves nothing, so these
+# fail closed instead of resolving to ``query=""``.
+_INCOMPLETE_WARNINGS: tuple[str, ...] = ("truncated_to_", "ndjson_skip_invalid_line")
+
+# Resolver status -> the identifier the GET warns with. The assign refuses with
+# the same string per branch below.
+_READ_STATUS_WARNINGS: dict[str, str] = {
+    "unavailable": "assigned_tags_unavailable",
+    "read_failed": "assigned_tags_read_failed",
+    "ambiguous": "assigned_tags_ambiguous",
+}
 
 
 # --- envelope helpers (copied from studios_write; that module is not edited) -
@@ -174,24 +192,47 @@ def _read_workspace(
 # --- AssignedTags read ------------------------------------------------------
 
 
-def _row_query(value: dict[str, Any]) -> str:
-    """The assigned query on one AssignedTags row, ``""`` when absent."""
+def _row_query(value: dict[str, Any]) -> str | None:
+    """The assigned query on one AssignedTags row, ``None`` when no field.
+
+    ``None`` and ``""`` are different answers: a row that carries no recognized
+    query field is unreadable (fail closed), while a studio with no row at all
+    is unassigned. Only the first recognized field is consulted.
+    """
     for field in _QUERY_FIELDS:
-        text = _as_str(value.get(field))
-        if text:
-            return text
-    return ""
+        raw = value.get(field)
+        if isinstance(raw, str):
+            return raw
+        if isinstance(raw, dict) and isinstance(raw.get("value"), str):
+            return raw["value"]
+    return None
+
+
+def _tag_row(value: Any) -> dict[str, Any] | None:
+    """Normalize one AssignedTags ``result.value``; ``None`` when not a row."""
+    if not isinstance(value, dict):
+        return None
+    key = value.get("key")
+    if not isinstance(key, dict):
+        return None
+    return {
+        "studio_id": _as_str(key.get("studioId") or key.get("studio_id")),
+        "workspace_id": _as_str(key.get("workspaceId") or key.get("workspace_id")),
+        "query": _row_query(value),
+    }
 
 
 def _fetch_assigned_tags(
-    datadict: dict[str, Any], studio_id: str, workspace_id: str
+    datadict: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], str | None, list[str]]:
-    """GET ``AssignedTags/all`` and client-filter to one studio + workspace.
+    """GET ``AssignedTags/all`` once and return every parsed row.
 
-    Returns ``(items, status, warnings)``. ``status`` is ``None`` when at least
-    one row matched, ``"unavailable"`` on 404/empty/no match, and
-    ``"read_failed"`` for any other transport error. A query is never
-    synthesized: an unavailable read yields no items.
+    Returns ``(rows, status, warnings)``. ``status`` is ``None`` only when the
+    stream is **complete**: helper ``err is None``, no ``truncated_to_`` or
+    ``ndjson_skip_invalid_line`` warning, and at least one AssignedTags row
+    parsed. ``"unavailable"`` is HTTP 404 or an empty body; ``"read_failed"``
+    is every other failure, including an incomplete 200. Callers may only read
+    "this studio has no row" out of a complete stream.
     """
     token, base, missing = _credentials(datadict)
     if missing:
@@ -211,28 +252,70 @@ def _fetch_assigned_tags(
         status = "unavailable" if err in _UNAVAILABLE_ERRORS else "read_failed"
         return [], status, warnings
 
-    items: list[dict[str, Any]] = []
-    for value in values or []:
-        if not isinstance(value, dict):
-            continue
-        key = value.get("key")
-        if not isinstance(key, dict):
-            continue
-        row_sid = _as_str(key.get("studioId") or key.get("studio_id"))
-        row_wid = _as_str(key.get("workspaceId") or key.get("workspace_id"))
-        if row_sid != studio_id or row_wid != workspace_id:
-            continue
-        items.append(
-            {
-                "studio_id": row_sid,
-                "workspace_id": row_wid,
-                "query": _row_query(value),
-            }
-        )
+    if any(marker in w for w in warnings for marker in _INCOMPLETE_WARNINGS):
+        return [], "read_failed", warnings
 
-    if not items:
-        return [], "unavailable", warnings
-    return items, None, warnings
+    rows = [row for row in (_tag_row(v) for v in values or []) if row]
+    if not rows:
+        # A 200 that yielded no AssignedTags row at all is not evidence that
+        # this studio is unassigned; other studios should have been present.
+        return [], "read_failed", warnings
+    return rows, None, warnings
+
+
+def _resolve_assigned_query(
+    datadict: dict[str, Any], studio_id: str, workspace_id: str | None
+) -> tuple[dict[str, Any] | None, str | None, list[str], int]:
+    """Resolve the query in force for one studio: overlay, else mainline, else ``""``.
+
+    Returns ``(item, status, warnings, matches)``. ``workspace_id`` of ``None``
+    or ``""`` looks at mainline only; a draft id looks at the draft's own row
+    first and falls back to mainline (``""``), which is what a new ``ws-mcp-*``
+    draft inherits until something is written to it. A different UUID
+    workspace's row is never copied onto mainline or onto this draft.
+
+    ``status`` is ``None`` when ``item`` holds the resolved query (possibly
+    ``""``), else ``"unavailable"`` / ``"read_failed"`` / ``"ambiguous"``.
+    """
+    rows, status, warnings = _fetch_assigned_tags(datadict)
+    reported_wid = _MAINLINE_WORKSPACE_ID if workspace_id is None else workspace_id
+    if status:
+        return None, status, warnings, 0
+
+    candidates = [reported_wid]
+    if _MAINLINE_WORKSPACE_ID not in candidates:
+        candidates.append(_MAINLINE_WORKSPACE_ID)
+
+    for candidate in candidates:
+        matches = [
+            row
+            for row in rows
+            if row["studio_id"] == studio_id and row["workspace_id"] == candidate
+        ]
+        if not matches:
+            continue
+        if len(matches) > 1:
+            return None, "ambiguous", warnings, len(matches)
+        query = matches[0]["query"]
+        if query is None:
+            # The row exists but carries no recognized query field; that is a
+            # read failure, not an unassigned studio.
+            return None, "read_failed", warnings, 1
+        item = {
+            "studio_id": studio_id,
+            "workspace_id": reported_wid,
+            "query": query,
+        }
+        return item, None, warnings, 1
+
+    # Complete stream, no row for this studio in this workspace or on
+    # mainline: the studio is unassigned.
+    item = {
+        "studio_id": studio_id,
+        "workspace_id": reported_wid,
+        "query": "",
+    }
+    return item, None, warnings, 0
 
 
 def get_cvp_studio_assigned_tags(
@@ -242,13 +325,16 @@ def get_cvp_studio_assigned_tags(
 ) -> dict[str, Any]:
     """Assigned tag query for one studio in one workspace (mainline is ``""``).
 
-    Best-effort read: ``GET AssignedTags/all`` is unprobed, so a 404, an empty
-    stream, or no matching row all return ``coverage="none"`` with an
-    ``assigned_tags_unavailable`` warning and ``items: []``.
+    A complete ``GET AssignedTags/all`` with no row for this studio resolves to
+    ``query=""`` with ``coverage="full"`` — many studios on this tenant have no
+    row. A 404 or an empty body is ``coverage="none"`` with
+    ``assigned_tags_unavailable``; an incomplete stream, an unreadable row or a
+    duplicate row is ``coverage="none"`` with ``assigned_tags_read_failed`` /
+    ``assigned_tags_ambiguous``. ``""`` is never synthesized from a stream we
+    could not trust.
     """
     warnings: list[str] = []
     sid = (studio_id or "").strip()
-    wid = _MAINLINE_WORKSPACE_ID if workspace_id is None else str(workspace_id)
     if not sid:
         return tool_envelope(
             data_source=_TAGS_SOURCE,
@@ -257,11 +343,11 @@ def get_cvp_studio_assigned_tags(
             warnings=["missing_studio_id"],
         )
 
-    items, status, read_warnings = _fetch_assigned_tags(datadict, sid, wid)
+    wid = _MAINLINE_WORKSPACE_ID if workspace_id is None else str(workspace_id)
+    item, status, read_warnings, _ = _resolve_assigned_query(datadict, sid, wid)
     warnings.extend(read_warnings)
-    if status == "unavailable":
-        warnings.append("assigned_tags_unavailable")
     if status:
+        warnings.append(_READ_STATUS_WARNINGS[status])
         return tool_envelope(
             data_source=_TAGS_SOURCE,
             coverage="none",
@@ -271,7 +357,7 @@ def get_cvp_studio_assigned_tags(
     return tool_envelope(
         data_source=_TAGS_SOURCE,
         coverage="full",
-        items=items,
+        items=[item],
         warnings=warnings,
     )
 
@@ -292,10 +378,14 @@ def assign_cvp_studio_tags(
     """Compare-and-set a studio's whole assigned tag query.
 
     ``expected_current_query`` is required and is checked against a fresh
-    ``AssignedTags`` GET; a mismatch, an ambiguous result, or a GET that did not
-    resolve refuses before the POST body exists. An empty ``query`` is refused
+    ``AssignedTags`` GET resolved overlay-then-mainline; a mismatch, an
+    ambiguous result, or a GET that did not resolve refuses before the POST body
+    exists. ``""`` is a valid expected value and means the resolver found no row
+    (the studio is unassigned); only a missing or non-``str`` value is
+    ``expected_current_query_required``. An empty **new** ``query`` is refused
     outright — 2.1 deliberately has no unassign-all. The write target must be a
-    pending ``ws-mcp-*`` draft.
+    pending ``ws-mcp-*`` draft, and the POST is keyed to that draft, never to
+    mainline.
     """
     tool = "assign_cvp_studio_tags"
     if not writes_enabled():
@@ -333,12 +423,15 @@ def assign_cvp_studio_tags(
         )
     new_query = query.strip()
 
-    if not isinstance(expected_current_query, str) or not expected_current_query:
+    # ``""`` is a valid CAS token ("the resolver says unassigned"), so this
+    # must not be ``if not expected_current_query``.
+    if not isinstance(expected_current_query, str):
         return _refused(
             tool,
             "expected_current_query_required",
             "expected_current_query is required; read it with "
-            "get_cvp_studio_assigned_tags first.",
+            'get_cvp_studio_assigned_tags first. Pass "" when the studio has '
+            "no assigned query.",
             details={"studio_id": sid},
             workspace_id=workspace,
         )
@@ -382,44 +475,55 @@ def assign_cvp_studio_tags(
             warnings=ws_warnings,
         )
 
-    items, tag_status, tag_warnings = _fetch_assigned_tags(datadict, sid, workspace)
+    # Overlay (this draft) then mainline: a fresh ``ws-mcp-*`` draft has no row
+    # of its own yet and inherits whatever mainline has.
+    item, tag_status, tag_warnings, matches = _resolve_assigned_query(
+        datadict, sid, workspace
+    )
     warnings = ws_warnings + tag_warnings
     if tag_status == "unavailable":
         warnings.append("assigned_tags_unavailable")
         return _refused(
             tool,
             "assigned_tags_unavailable",
-            "AssignedTags GET returned nothing for this studio and workspace; "
-            "the current query cannot be confirmed, so the assign is refused.",
+            "AssignedTags GET returned nothing at all for this tenant; the "
+            "current query cannot be confirmed, so the assign is refused.",
             details={"studio_id": sid},
+            workspace_id=workspace,
+            warnings=warnings,
+        )
+    if tag_status == "ambiguous":
+        warnings.append("assigned_tags_ambiguous")
+        return _refused(
+            tool,
+            "assigned_tags_ambiguous",
+            f"Expected at most one AssignedTags row, found {matches}.",
+            details={"studio_id": sid, "matches": matches},
             workspace_id=workspace,
             warnings=warnings,
         )
     if tag_status:
+        warnings.append("assigned_tags_read_failed")
         return _refused(
             tool,
             "assigned_tags_read_failed",
-            "AssignedTags GET failed; refusing to assign tags.",
+            "AssignedTags GET did not return a complete, readable stream; "
+            "refusing to assign tags.",
             details={"studio_id": sid},
             workspace_id=workspace,
             warnings=warnings,
         )
-    if len(items) != 1:
-        return _refused(
-            tool,
-            "assigned_tags_ambiguous",
-            f"Expected exactly one AssignedTags row, found {len(items)}.",
-            details={"studio_id": sid, "matches": len(items)},
-            workspace_id=workspace,
-            warnings=warnings,
-        )
 
-    current = items[0]["query"]
+    # Resolved: ``item`` is set whenever ``tag_status`` is None, and its query
+    # is ``""`` when neither the draft nor mainline has a row.
+    current = (item or {}).get("query", "")
     if current != expected:
         return _refused(
             tool,
             "current_query_mismatch",
-            "Current tag query does not match expected_current_query.",
+            "Current tag query does not match expected_current_query. The "
+            "current query is the draft's own row if it has one, else "
+            'mainline\'s, else "" when the studio is unassigned.',
             details={
                 "studio_id": sid,
                 "current_query": current,

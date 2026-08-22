@@ -219,7 +219,7 @@ try:
 except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
     sys.exit(1)
 
-for tag in payload.get("Tags") or []:
+for tag in payload.get("tags") or payload.get("Tags") or []:
     print(tag)
 PY
 )"

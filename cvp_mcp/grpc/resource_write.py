@@ -20,11 +20,17 @@ from cvp_mcp.grpc.uri_allowlist import is_uri_host_allowed
 from cvp_mcp.grpc.uri_fetch import post_json_with_bearer
 
 # Exact resource paths this helper may write. No query string, no prefixes.
+# Spec: docs/studios-phase2-spec.md, "Path allowlist (exact)". Anything absent
+# here — notably ``changecontrol/*`` and ``configlet/*`` — is refused before any
+# request is built.
 POST_PATH_ALLOWLIST: frozenset[str] = frozenset(
     {
+        # 2.0: workspace create / request, and studio inputs.
         "/api/resources/workspace/v1/WorkspaceConfig",
         "/api/resources/studio/v1/InputsConfig",
+        # 2.1: assign_cvp_studio_tags replaces the whole tag query.
         "/api/resources/studio/v1/AssignedTagsConfig",
+        # 2.2: create_cvp_studio / delete_cvp_studio upsert or remove a studio.
         "/api/resources/studio/v1/StudioConfig",
     }
 )
@@ -65,7 +71,9 @@ def _normalize_base(base_url: str | None) -> str:
 def _submit_allowed() -> bool:
     """True only when ``cvp_mcp.write_access.submit_enabled`` exists and is on.
 
-    Bucket 0 may not be merged yet; a missing module means submit stays off.
+    Fail-close: an unimportable or raising gate means submit stays off. Submit
+    itself is spec 2.1 and stays unregistered until the Workspace staleness
+    field is confirmed, so this is expected to be False in 2.0/2.2.
     """
     try:
         from cvp_mcp.write_access import submit_enabled  # noqa: PLC0415

@@ -1,0 +1,102 @@
+{
+  "captured_at": "2026-08-21T01:54:16Z",
+  "cvp": "www.cv-staging.corp.arista.io",
+  "device_id": "JPE19151499",
+  "hostname": "720xp-24",
+  "endpoint": "POST /api/v3/services/compliancecheck.Compliance/GetConfig",
+  "request": {
+    "device_id": "JPE19151499",
+    "timestamp": "<RFC3339 UTC>",
+    "type": "DESIGNED_CONFIG"
+  },
+  "notes": [
+    "HTTP 200 body is a JSON array of message objects, not a single object.",
+    "First message(s) carry sources; a later message carries config (designed CLI text).",
+    "source.key is a string studio id (not a nested object).",
+    "UUID-shaped studio ids from the live capture were replaced with placeholders so gitleaks generic-api-key does not treat JSON field 'key' as a secret.",
+    "Observed source_type values listed under source_types_observed."
+  ],
+  "source_types_observed": {
+    "CONFIG_TYPE_STUDIO": 13,
+    "CONFIG_TYPE_STUDIO_STATIC": 5
+  },
+  "sources": {
+    "source": [
+      {
+        "source_type": "CONFIG_TYPE_STUDIO",
+        "key": "studio-campus-access-interfaces"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO",
+        "key": "studio-authentication"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO",
+        "key": "studio-avd-campus-fabric"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO",
+        "key": "studio-connectivity"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO",
+        "key": "studio-dns-settings"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO",
+        "key": "studio-date-time"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO",
+        "key": "studio-eos-aliases-pkg"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO",
+        "key": "studio-eos-event-handler-pkg"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO",
+        "key": "studio-flow-monitoring-pkg"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO",
+        "key": "studio-mss-service"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO",
+        "key": "studio-id-custom-1"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO",
+        "key": "studio-postcard"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO",
+        "key": "studio-telemetry-config"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO_STATIC",
+        "key": "static-studio-id-1"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO_STATIC",
+        "key": "static-studio-id-2"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO_STATIC",
+        "key": "static-studio-id-3"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO_STATIC",
+        "key": "static-studio-id-3"
+      },
+      {
+        "source_type": "CONFIG_TYPE_STUDIO_STATIC",
+        "key": "avd-JPE19151499"
+      }
+    ]
+  },
+  "config_message_shape": {
+    "config": "<str N chars designed CLI; omitted from fixture>"
+  }
+}

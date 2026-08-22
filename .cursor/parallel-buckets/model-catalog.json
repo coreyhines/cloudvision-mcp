@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "scanned_at": "2026-08-20T03:47:30+00:00",
+  "resources": {
+    "ollama_local": {
+      "host": "http://127.0.0.1:11434",
+      "ok": true,
+      "models": [
+        "qwen3.8:27b-mxfp8",
+        "qwen3.8:27b-mlx",
+        "qwen3.6:35b-a3b-mxfp8",
+        "kimi-k3:cloud",
+        "glm-5.2:cloud",
+        "gemma4:31b-mlx-bf16"
+      ],
+      "running": [],
+      "error": null
+    },
+    "ollama_cloud": {
+      "host": "https://ollama.com",
+      "ok": true,
+      "models": [
+        "qwen3.5:397b",
+        "minimax-m2.7",
+        "mistral-large-3:675b",
+        "glm-5.2",
+        "deepseek-v4-pro:0813",
+        "gemma4:31b",
+        "nemotron-3-ultra",
+        "kimi-k2.7-code",
+        "kimi-k3",
+        "gpt-oss:120b",
+        "nemotron-3-nano:30b",
+        "gpt-oss:20b",
+        "minimax-m3",
+        "nemotron-3-super",
+        "deepseek-v4-flash:preview",
+        "glm-5.1",
+        "kimi-k2.6",
+        "deepseek-v4-pro:preview",
+        "deepseek-v4-flash:0731"
+      ],
+      "error": null
+    },
+    "ollama_workstation": {
+      "host": "http://morpheus.freeblizz.com:11434",
+      "ok": false,
+      "models": [],
+      "configured": true,
+      "error": "<urlopen error [Errno 8] nodename nor servname provided, or not known>",
+      "model": "qwen3:32b"
+    },
+    "claude": {
+      "models": [
+        "sonnet",
+        "opus"
+      ],
+      "note": "Claude Code CLI tiers; not enumerated via API"
+    },
+    "cursor": {
+      "models": [
+        "auto",
+        "sonnet",
+        "opus"
+      ],
+      "note": "Cursor agent picker; pin before farming named models"
+    },
+    "codex": {
+      "ok": true,
+      "models": [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "codex-auto-review"
+      ],
+      "default_model": "gpt-5.6-sol",
+      "note": "Codex CLI; models from ~/.codex/models_cache.json + config.toml",
+      "error": null
+    },
+    "opencode-ollama-local": {
+      "ok": null,
+      "models": [],
+      "note": "no scan implemented for this executor yet"
+    }
+  },
+  "env_defaults": {
+    "ollama_local_standard": "qwen3.6:35b-a3b-mxfp8",
+    "ollama_local_fast": null,
+    "ollama_cloud_standard": "kimi-k2.7-code:cloud",
+    "ollama_workstation_standard": "qwen3:32b",
+    "codex_default": "gpt-5.6-sol"
+  }
+}

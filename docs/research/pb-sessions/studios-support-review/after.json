@@ -1,0 +1,161 @@
+{
+  "wall_ts": "2026-08-20T03:58:32.497082+00:00",
+  "capacity_probe": "burnbar_primary",
+  "burnbar": {
+    "ok": true,
+    "providers": [
+      {
+        "provider": "anthropic",
+        "ok": false,
+        "level": "RED",
+        "percent": 0.0,
+        "hint": "Anthropic auth not found \u2014 run `burnbar login anthropic`",
+        "meters": [],
+        "models": [],
+        "freshness": {
+          "state": "live"
+        }
+      },
+      {
+        "provider": "chatgpt-plus",
+        "ok": false,
+        "level": "RED",
+        "percent": 0.0,
+        "hint": "ChatGPT quota snapshot is stale \u2014 re-run `burnbar login chatgpt` or `node scripts/fetch_chatgpt_quota.mjs`",
+        "meters": [],
+        "models": [],
+        "freshness": {
+          "state": "live"
+        }
+      },
+      {
+        "provider": "cursor",
+        "ok": true,
+        "level": "GREEN",
+        "percent": 13.0,
+        "hint": null,
+        "meters": [
+          {
+            "label": "Total",
+            "percent": 6.0,
+            "used": 6,
+            "total": 100,
+            "resets_at": "2026-09-15T21:55:40.000Z"
+          },
+          {
+            "label": "Auto + Composer",
+            "percent": 5.0,
+            "used": 5,
+            "total": 100,
+            "resets_at": "2026-09-15T21:55:40.000Z"
+          },
+          {
+            "label": "API",
+            "percent": 13.0,
+            "used": 13,
+            "total": 100,
+            "resets_at": "2026-09-15T21:55:40.000Z"
+          }
+        ],
+        "models": [],
+        "freshness": {
+          "state": "live"
+        }
+      },
+      {
+        "provider": "openai",
+        "ok": false,
+        "level": "RED",
+        "percent": 0.0,
+        "hint": "No OpenAI API key \u2014 set OPENAI_API_KEY or providers.openai.token",
+        "meters": [],
+        "models": [],
+        "freshness": {
+          "state": "live"
+        }
+      },
+      {
+        "provider": "ollama-cloud",
+        "ok": true,
+        "level": "GREEN",
+        "percent": 0.2,
+        "hint": null,
+        "meters": [
+          {
+            "label": "Session usage",
+            "percent": 0.0,
+            "used": 0,
+            "total": 100,
+            "resets_at": "2026-08-20T05:00:00Z"
+          },
+          {
+            "label": "Weekly usage",
+            "percent": 26.0,
+            "used": 26,
+            "total": 100,
+            "resets_at": "2026-08-24T00:00:00Z"
+          }
+        ],
+        "models": [],
+        "freshness": {
+          "state": "live"
+        }
+      },
+      {
+        "provider": "ollama-local",
+        "ok": false,
+        "level": "RED",
+        "percent": 0.0,
+        "hint": "Unreachable: error sending request for url (http://127.0.0.1:11434/api/tags)",
+        "meters": [],
+        "models": [],
+        "freshness": {
+          "state": "live"
+        }
+      }
+    ],
+    "source": "burnbar",
+    "url": "https://burnbar.freeblizz.com"
+  },
+  "claude": {
+    "ok": false,
+    "error": "no_oauth_token"
+  },
+  "cursor": {
+    "ok": true,
+    "source": "burnbar",
+    "total_percent_used": 6.0,
+    "auto_composer_percent_used": 5.0,
+    "api_percent_used": 13.0,
+    "messages": {},
+    "freshness": {
+      "state": "live"
+    },
+    "resets_at": "2026-09-15T21:55:40.000Z"
+  },
+  "ollama_cloud": {
+    "ok": true,
+    "source": "burnbar",
+    "session_pct": 0.0,
+    "week_pct": 26.0,
+    "resets_at": {
+      "session": "2026-08-20T05:00:00Z",
+      "week": "2026-08-24T00:00:00Z"
+    },
+    "freshness": {
+      "state": "live"
+    }
+  },
+  "codex": {
+    "ok": true,
+    "source": "chatgpt.json",
+    "pool": "chatgpt_plus_codex",
+    "session_pct": null,
+    "week_pct": 0.0,
+    "overall_pct": 0.0,
+    "plan_type": "plus",
+    "harvested_at": "2026-08-20T03:58:30.548076Z"
+  },
+  "label": "after",
+  "feature": "studios-support-review"
+}

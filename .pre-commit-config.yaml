@@ -1,13 +1,19 @@
-# Setup: uv sync --dev && pre-commit install
-# Manual run: pre-commit run --all-files
-# Requires: uv (project dev deps include pre-commit); gitleaks on PATH for secret scan hook
+# Install commit + push hooks (gitleaks on staged files AND on push):
+#   uv sync --dev && pre-commit install --hook-type pre-commit --hook-type pre-push
+# Manual: pre-commit run --all-files
+#
+# Do not pass --log-opts main: that makes gitleaks scan `main` instead of the
+# staged commit, so secrets on a feature branch would slip through locally.
+
+default_install_hook_types: [pre-commit, pre-push]
 
 repos:
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
     hooks:
       - id: gitleaks
-        args: [--config, .gitleaks.toml, --redact, --log-opts, main]
+        args: [--config=.gitleaks.toml]
+        stages: [pre-commit, pre-push]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

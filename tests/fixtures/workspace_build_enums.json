@@ -1,0 +1,67 @@
+{
+  "captured_at": "2026-08-21T01:54:16Z",
+  "cvp": "www.cv-staging.corp.arista.io",
+  "mainline_workspace_id": "",
+  "notes": [
+    "Mainline studios use key.workspaceId empty string \"\".",
+    "Workspace.responses.values is keyed by request_id; success messages often say Build <uuid> where uuid equals the map key (request_id == buildId on this tenant for builds).",
+    "WorkspaceBuild.key = {workspaceId, buildId}.",
+    "BUILD_STATE_IN_PROGRESS exists in protobuf but was not present in historical WorkspaceBuild/all dump."
+  ],
+  "WorkspaceBuild.state_observed": {
+    "BUILD_STATE_SUCCESS": 2045,
+    "BUILD_STATE_FAIL": 516,
+    "BUILD_STATE_CANCELED": 12
+  },
+  "WorkspaceBuild.state_protobuf_also": [
+    "BUILD_STATE_UNSPECIFIED",
+    "BUILD_STATE_IN_PROGRESS",
+    "BUILD_STATE_SKIPPED"
+  ],
+  "Workspace.state_observed": {
+    "WORKSPACE_STATE_SUBMITTED": 1380,
+    "WORKSPACE_STATE_ABANDONED": 130,
+    "WORKSPACE_STATE_PENDING": 3
+  },
+  "Workspace.Response.status_observed": {
+    "RESPONSE_STATUS_SUCCESS": 3604,
+    "RESPONSE_STATUS_FAIL": 589
+  },
+  "poll_contract": {
+    "after_REQUEST_START_BUILD": "Poll GET Workspace?key.workspaceId= until responses.values[<request_id>] appears; buildId is typically that same request_id. Then GET WorkspaceBuild?key.workspaceId=&key.buildId= until state in {BUILD_STATE_SUCCESS, BUILD_STATE_FAIL, BUILD_STATE_CANCELED} (also treat IN_PROGRESS as non-terminal).",
+    "terminal_build_states": [
+      "BUILD_STATE_SUCCESS",
+      "BUILD_STATE_FAIL",
+      "BUILD_STATE_CANCELED"
+    ],
+    "success_build_state": "BUILD_STATE_SUCCESS",
+    "workspace_staleness": "Submit proof-of-review must use Workspace lastModifiedAt (or similar), not immutable WorkspaceBuild alone"
+  },
+  "keyed_get": {
+    "mainline_workspace_id": "",
+    "winner": "Studio",
+    "Studio": "GET /api/resources/studio/v1/Studio?key.studioId=<id>&key.workspaceId=  \u2192 200 on mainline; includes template + inputSchema",
+    "StudioConfig": "GET .../StudioConfig?key.studioId=&key.workspaceId= \u2192 404 on mainline empty workspaceId (confirmed TOPOLOGY, studio-authentication). Use Studio for keyed mainline get; StudioConfig/all still used for search streams.",
+    "mainline_example_studio_id": "TOPOLOGY",
+    "mainline_example_key": {
+      "studioId": "TOPOLOGY",
+      "workspaceId": ""
+    },
+    "StudioConfig_all_mainline": false
+  },
+  "studioconfig_all": {
+    "empty_workspaceId_rows": 0,
+    "nonempty_workspaceId_rows": 345,
+    "note": "StudioConfig/all has no mainline rows; search mainline via Studio/all or keyed Studio GET."
+  },
+  "inputs": {
+    "v1": "GET Inputs/all + client filter",
+    "key_shape": {
+      "studioId": "...",
+      "workspaceId": "",
+      "path": {}
+    },
+    "inputs_field": "JSON string",
+    "keyed_get": "400 path cannot be nil without path; empty path encoding unresolved"
+  }
+}

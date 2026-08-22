@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+from cvp_mcp import write_access
 from cvp_mcp.grpc import resource_write
 
 BASE = "https://cvp.example.com"
@@ -75,6 +76,59 @@ def test_post_allows_each_allowlisted_path():
         assert mock_open.call_count == 1
 
 
+def test_post_assigned_tags_config_2_1_reaches_urlopen():
+    """Spec 2.1 assign_cvp_studio_tags POSTs the replacement tag query."""
+    body = {
+        "key": {"workspaceId": "ws-mcp-1", "studioId": "studio-1"},
+        "query": "device:leaf1",
+    }
+    (obj, err), mock_open = _post(TAGS_PATH, body)
+    assert err is None
+    assert obj == {"value": {"ok": True}}
+    assert mock_open.call_count == 1
+    req = mock_open.call_args[0][0]
+    assert req.method == "POST"
+    assert req.full_url == f"{BASE}{TAGS_PATH}"
+    assert json.loads(req.data.decode()) == body
+
+
+def test_post_studio_config_2_2_reaches_urlopen():
+    """Spec 2.2 create_cvp_studio / delete_cvp_studio POST StudioConfig."""
+    body = {
+        "key": {"workspaceId": "ws-mcp-1", "studioId": "studio-1"},
+        "displayName": "MCP studio",
+    }
+    (obj, err), mock_open = _post(STUDIO_PATH, body)
+    assert err is None
+    assert obj == {"value": {"ok": True}}
+    assert mock_open.call_count == 1
+    req = mock_open.call_args[0][0]
+    assert req.method == "POST"
+    assert req.full_url == f"{BASE}{STUDIO_PATH}"
+    assert json.loads(req.data.decode()) == body
+
+
+def test_post_studio_config_remove_2_2_reaches_urlopen():
+    body = {
+        "key": {"workspaceId": "ws-mcp-1", "studioId": "studio-1"},
+        "remove": True,
+    }
+    (obj, err), mock_open = _post(STUDIO_PATH, body)
+    assert err is None
+    assert mock_open.call_count == 1
+
+
+def test_post_change_control_config_never_calls_urlopen():
+    """ChangeControlConfig is forbidden at every slice, 2.1 and 2.2 included."""
+    body = {"key": {"id": "cc-1"}, "change": {"name": "cc"}}
+    (obj, err), mock_open = _post(
+        "/api/resources/changecontrol/v1/ChangeControlConfig", body
+    )
+    assert obj is None
+    assert err == "path_not_allowed"
+    mock_open.assert_not_called()
+
+
 # --- request enum allowlist -------------------------------------------------
 
 
@@ -115,7 +169,7 @@ def test_post_start_build_allowed():
 
 
 def test_post_submit_disabled_when_write_access_missing(monkeypatch):
-    """Bucket 0 not merged: REQUEST_SUBMIT must refuse, not POST."""
+    """Fail-close: an unimportable gate module must refuse, not POST."""
     monkeypatch.setitem(sys.modules, "cvp_mcp.write_access", None)
     body = dict(_key(), request=resource_write.REQUEST_SUBMIT)
     (obj, err), mock_open = _post(WORKSPACE_PATH, body)
@@ -138,6 +192,29 @@ def test_post_submit_allowed_when_gate_true():
         (obj, err), mock_open = _post(WORKSPACE_PATH, body)
     assert err is None
     assert mock_open.call_count == 1
+
+
+def test_post_submit_refused_through_real_env_gate(monkeypatch):
+    """No patching of ``_submit_allowed``: the real env gate must refuse."""
+    monkeypatch.delenv(write_access.WRITES_ENV, raising=False)
+    monkeypatch.delenv(write_access.SUBMIT_ENV, raising=False)
+    body = dict(_key(), request=resource_write.REQUEST_SUBMIT)
+    (obj, err), mock_open = _post(WORKSPACE_PATH, body)
+    assert obj is None
+    assert err == "submit_disabled"
+    mock_open.assert_not_called()
+
+
+def test_post_submit_refused_when_staleness_field_unregistered(monkeypatch):
+    """Both env vars on is not enough: submit stays 2.1-unregistered."""
+    monkeypatch.setenv(write_access.WRITES_ENV, "1")
+    monkeypatch.setenv(write_access.SUBMIT_ENV, "1")
+    monkeypatch.setattr(write_access, "SUBMIT_STALENESS_FIELD", None)
+    body = dict(_key(), request=resource_write.REQUEST_SUBMIT)
+    (obj, err), mock_open = _post(WORKSPACE_PATH, body)
+    assert obj is None
+    assert err == "submit_disabled"
+    mock_open.assert_not_called()
 
 
 # --- envelope key denylist --------------------------------------------------

@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import sys
+from typing import Any
 
 import grpc
 from mcp.server.fastmcp import FastMCP
@@ -48,6 +49,21 @@ from cvp_mcp.grpc.overlay import (
     grpc_get_vxlan,
 )
 from cvp_mcp.grpc.routing import grpc_get_bgp_status, grpc_get_routes
+from cvp_mcp.grpc.studio_crud import (
+    create_cvp_studio as studio_crud_create,
+)
+from cvp_mcp.grpc.studio_crud import (
+    delete_cvp_studio as studio_crud_delete,
+)
+from cvp_mcp.grpc.studio_inputs_generic import (
+    set_cvp_studio_inputs as studio_inputs_set,
+)
+from cvp_mcp.grpc.studio_tags import (
+    assign_cvp_studio_tags as studio_tags_assign,
+)
+from cvp_mcp.grpc.studio_tags import (
+    get_cvp_studio_assigned_tags as studio_tags_get_assigned,
+)
 from cvp_mcp.grpc.studios import (
     get_cvp_designed_config as studios_get_designed_config,
 )
@@ -1522,6 +1538,23 @@ def get_cvp_designed_config(device_id: str) -> dict:
         )
 
 
+@mcp.tool()
+@tool_enabled("get_cvp_studio_assigned_tags")
+def get_cvp_studio_assigned_tags(
+    studio_id: str, workspace_id: str | None = None
+) -> dict:
+    """Tag query assigned to a studio. Default workspace is mainline (empty string)."""
+    datadict = get_env_vars()
+    try:
+        return studio_tags_get_assigned(datadict, studio_id, workspace_id)
+    except Exception as e:
+        return client_error(
+            "studio_assigned_tags_failed",
+            log_exc=e,
+            context="get_cvp_studio_assigned_tags",
+        )
+
+
 # ===================================================
 # Studios Phase 2.0 writes (registered only when ALLOW_WRITES=1)
 # ===================================================
@@ -1633,6 +1666,120 @@ if writes_enabled():
                 "set_access_description_failed",
                 log_exc=e,
                 context="set_cvp_access_interface_description",
+            )
+
+    @mcp.tool()
+    @tool_enabled("assign_cvp_studio_tags")
+    def assign_cvp_studio_tags(
+        studio_id: str,
+        workspace_id: str,
+        query: str,
+        expected_current_query: str,
+        confirm: bool = False,
+        preview_token: str | None = None,
+    ) -> dict:
+        """Compare-and-set a studio's tag query. Does not submit the workspace."""
+        datadict = get_env_vars()
+        try:
+            return studio_tags_assign(
+                datadict,
+                studio_id,
+                workspace_id,
+                query,
+                expected_current_query,
+                confirm=confirm,
+                preview_token_value=preview_token,
+            )
+        except Exception as e:
+            return client_error(
+                "assign_studio_tags_failed",
+                log_exc=e,
+                context="assign_cvp_studio_tags",
+            )
+
+    @mcp.tool()
+    @tool_enabled("set_cvp_studio_inputs")
+    def set_cvp_studio_inputs(
+        studio_id: str,
+        workspace_id: str,
+        path_values: list[str],
+        inputs: Any,
+        confirm: bool = False,
+        preview_token: str | None = None,
+    ) -> dict:
+        """Set studio inputs at a path. Dry-run unless confirm=True and preview_token matches."""
+        datadict = get_env_vars()
+        try:
+            return studio_inputs_set(
+                datadict,
+                studio_id,
+                workspace_id,
+                path_values,
+                inputs,
+                confirm=confirm,
+                preview_token_value=preview_token,
+            )
+        except Exception as e:
+            return client_error(
+                "set_studio_inputs_failed",
+                log_exc=e,
+                context="set_cvp_studio_inputs",
+            )
+
+    @mcp.tool()
+    @tool_enabled("create_cvp_studio")
+    def create_cvp_studio(
+        workspace_id: str,
+        studio_id: str,
+        display_name: str,
+        template_body: str = "",
+        description: str = "",
+        confirm: bool = False,
+        preview_token: str | None = None,
+    ) -> dict:
+        """Create a studio in a workspace. Dry-run unless confirm=True and preview_token matches."""
+        datadict = get_env_vars()
+        try:
+            return studio_crud_create(
+                datadict,
+                workspace_id,
+                studio_id,
+                display_name,
+                template_body=template_body,
+                description=description,
+                confirm=confirm,
+                preview_token_value=preview_token,
+            )
+        except Exception as e:
+            return client_error(
+                "create_studio_failed",
+                log_exc=e,
+                context="create_cvp_studio",
+            )
+
+    @mcp.tool()
+    @tool_enabled("delete_cvp_studio")
+    def delete_cvp_studio(
+        workspace_id: str,
+        studio_id: str,
+        confirm: bool = False,
+        preview_token: str | None = None,
+    ) -> dict:
+        """Delete a studio in a workspace. Dry-run unless confirm=True and preview_token matches."""
+        datadict = get_env_vars()
+        try:
+            return studio_crud_delete(
+                datadict,
+                workspace_id,
+                studio_id,
+                confirm=confirm,
+                preview_token_value=preview_token,
+            )
+        except Exception as e:
+            return client_error(
+                "delete_studio_failed",
+                log_exc=e,
+                context="delete_cvp_studio",
             )
 
 

@@ -10,7 +10,20 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from cvp_mcp.grouped_tool import GroupedTool
-from cvp_mcp.members import device, endpoints, inventory, overlay, routing
+from cvp_mcp.members import (
+    compliance,
+    device,
+    endpoints,
+    events,
+    flow,
+    inventory,
+    meta,
+    overlay,
+    probes,
+    routing,
+    studios,
+    topology,
+)
 
 DOCSTRING_SURFACE = "46 operations behind 12 names (13 with writes)"
 
@@ -122,5 +135,43 @@ def build_groups() -> list[GroupedTool]:
             name="routing",
             description="Read device BGP and route operational state.",
             members=routing.members(),
+        ),
+        GroupedTool(
+            name="topology",
+            description="Read LLDP neighbors or map network topology.",
+            members=topology.members(),
+        ),
+        GroupedTool(
+            name="events",
+            description="List or search CloudVision events.",
+            members=events.members(),
+        ),
+        GroupedTool(
+            name="flow",
+            description="Read Clover flow records.",
+            members=flow.members(),
+        ),
+        GroupedTool(
+            name="probes",
+            description="Read connectivity-monitor probe status.",
+            members=probes.members(),
+        ),
+        GroupedTool(
+            name="compliance",
+            description="Read bug, lifecycle, designed-config, and status data.",
+            members=compliance.members(),
+        ),
+        GroupedTool(
+            name="meta",
+            description="Inspect installed CloudVision Resource API packages.",
+            members=meta.members(),
+        ),
+        GroupedTool(
+            name="studios",
+            description=(
+                "Read studios and workspaces; designed config is compliance action "
+                "designed_config."
+            ),
+            members=studios.members(),
         ),
     ]

@@ -1,34 +1,16 @@
 #!/usr/bin/python3
 
 import argparse
-import json
 import logging
 import os
 import re
 import sys
 from typing import Any
 
-import grpc
 from mcp.server.fastmcp import FastMCP
 
 from cvp_mcp.env import env_datadict_from_os
 from cvp_mcp.errors import client_error
-from cvp_mcp.grpc.bugs import grpc_all_bug_exposure
-from cvp_mcp.grpc.capability import probe_arista_v1_packages
-from cvp_mcp.grpc.connector import conn_get_info_bugs
-from cvp_mcp.grpc.device_resolve import (
-    resolve_device_to_serial,
-    summarize_inventory_candidates,
-)
-from cvp_mcp.grpc.envelope import tool_envelope
-from cvp_mcp.grpc.events import grpc_get_cvp_events, grpc_search_cvp_events
-from cvp_mcp.grpc.flow import conn_get_flow_data
-from cvp_mcp.grpc.hostname_resolve import resolve_endpoint_query
-from cvp_mcp.grpc.inventory import grpc_one_inventory_serial
-from cvp_mcp.grpc.lifecycle import grpc_all_device_lifecycle
-from cvp_mcp.grpc.lldp import LLDP_DATA_SOURCE, grpc_get_lldp_neighbors
-from cvp_mcp.grpc.monitor import grpc_all_probe_status, grpc_one_probe_status
-from cvp_mcp.grpc.network_map import grpc_map_network_topology
 from cvp_mcp.grpc.studio_crud import (
     create_cvp_studio as studio_crud_create,
 )
@@ -44,33 +26,6 @@ from cvp_mcp.grpc.studio_mss_inputs import (
 from cvp_mcp.grpc.studio_tags import (
     assign_cvp_studio_tags as studio_tags_assign,
 )
-from cvp_mcp.grpc.studio_tags import (
-    get_cvp_studio_assigned_tags as studio_tags_get_assigned,
-)
-from cvp_mcp.grpc.studios import (
-    get_cvp_designed_config as studios_get_designed_config,
-)
-from cvp_mcp.grpc.studios import (
-    get_cvp_studio as studios_get_studio,
-)
-from cvp_mcp.grpc.studios import (
-    get_cvp_studio_inputs as studios_get_studio_inputs,
-)
-from cvp_mcp.grpc.studios import (
-    get_cvp_studios as studios_get_studios,
-)
-from cvp_mcp.grpc.studios import (
-    get_cvp_workspace as studios_get_workspace,
-)
-from cvp_mcp.grpc.studios import (
-    get_cvp_workspace_build as studios_get_workspace_build,
-)
-from cvp_mcp.grpc.studios import (
-    get_cvp_workspaces as studios_get_workspaces,
-)
-from cvp_mcp.grpc.studios import (
-    search_cvp_studio_templates as studios_search_templates,
-)
 from cvp_mcp.grpc.studios_write import (
     build_cvp_workspace as studios_build_workspace,
 )
@@ -83,7 +38,11 @@ from cvp_mcp.grpc.studios_write import (
 from cvp_mcp.grpc.studios_write import (
     set_cvp_access_interface_description as studios_set_access_description,
 )
-from cvp_mcp.grpc.utils import _is_lab_device, createConnection
+from cvp_mcp.members.compliance import (
+    compliance_bugs,
+    compliance_designed_config,
+    compliance_lifecycle,
+)
 from cvp_mcp.members.device import (
     device_config,
     device_features,
@@ -93,13 +52,28 @@ from cvp_mcp.members.device import (
     device_vlans,
 )
 from cvp_mcp.members.endpoints import endpoint_filter, endpoint_get, endpoint_list
+from cvp_mcp.members.events import events_list, events_search
+from cvp_mcp.members.flow import flow_get
 from cvp_mcp.members.inventory import (
     inventory_get,
     inventory_list,
     inventory_search,
 )
+from cvp_mcp.members.meta import meta_probe_apis
 from cvp_mcp.members.overlay import overlay_evpn, overlay_vxlan
+from cvp_mcp.members.probes import probes_get, probes_list
 from cvp_mcp.members.routing import routing_bgp, routing_routes
+from cvp_mcp.members.studios import (
+    studios_get,
+    studios_get_build,
+    studios_get_workspace,
+    studios_inputs,
+    studios_list,
+    studios_list_workspaces,
+    studios_search_templates,
+    studios_tags,
+)
+from cvp_mcp.members.topology import topology_lldp, topology_map
 from cvp_mcp.rate_limit import rate_limited_tool
 from cvp_mcp.tool_access import tool_enabled
 from cvp_mcp.transport_security_config import build_transport_security
@@ -188,91 +162,6 @@ def get_env_vars():
     return env_datadict_from_os()
 
 
-def _resolve_device_serial(
-    datadict: dict,
-    device_id: str,
-    *,
-    channel: grpc.Channel | None = None,
-) -> tuple[str | None, dict | None, list[str], list[dict]]:
-    return resolve_device_to_serial(datadict, device_id, channel=channel)
-
-
-def _device_resolution_failure_envelope(
-    device_id: str,
-    data_source: str,
-    warnings: list[str] | None = None,
-    candidates: list | None = None,
-) -> dict:
-    inp = (device_id or "").strip()
-    warns = list(warnings or [])
-    ambiguous = "device_ambiguous" in warns
-    primary = "device_ambiguous" if ambiguous else "device_not_found"
-    if primary not in warns:
-        warns.insert(0, primary)
-    candidate_rows = summarize_inventory_candidates(candidates)
-    hint = (
-        "Multiple inventory devices match this shorthand. Pick one serial_number "
-        "from candidates and re-call with device_id=<serial_number>."
-        if ambiguous and candidate_rows
-        else (
-            "No device matched. Run search_cvp_inventory or get_cvp_all_inventory "
-            "first, then pass device_id as the CloudVision serial_number "
-            "(not a model name like 720xp)."
-        )
-    )
-    if candidate_rows and not ambiguous:
-        hint = (
-            "No exact device match. Partial inventory matches are listed in "
-            "candidates — re-call with device_id=<serial_number>."
-        )
-    obj: dict = {
-        "device_id_input": inp,
-        "hint": hint,
-        "next_step": "search_cvp_inventory(query) -> get_cvp_lldp_neighbors(serial_number)",
-    }
-    if candidate_rows:
-        obj["candidates"] = candidate_rows
-    return tool_envelope(
-        device_id=inp or None,
-        data_source=data_source,
-        coverage="none",
-        items=[],
-        warnings=warns,
-        obj=obj,
-    )
-
-
-def _device_not_found_envelope(
-    device_id: str,
-    data_source: str,
-    warnings: list[str] | None = None,
-    candidates: list | None = None,
-) -> dict:
-    return _device_resolution_failure_envelope(
-        device_id, data_source, warnings, candidates
-    )
-
-
-def _attach_device_resolution(
-    result: dict,
-    device_id_input: str,
-    serial: str,
-    resolution_warnings: list[str],
-) -> dict:
-    if not isinstance(result, dict):
-        return result
-    inp = (device_id_input or "").strip()
-    result["device_id"] = serial
-    if inp and inp != serial:
-        obj = dict(result.get("object") or {})
-        obj["device_id_input"] = inp
-        obj["device_id_resolved"] = serial
-        result["object"] = obj
-    if resolution_warnings:
-        result["warnings"] = list(result.get("warnings") or []) + resolution_warnings
-    return result
-
-
 # ===================================================
 # Inventory Based Tools
 # ===================================================
@@ -338,44 +227,7 @@ def get_cvp_all_bugs() -> dict:
     hostname, EOS version, streaming status, device type, hardware revision,
     FQDN, domain name, and model
     """
-    all_data = {}
-    all_devices = []
-    all_bug_ids = []
-    # all_bug_info = {}
-    datadict = get_env_vars()
-    logging.info("CVP Get all Bugs Tool")
-    match CVP_TRANSPORT:
-        case "grpc":
-            connCreds = createConnection(datadict)
-            with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                all_bugs = grpc_all_bug_exposure(channel)
-                if all_bugs:
-                    for bug in all_bugs:
-                        for id in bug["bug_ids"]:
-                            if id not in all_bug_ids:
-                                all_bug_ids.append(id)
-                        device = grpc_one_inventory_serial(
-                            channel, bug["serial_number"]
-                        )
-                        if device:
-                            all_devices.append(device)
-        case "http":
-            logging.info("HTTP Transport to get all bugs")
-            all_bugs = {}
-    logging.debug(json.dumps(all_bugs))
-    # Grab information about each bug
-    all_bug_info = conn_get_info_bugs(datadict, all_bug_ids)
-    all_data["bug_info"] = all_bug_info
-    all_data["bugs"] = all_bugs
-    all_data["devices"] = all_devices
-    try:
-        logging.debug(f"Bug Data: {type(all_data['bug_info'])} {all_data['bug_info']}")
-        logging.debug(f"All data: {json.dumps(all_data)}")
-    except Exception as y:
-        logging.error(f"Error processing bug data: {y}")
-        return '{"error": "Bug data processing failed"}'
-    # return(json.dumps(all_data, indent=2))
-    return all_data
+    return compliance_bugs()
 
 
 # ===================================================
@@ -389,30 +241,7 @@ def get_cvp_all_connectivity_probes() -> dict:
     Gets all connectivity monitor probes from CVP
     Displays latency, jitter, http response time and packet loss
     """
-    datadict = get_env_vars()
-    all_devices = {}
-    all_data = {}
-    logging.info("CVP Get all Probes")
-    match CVP_TRANSPORT:
-        case "grpc":
-            connCreds = createConnection(datadict)
-            with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                all_probes = grpc_all_probe_status(channel)
-                # Gather information about the source switches for analytics
-                for probe in all_probes:
-                    serial_number = probe["serial_number"]
-                    if serial_number not in all_devices.keys():
-                        all_devices[serial_number] = grpc_one_inventory_serial(
-                            channel, serial_number
-                        )
-        case "http":
-            logging.info("CVP HTTP Request for all devices")
-            all_devices = ""
-    all_data["devices"] = all_devices
-    all_data["probes"] = all_probes
-    logging.debug(json.dumps(all_data))
-    # return(json.dumps(all_data, indent=2))
-    return all_data
+    return probes_list()
 
 
 @mcp.tool()
@@ -428,47 +257,7 @@ def get_cvp_one_connectivity_probe(
     If ``endpoint`` is a hostname/FQDN, it is resolved to an IP (DNS) before
     querying probe stats, matching how OPNsense MCP resolves names before API calls.
     """
-    datadict = get_env_vars()
-    logging.debug("CVP Get One Probe State")
-    all_data = {}
-    all_devices = {}
-    probe_hosts: list[str] = [""]
-    if endpoint and endpoint.strip():
-        raw_ep = endpoint.strip()
-        resolved_ep = resolve_endpoint_query(raw_ep)
-        probe_hosts = [resolved_ep, raw_ep] if resolved_ep != raw_ep else [raw_ep]
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    probes: list = []
-                    for host_key in probe_hosts:
-                        probes = grpc_one_probe_status(
-                            channel,
-                            serial_number or "",
-                            host_key,
-                            vrf or "",
-                            source_interface or "",
-                        )
-                        if probes:
-                            break
-                    for _probe in probes:
-                        logging.debug(f"MON S/n: {_probe['serial_number']}")
-                        serial_number = _probe["serial_number"]
-                        if serial_number not in all_devices.keys():
-                            all_devices[serial_number] = grpc_one_inventory_serial(
-                                channel, serial_number
-                            )
-                    all_data["probes"] = probes
-                    all_data["devices"] = all_devices
-            case "http":
-                pass
-    except Exception as e:
-        logging.error(f"Error in lifecycle flow: {e}")
-        return '{"error": "Lifecycle fetch failed"}'
-    logging.debug(json.dumps(all_data, indent=2))
-    return json.dumps(all_data, indent=2)
+    return probes_get(serial_number, endpoint, vrf, source_interface)
 
 
 # ===================================================
@@ -483,30 +272,7 @@ def get_cvp_all_device_lifecycle() -> dict:
     Displays information about switch software end of life,
     and hardware end of support, end of rma, end of sale and end of life.
     """
-    datadict = get_env_vars()
-    all_devices = {}
-    all_data = {}
-    logging.info("CVP Get all Device Lifecycle")
-    match CVP_TRANSPORT:
-        case "grpc":
-            connCreds = createConnection(datadict)
-            with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                all_lifecycle = grpc_all_device_lifecycle(channel)
-                # Gather information about the source switches for analytics
-                for _lifecycle in all_lifecycle:
-                    serial_number = _lifecycle["serial_number"]
-                    if serial_number not in all_devices.keys():
-                        all_devices[serial_number] = grpc_one_inventory_serial(
-                            channel, serial_number
-                        )
-        case "http":
-            logging.info("CVP HTTP Request for all devices")
-            all_devices = ""
-    all_data["devices"] = all_devices
-    all_data["lifecycle"] = all_lifecycle
-    logging.debug(json.dumps(all_data))
-    # return(json.dumps(all_data, indent=2))
-    return all_data
+    return compliance_lifecycle()
 
 
 # ===================================================
@@ -568,7 +334,7 @@ def get_cvp_endpoint_locations_filtered(
 @mcp.tool()
 def get_cvp_probe_arista_apis() -> dict:
     """Lists installed ``arista.*.v1`` Python API packages (Resource API clients bundled with cloudvision)."""
-    return {"packages": probe_arista_v1_packages()}
+    return meta_probe_apis()
 
 
 # ===================================================
@@ -628,25 +394,14 @@ def get_cvp_events(
     limit: int | None = 100,
 ) -> dict:
     """List CVP events with structured filters (severity, event_type, optional device_id substring, ISO time bounds)."""
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    return grpc_get_cvp_events(
-                        channel,
-                        severity=severity,
-                        event_type=event_type,
-                        device_id=device_id,
-                        start_time=start_time,
-                        end_time=end_time,
-                        limit=limit,
-                    )
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error("events_failed", log_exc=e, context="get_cvp_events")
+    return events_list(
+        severity=severity,
+        event_type=event_type,
+        device_id=device_id,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+    )
 
 
 @mcp.tool()
@@ -661,28 +416,15 @@ def search_cvp_events(
     limit: int | None = 50,
 ) -> dict:
     """Search event title/description/type (client-side match) after optional structured filters."""
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    return grpc_search_cvp_events(
-                        channel,
-                        query,
-                        severity=severity,
-                        event_type=event_type,
-                        device_id=device_id,
-                        start_time=start_time,
-                        end_time=end_time,
-                        limit=limit,
-                    )
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error(
-            "search_events_failed", log_exc=e, context="search_cvp_events"
-        )
+    return events_search(
+        query,
+        severity=severity,
+        event_type=event_type,
+        device_id=device_id,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+    )
 
 
 @mcp.tool()
@@ -731,64 +473,12 @@ def get_cvp_lldp_neighbors(
     when available, otherwise ``Ethernet1..N`` from the device model) and returns every LLDP
     neighbor — not just the first port that returns data.
     """
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, device_info, res_warns, candidates = _resolve_device_serial(
-                        datadict, device_id, channel=channel
-                    )
-                    if not serial:
-                        return _device_not_found_envelope(
-                            device_id,
-                            LLDP_DATA_SOURCE,
-                            res_warns,
-                            candidates,
-                        )
-                    if not include_lab_devices and _is_lab_device(device_info):
-                        return tool_envelope(
-                            device_id=serial,
-                            data_source=LLDP_DATA_SOURCE,
-                            coverage="none",
-                            items=[],
-                            warnings=["device_excluded_lab_or_virtual"],
-                            obj={
-                                "device_id_input": (device_id or "").strip(),
-                                "device_id_resolved": serial,
-                                "hint": "Device is a virtual/lab EOS instance (vEOS or cEOS). "
-                                "Pass include_lab_devices=True to query it explicitly.",
-                            },
-                        )
-                    if (device_info or {}).get("streaming_status") == "Inactive":
-                        return tool_envelope(
-                            device_id=serial,
-                            data_source=LLDP_DATA_SOURCE,
-                            coverage="none",
-                            items=[],
-                            warnings=["device_inactive_not_streaming"],
-                            obj={
-                                "device_id_input": (device_id or "").strip(),
-                                "device_id_resolved": serial,
-                            },
-                        )
-                    result = grpc_get_lldp_neighbors(
-                        datadict,
-                        serial,
-                        port_name=port_name,
-                        remote_neighbor_key=remote_neighbor_key,
-                        device_model=str((device_info or {}).get("model") or ""),
-                    )
-                    return _attach_device_resolution(
-                        result, device_id, serial, res_warns
-                    )
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error(
-            "lldp_neighbors_failed", log_exc=e, context="get_cvp_lldp_neighbors"
-        )
+    return topology_lldp(
+        device_id,
+        port_name=port_name,
+        remote_neighbor_key=remote_neighbor_key,
+        include_lab_devices=include_lab_devices,
+    )
 
 
 @mcp.tool()
@@ -823,34 +513,16 @@ def map_cvp_network_topology(
     - Set ``max_ethernet_ports`` to a realistic cap.
     - Merge outputs across batches for full-fabric topology.
     """
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                allowed = {"json", "mermaid", "table", "containerlab"}
-                fmt = (output_format or "json").strip().lower()
-                if fmt not in allowed:
-                    return {
-                        "error": f"output_format must be one of {sorted(allowed)}",
-                        "output_format": output_format,
-                    }
-                return grpc_map_network_topology(
-                    datadict,
-                    output_format=fmt,
-                    include_inactive_devices=include_inactive_devices,
-                    max_ethernet_ports=max_ethernet_ports,
-                    device_serial_allowlist=device_serial_allowlist,
-                    topology_name=topology_name,
-                    topology_node_scope=topology_node_scope,
-                    lldp_port_source=lldp_port_source,
-                    include_lab_devices=include_lab_devices,
-                )
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error(
-            "network_topology_failed", log_exc=e, context="map_cvp_network_topology"
-        )
+    return topology_map(
+        output_format=output_format,
+        include_inactive_devices=include_inactive_devices,
+        max_ethernet_ports=max_ethernet_ports,
+        device_serial_allowlist=device_serial_allowlist,
+        topology_name=topology_name,
+        topology_node_scope=topology_node_scope,
+        lldp_port_source=lldp_port_source,
+        include_lab_devices=include_lab_devices,
+    )
 
 
 # ===================================================
@@ -910,40 +582,7 @@ def get_cvp_flow_data(
     records whose node matches that device.
     Returns flow records with src/dst IPs, ports, protocol, bytes/packets, and interfaces.
     """
-    datadict = get_env_vars()
-    logging.info(f"CVP Get Flow Data: device={device_id} flow_index={flow_index}")
-    filter_serial = device_id
-    resolution: dict[str, str] = {}
-    if filter_serial:
-        serial, _info, warns, candidates = _resolve_device_serial(
-            datadict, filter_serial
-        )
-        if not serial:
-            err = {
-                "error": (
-                    "device_ambiguous"
-                    if "device_ambiguous" in warns
-                    else "device_not_found"
-                ),
-                "device_id_input": (filter_serial or "").strip(),
-                "warnings": warns,
-                "flows": [],
-            }
-            rows = summarize_inventory_candidates(candidates)
-            if rows:
-                err["candidates"] = rows
-            return err
-        if serial != (filter_serial or "").strip():
-            resolution = {
-                "device_id_input": (filter_serial or "").strip(),
-                "device_id_resolved": serial,
-            }
-        filter_serial = serial
-    flows = conn_get_flow_data(datadict, filter_serial, flow_index)
-    out: dict = {"flows": flows}
-    if resolution:
-        out.update(resolution)
-    return out
+    return flow_get(device_id, flow_index)
 
 
 # ===================================================
@@ -955,11 +594,7 @@ def get_cvp_flow_data(
 @tool_enabled("get_cvp_studios")
 def get_cvp_studios() -> dict:
     """List CloudVision studios (ids, names, flags). Omits large template bodies."""
-    datadict = get_env_vars()
-    try:
-        return studios_get_studios(datadict)
-    except Exception as e:
-        return client_error("studios_failed", log_exc=e, context="get_cvp_studios")
+    return studios_list()
 
 
 @mcp.tool()
@@ -968,24 +603,14 @@ def get_cvp_studio(
     studio_id: str, workspace_id: str | None = None, body: bool = False
 ) -> dict:
     """One studio by id. Default workspace is mainline (empty string). Set body=True for full Mako."""
-    datadict = get_env_vars()
-    try:
-        return studios_get_studio(datadict, studio_id, workspace_id, body=body)
-    except Exception as e:
-        return client_error("studio_failed", log_exc=e, context="get_cvp_studio")
+    return studios_get(studio_id, workspace_id, body)
 
 
 @mcp.tool()
 @tool_enabled("get_cvp_studio_inputs")
 def get_cvp_studio_inputs(studio_id: str, workspace_id: str | None = None) -> dict:
     """Current studio input document(s) for a studio/workspace (mainline default)."""
-    datadict = get_env_vars()
-    try:
-        return studios_get_studio_inputs(datadict, studio_id, workspace_id)
-    except Exception as e:
-        return client_error(
-            "studio_inputs_failed", log_exc=e, context="get_cvp_studio_inputs"
-        )
+    return studios_inputs(studio_id, workspace_id)
 
 
 @mcp.tool()
@@ -994,55 +619,28 @@ def search_cvp_studio_templates(
     pattern: str, include_input_schema: bool = True, max_hits: int = 100
 ) -> dict:
     """Search studio templates/schemas for a literal substring; returns JSON paths of hits."""
-    datadict = get_env_vars()
-    try:
-        return studios_search_templates(
-            datadict,
-            pattern,
-            include_input_schema=include_input_schema,
-            max_hits=max_hits,
-        )
-    except Exception as e:
-        return client_error(
-            "studio_search_failed", log_exc=e, context="search_cvp_studio_templates"
-        )
+    return studios_search_templates(pattern, include_input_schema, max_hits)
 
 
 @mcp.tool()
 @tool_enabled("get_cvp_workspaces")
 def get_cvp_workspaces() -> dict:
     """List CloudVision workspaces (state, cc ids, build/response ids)."""
-    datadict = get_env_vars()
-    try:
-        return studios_get_workspaces(datadict)
-    except Exception as e:
-        return client_error(
-            "workspaces_failed", log_exc=e, context="get_cvp_workspaces"
-        )
+    return studios_list_workspaces()
 
 
 @mcp.tool()
 @tool_enabled("get_cvp_workspace")
 def get_cvp_workspace(workspace_id: str) -> dict:
     """One workspace by id, including responses map for build polling."""
-    datadict = get_env_vars()
-    try:
-        return studios_get_workspace(datadict, workspace_id)
-    except Exception as e:
-        return client_error("workspace_failed", log_exc=e, context="get_cvp_workspace")
+    return studios_get_workspace(workspace_id)
 
 
 @mcp.tool()
 @tool_enabled("get_cvp_workspace_build")
 def get_cvp_workspace_build(workspace_id: str, build_id: str) -> dict:
     """Workspace build status (BUILD_STATE_*) for poll-after-build workflows."""
-    datadict = get_env_vars()
-    try:
-        return studios_get_workspace_build(datadict, workspace_id, build_id)
-    except Exception as e:
-        return client_error(
-            "workspace_build_failed", log_exc=e, context="get_cvp_workspace_build"
-        )
+    return studios_get_build(workspace_id, build_id)
 
 
 @mcp.tool()
@@ -1052,13 +650,7 @@ def get_cvp_designed_config(device_id: str) -> dict:
 
     Prefer device serial; hostname is resolved via inventory when possible.
     """
-    datadict = get_env_vars()
-    try:
-        return studios_get_designed_config(datadict, device_id)
-    except Exception as e:
-        return client_error(
-            "designed_config_failed", log_exc=e, context="get_cvp_designed_config"
-        )
+    return compliance_designed_config(device_id)
 
 
 @mcp.tool()
@@ -1067,15 +659,7 @@ def get_cvp_studio_assigned_tags(
     studio_id: str, workspace_id: str | None = None
 ) -> dict:
     """Tag query assigned to a studio. Default workspace is mainline (empty string)."""
-    datadict = get_env_vars()
-    try:
-        return studio_tags_get_assigned(datadict, studio_id, workspace_id)
-    except Exception as e:
-        return client_error(
-            "studio_assigned_tags_failed",
-            log_exc=e,
-            context="get_cvp_studio_assigned_tags",
-        )
+    return studios_tags(studio_id, workspace_id)
 
 
 # ===================================================

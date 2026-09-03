@@ -222,7 +222,7 @@ Applied in order to a deep copy of the current root document.
 
 | `op` | Fields | Semantics |
 | --- | --- | --- |
-| `upsert` | `collection`, `entry` (object with `name`) | Replace the entry whose `name` matches, else append. Validated per §D.4. On `policies`: **existing name only** (new → `mss_entry_not_found`). |
+| `upsert` | `collection`, `entry` (object with `name`) | **Merge** over the entry whose `name` matches (keys the op does not name survive — an optional `description`, or a field CVP adds later), else append. Validated per §D.4. On `policies`: **existing name only** (new → `mss_entry_not_found`). |
 | `remove` | `collection`, `name` | Remove the entry whose `name` matches. Missing → `mss_entry_not_found`. **Not allowed on `policies`** → `mss_operation_invalid`. |
 | `set_policy_rules` | `policy`, `policy_rules` (non-empty list of rule names) | Replace `policies[name==policy].policyRules`. Missing policy → `mss_entry_not_found`. Empty list → `mss_operation_invalid`. |
 
@@ -250,9 +250,9 @@ with path. Types are checked. **Subject to the D.0 fixture.**
 
 | Collection | Accepted keys | Constraints |
 | --- | --- | --- |
-| `staticGroups` | `name`, `membership.members` | `members`: non-empty list of IPv4/IPv6 CIDR strings (`ipaddress.ip_network(strict=False)`); **`prefixlen == 0` refused** (`0.0.0.0/0`, `::/0` are `<any>` under another name — F-C2). `name` must not collide with any `acceptedGroups[].name` (F-C4). No `staticExceptionList` / `enableStaticExceptionList`. |
+| `staticGroups` | `name`, `membership.members` | `members`: non-empty list of IPv4/IPv6 CIDR strings, **`strict=True`** (`10.0.3.4/8` is refused as a host-bits typo, not widened); **`prefixlen == 0` refused** and a union that collapses to the whole family space (two `/1`s) refused (F-C2 + code review C2). Members wider than `/24` (v4) / `/64` (v6) warn `mss_group_broad:<group>:<member>`. `name` must not collide with any `acceptedGroups[].name` (F-C4). No `staticExceptionList` / `enableStaticExceptionList`. |
 | `services` | `name`, `protocols`, `configurations[]` with `protocol`, `sourceports`, `destinationports`, optional `icmpTypes` | `protocols` ∈ `TCP/UDP`, `ICMP`. `protocol` ∈ `tcp`, `udp`, `icmp`. Ports: `all`, single `1–65535`, `a-b` range, or comma list of those. `icmpTypes` (optional): `all` or comma list of ints 0–255. `configurations` non-empty. |
-| `rules` | `name`, `action`, `sources`, `destinations`, `services`, `packet`, `direction`, optional `monitorName` | No `description` (the wire has none). `action` ∈ `forward`, `drop`. `sources`/`destinations`: non-empty lists of group names or `<any>`. `services`: non-empty list of service names or `<any>`. `packet` = `any`. `direction`: bool. `monitorName` allowed on any action, must name an existing `monitorObjects[].name`. |
+| `rules` | `name`, `action`, `sources`, `destinations`, `services`, `packet`, `direction`, optional `monitorName` | No `description` (the wire has none). `action` ∈ `forward`, `drop`. `sources`/`destinations`: non-empty lists of distinct group names, or exactly `["<any>"]` — **`<any>` may not share a list with a name** (`["<any>", "x"]` is any on the wire; code review C1). `services`: same rule over service names. `packet` = `any`. `direction`: bool. `monitorName` allowed on any action, must name an existing `monitorObjects[].name` (checked per op, path `operations[N].entry.monitorName`). |
 | `policies` | `name`, `description`, `policyRules` | `policyRules`: list of rule names, unique. |
 
 **Referential integrity** on the **result** document after all ops: every group
@@ -261,23 +261,28 @@ are read-only here but referenceable); every service name exists in `services`;
 every rule name in any `policyRules` exists in `rules`; a `remove` that leaves a
 dangling reference → `mss_reference_unresolved` naming the referrer.
 
-**Blast-radius refusal (new vs 2.3 draft):** a rule with `action: drop` and
-`sources == ["<any>"]` and `destinations == ["<any>"]` and `services == ["<any>"]`
-→ `mss_rule_too_broad`, no preview. That rule drops the fabric at physical
-ingress on every MSS-enforcing switch. There is no `allow_broad` flag, matching
-the parent's "no `allow_disruptive`" rule.
+**Blast-radius refusal (new vs 2.3 draft):** a rule with `action: drop` whose
+`sources`, `destinations` and `services` each **contain** `<any>` →
+`mss_rule_too_broad`, no preview, when this call added or replaced that rule.
+That rule drops the fabric at physical ingress on every MSS-enforcing switch.
+There is no `allow_broad` flag, matching the parent's "no `allow_disruptive`"
+rule. The same rule already on the wire and **untouched** by this call is a
+warning `mss_rule_too_broad_existing:<rule>` instead, so UI-left state cannot
+brick every unrelated edit (the tool may be the way to remove it).
 
 **Warnings (not refusals):**
 
-- `mss_rule_broad:<rule>` — `action: drop` with both `sources` and `destinations` `<any>` (services narrowed).
+- `mss_rule_broad:<rule>` — `action: drop` with both `sources` and `destinations` `<any>` (services narrowed); touched rules only.
+- `mss_rule_too_broad_existing:<rule>` / `mss_group_broad:<group>:<member>` — pre-existing fabric drop, or a touched group wider than `/24` / `/64`.
 - `mss_rule_shadowed:<policy>:<rule>` — a policy places a `forward` rule with all three `<any>` before any `drop` rule (the `monitor` rule on this tenant; operator wants drops ahead of it).
 - `inputs_unchanged` — zero changed leaves after all ops; preview still returned.
 
 ### D.5 Write shape (five steps, same as 2.0)
 
 1. Gates, no HTTP: `writes_enabled()`, `validate_workspace_id`,
-   `expected_inputs_sha256` well-formed, operations validated (§D.3 structure only
-   — §D.4 needs the document).
+   `expected_inputs_sha256` well-formed, operations validated (§D.3 + §D.4 entry
+   schema; the document-dependent checks come after the read), **EOS lint on the
+   normalized operations** (`_disruptive_hits(canonical_json(ops))`).
 2. Workspace GET (`_read_workspace`): exists and `WORKSPACE_STATE_PENDING`. Studio GET
    via `_read_studio_anywhere` (overlay then mainline, 404-only fallthrough):
    not `immutable`, not `from_package`; `read_failed` or both-missing →
@@ -288,7 +293,14 @@ the parent's "no `allow_disruptive`" rule.
 3. Root read: `_load_root_inputs(datadict, workspace_id, studio_id="studio-mss-service")`.
    Draft overlay preferred, else mainline. Truncation / skipped NDJSON →
    `preflight_failed` (already the loader's behaviour). Document not a dict →
-   `inputs_path_unresolved`. `before_sha256 = inputs_sha256(document)`. Mismatch
+   `inputs_path_unresolved`. **Document shape check** (post-implementation
+   review): every writable collection present and a list; every entry in those
+   plus `acceptedGroups` / `monitorObjects` an object with a plain non-empty
+   string `name`, unique per collection; rule `sources` / `destinations` /
+   `services` and policy `policyRules` lists of strings; `monitorName` string or
+   absent → else `mss_document_malformed` with the JSON path. The tool re-posts
+   the whole document, so a shape it cannot reason about is never rewritten.
+   `before_sha256 = inputs_sha256(document)`. Mismatch
    with `expected_inputs_sha256` → `inputs_digest_mismatch` with
    `details.current_inputs_sha256` and `details.inputs_source_workspace_id`; no POST.
 4. Apply ops to a deep copy. Validate result (§D.4, referential, blast radius).
@@ -298,17 +310,16 @@ the parent's "no `allow_disruptive`" rule.
    `tree_diff_outside_mss_scope` (defence in depth against a buggy applier).
    Note `_changed_leaf_paths` reports a **list length change as one path at the
    list** (`$.rules`), and an in-place replacement as nested paths
-   (`$.rules[1].action`); both forms are in scope. **EOS lint runs on the
-   caller-supplied `operations`** — `_disruptive_hits(json.dumps(operations,
-   sort_keys=True))` — not on the after-document: the ops are the only source of
-   new text, and `_disruptive_hits` returns pattern names, so a before/after
-   subtraction would mask a new `shutdown` whenever any pre-existing string
-   already matched (F-C1). Any hit → `disruptive_content_forbidden`. Zero
-   changed leaves → warning `inputs_unchanged`, proceed.
+   (`$.rules[1].action`); both forms are in scope. (The EOS lint ran in step 1
+   on the ops — the only source of new text; linting the after-document minus
+   the before-document would mask a new `shutdown` whenever any pre-existing
+   string already matched, because `_disruptive_hits` returns pattern names —
+   F-C1.) Zero changed leaves → warning `inputs_unchanged`, proceed.
 5. `confirm=False` → `outcome: preview`, `preview_token = preview_token(TOOL_NAME, {studio_id, workspace_id, expected_inputs_sha256, operations, after_sha256})`.
    `confirm=True` → `check_preview_token` over the **same** dict recomputed from
    this call (so `after_sha256` is recomputed from this call's read + ops);
-   mismatch/missing → `preview_required`, no HTTP. Match → **one** POST:
+   mismatch/missing → `preview_required`, no POST (the three preflight GETs
+   have already run; `after_sha256` needs the read). Match → **one** POST:
 
 ```json
 {
@@ -360,7 +371,7 @@ Refusals reuse `studios_write._refused` unchanged (`next_action: None`; hints in
 **`mss_operations_required`**, **`mss_operations_too_many`**,
 **`mss_operation_invalid`**, **`mss_collection_not_allowed`**,
 **`mss_entry_not_found`**, **`mss_reference_unresolved`**,
-**`mss_rule_too_broad`**, **`tree_diff_outside_mss_scope`**,
+**`mss_rule_too_broad`**, **`mss_document_malformed`**, **`tree_diff_outside_mss_scope`**,
 `disruptive_content_forbidden`, `preview_required`, `resource_write_failed`.
 
 Audit INFO per parent: tool, `workspace_id`, `studio_id`, outcome,
@@ -430,13 +441,21 @@ removing `pdu4-trendnet`, the three services and three rules, and restoring
 - Truncated `/all` or skipped NDJSON line → `preflight_failed`, no POST.
 - Studio GET: overlay 200 used; overlay 404 then mainline 200; overlay non-404 `read_failed` → `preflight_failed`, no fallthrough. `immutable` / `from_package` refuse.
 - Workspace not pending / unknown state / missing → refuse, no POST.
-- Each of `staticGroups`, `services`, `rules`: `upsert` new (list-length path), `upsert` replace by `name` (nested paths), `remove`; unknown key → `mss_operation_invalid` with path; bad CIDR, bad port string, bad `action`, `monitorName` on `drop`, unknown `monitorName` → `mss_operation_invalid`.
+- Each of `staticGroups`, `services`, `rules`: `upsert` new (list-length path), `upsert` replace by `name` (nested paths), `remove`; unknown key → `mss_operation_invalid` with path; bad CIDR, bad port string, bad `action`, unknown `monitorName` → `mss_operation_invalid`. (`monitorName` on `drop` is valid — the wire stores it on every rule.)
+- Wire document shape: a non-list collection, a non-object entry, a wrapped or duplicate `name`, a string-valued `sources`, a missing writable collection → `mss_document_malformed` with path, no POST. Duplicate rule names cannot hide a fabric-wide drop.
+- Non-string `op` / `collection` / `action` / `protocols` (unhashable) → `mss_operation_invalid`, never an uncaught exception.
+- `<any>` must be spelled exactly; `" <ANY> "` in a rule list → `mss_operation_invalid`. Port strings carry no whitespace.
+- Preview token composition pinned: `preview_token(TOOL_NAME, {studio_id, workspace_id, expected_inputs_sha256, normalized operations, after_sha256})`; a token from one draft does not confirm in another.
+- Workspace / studio / Inputs GET warnings are carried onto preview and accepted envelopes.
+- Registration: `tests/test_write_registration.py` reloads the server with the env off/on — write tools absent/present, `submit_cvp_workspace` never present.
 - `staticGroups` member `0.0.0.0/0` or `::/0` → `mss_operation_invalid`. `staticGroups` name equal to an `acceptedGroups[].name` → `mss_operation_invalid`. Any entry named `<any>` / ` <ANY> ` → `mss_operation_invalid`.
 - `policies`: `upsert` existing (description / policyRules) allowed; `upsert` new name → `mss_entry_not_found`; `remove` → `mss_operation_invalid`; `set_policy_rules` with `[]` → `mss_operation_invalid`.
 - `remove` of a group referenced by a rule → `mss_reference_unresolved` naming the rule. `remove` of a rule still in `POL1.policyRules` → `mss_reference_unresolved` naming the policy.
 - `set_policy_rules` unknown rule → `mss_reference_unresolved`; duplicate → `mss_operation_invalid`; unknown policy → `mss_entry_not_found`.
 - Reference to an `acceptedGroups[].name` allowed.
-- `drop` with `<any>`/`<any>`/`<any>` → `mss_rule_too_broad`, no preview. `upsert` of `monitor` with `action: drop` → same. `drop` with `<any>`/`<any>`/named service → warning `mss_rule_broad`, preview.
+- `drop` with `<any>`/`<any>`/`<any>` → `mss_rule_too_broad`, no preview. `upsert` of `monitor` with `action: drop` → same. A pre-existing wire rule with `sources: ["<any>", "x"]` (padded wildcard) + `<any>`/`<any>` drop: untouched → warning `mss_rule_too_broad_existing`; touched → refused. `["<any>", "trogdor"]` in an op → `mss_operation_invalid`. `drop` with `<any>`/`<any>`/named service → warning `mss_rule_broad`, preview.
+- Two `/1` members (v4 or v6), a three-piece cover, host bits (`10.0.3.4/8`), surrounding whitespace → `mss_operation_invalid` with path. `/16` member → `mss_group_broad` warning, preview; `/24` and `/64` → no warning.
+- `upsert` merge: POL1 re-upserted without `description` keeps `description: null` (`inputs_unchanged`); a rule carrying an unknown wire key (`sequence: 7`) keeps it through an upsert of that rule. `test_fixture_entries_use_only_allowlisted_keys` fails the day a re-capture grows a key.
 - Forward-all before a drop → `mss_rule_shadowed:<policy>:<rule>`, outcome preview.
 - Ops that change nothing (re-upsert of an existing entry byte-identical) → `inputs_unchanged`, preview.
 - Injected op that mutates `securityDomains` (monkeypatched applier) → `tree_diff_outside_mss_scope`.

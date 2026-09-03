@@ -1794,7 +1794,14 @@ if writes_enabled():
         confirm: bool = False,
         preview_token: str | None = None,
     ) -> dict:
-        """Compare-and-set MSS Service groups/services/rules/policy order. Does not submit."""
+        """Compare-and-set MSS Service groups/services/rules/policy order. Does not submit.
+
+        operations: list of {"op": "upsert", "collection", "entry"},
+        {"op": "remove", "collection", "name"} or {"op": "set_policy_rules",
+        "policy", "policy_rules"}; collection is one of staticGroups, services,
+        rules, policies. expected_inputs_sha256 comes from
+        get_cvp_studio_inputs("studio-mss-service").items[].inputs_sha256.
+        """
         datadict = get_env_vars()
         try:
             return studio_mss_set_policy_inputs(

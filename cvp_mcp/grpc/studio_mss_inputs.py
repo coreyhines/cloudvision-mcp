@@ -80,6 +80,9 @@ WRITABLE_COLLECTIONS: tuple[str, ...] = (
 
 ANY = "<any>"
 MAX_OPERATIONS = 20
+# A static group in this tool names hosts. Anything wider than these gets a
+# ``mss_group_broad`` warning on the preview (not a refusal: a lab /16 is legal).
+_BROAD_PREFIX: dict[int, int] = {4: 24, 6: 64}
 _MAX_REPORTED = 10
 
 _OPS: frozenset[str] = frozenset({"upsert", "remove", "set_policy_rules"})
@@ -135,7 +138,22 @@ class _Invalid(Exception):
 
 
 def _is_any(value: Any) -> bool:
+    """The wildcard, spelled exactly. Lookalikes (`` <ANY> ``) are not wildcards."""
+    return value == ANY
+
+
+def _is_any_like(value: Any) -> bool:
     return isinstance(value, str) and value.strip().lower() == ANY
+
+
+def _entry_name(item: Any) -> str | None:
+    """A plain, non-empty ``name`` or ``None``. Nothing here unwraps wire shapes."""
+    if not isinstance(item, dict):
+        return None
+    name = item.get("name")
+    if isinstance(name, str) and name and name == name.strip():
+        return name
+    return None
 
 
 def _require_name(value: Any, path: str) -> str:
@@ -143,7 +161,7 @@ def _require_name(value: Any, path: str) -> str:
         raise _Invalid(path, "name must be a non-empty string")
     if value != value.strip():
         raise _Invalid(path, "name must not have surrounding whitespace")
-    if _is_any(value):
+    if _is_any_like(value):
         raise _Invalid(path, f"{ANY!r} is a reserved name")
     return value
 
@@ -162,26 +180,41 @@ def _require_keys(
 
 
 def _require_name_list(value: Any, path: str, *, allow_any: bool) -> list[str]:
+    """A non-empty list of distinct names. ``<any>`` may only appear alone.
+
+    ``["<any>", "trogdor"]`` means *any* on the wire; accepting it would let a
+    rule slip past the blast-radius check by carrying a second element.
+    """
     if not isinstance(value, list) or not value:
         raise _Invalid(path, "must be a non-empty list of names")
     out: list[str] = []
     for index, item in enumerate(value):
         if not isinstance(item, str) or not item.strip():
             raise _Invalid(f"{path}[{index}]", "must be a non-empty string")
-        if _is_any(item) and not allow_any:
-            raise _Invalid(f"{path}[{index}]", f"{ANY!r} not allowed here")
+        if _is_any_like(item) and (not allow_any or not _is_any(item)):
+            raise _Invalid(
+                f"{path}[{index}]",
+                (
+                    f"{ANY!r} not allowed here"
+                    if not allow_any
+                    else f"spell the wildcard exactly {ANY!r}"
+                ),
+            )
+        if item in out:
+            raise _Invalid(f"{path}[{index}]", f"duplicate {item!r}")
         out.append(item)
+    if len(out) > 1 and any(_is_any(item) for item in out):
+        raise _Invalid(path, f"{ANY!r} must be the only element")
     return out
 
 
 def _validate_ports(value: Any, path: str) -> None:
     """``all``, a single port, ``a-b``, or a comma list of those (1–65535)."""
-    if not isinstance(value, str) or not value.strip():
+    if not isinstance(value, str) or not value:
         raise _Invalid(path, "must be 'all', a port, a range a-b, or a comma list")
-    if value.strip() == "all":
+    if value == "all":
         return
     for token in value.split(","):
-        token = token.strip()
         parts = token.split("-")
         if len(parts) not in (1, 2) or not all(p.isdigit() for p in parts):
             raise _Invalid(path, f"bad port token {token!r}")
@@ -191,27 +224,50 @@ def _validate_ports(value: Any, path: str) -> None:
 
 
 def _validate_icmp_types(value: Any, path: str) -> None:
-    if not isinstance(value, str) or not value.strip():
+    if not isinstance(value, str) or not value:
         raise _Invalid(path, "must be 'all' or a comma list of 0-255")
-    if value.strip() == "all":
+    if value == "all":
         return
     for token in value.split(","):
-        token = token.strip()
         if not token.isdigit() or not 0 <= int(token) <= 255:
             raise _Invalid(path, f"bad icmp type {token!r}")
 
 
-def _validate_cidr(value: Any, path: str) -> None:
-    if not isinstance(value, str):
-        raise _Invalid(path, "must be a CIDR string")
+def _validate_cidr(
+    value: Any, path: str
+) -> ipaddress.IPv4Network | ipaddress.IPv6Network:
+    if not isinstance(value, str) or value != value.strip():
+        raise _Invalid(path, "must be a CIDR string without surrounding whitespace")
     try:
-        network = ipaddress.ip_network(value.strip(), strict=False)
+        network = ipaddress.ip_network(value, strict=True)
     except ValueError as exc:
-        raise _Invalid(path, f"bad CIDR: {exc}") from None
+        # ``10.0.3.4/8`` is almost always a typo for ``/32``; stored verbatim it
+        # would become a 16-million-address group. Refuse rather than widen.
+        raise _Invalid(path, f"bad CIDR (host bits must be zero): {exc}") from None
     # ``0.0.0.0/0`` is ``<any>`` under another name and would defeat the
     # blast-radius refusal on drop rules.
     if network.prefixlen == 0:
         raise _Invalid(path, f"prefix length 0 is not allowed; use {ANY!r} in the rule")
+    return network
+
+
+def _validate_members(members: Any, path: str) -> None:
+    if not isinstance(members, list) or not members:
+        raise _Invalid(path, "must be a non-empty list of CIDRs")
+    networks = [
+        _validate_cidr(member, f"{path}[{index}]")
+        for index, member in enumerate(members)
+    ]
+    # Two ``/1``s (or any union that collapses to the whole space) are ``/0``
+    # spelled differently. Collapse per family and refuse a full cover.
+    for version in (4, 6):
+        family = [n for n in networks if n.version == version]
+        if family and any(
+            n.prefixlen == 0 for n in ipaddress.collapse_addresses(family)
+        ):
+            raise _Invalid(
+                path, f"members cover the entire IPv{version} space; use {ANY!r}"
+            )
 
 
 # --- entry schema -----------------------------------------------------------
@@ -226,13 +282,7 @@ def _validate_entry(collection: str, entry: Any, path: str) -> None:
         _require_keys(
             membership, frozenset({"members"}), ("members",), f"{path}.membership"
         )
-        members = membership["members"]
-        if not isinstance(members, list) or not members:
-            raise _Invalid(
-                f"{path}.membership.members", "must be a non-empty list of CIDRs"
-            )
-        for index, member in enumerate(members):
-            _validate_cidr(member, f"{path}.membership.members[{index}]")
+        _validate_members(membership["members"], f"{path}.membership.members")
         return
 
     if collection == "services":
@@ -240,7 +290,10 @@ def _validate_entry(collection: str, entry: Any, path: str) -> None:
             entry, _SERVICE_KEYS, ("name", "protocols", "configurations"), path
         )
         _require_name(entry["name"], f"{path}.name")
-        if entry["protocols"] not in _PROTOCOLS:
+        if (
+            not isinstance(entry["protocols"], str)
+            or entry["protocols"] not in _PROTOCOLS
+        ):
             raise _Invalid(f"{path}.protocols", f"must be one of {sorted(_PROTOCOLS)}")
         configurations = entry["configurations"]
         if not isinstance(configurations, list) or not configurations:
@@ -248,7 +301,10 @@ def _validate_entry(collection: str, entry: Any, path: str) -> None:
         for index, config in enumerate(configurations):
             cpath = f"{path}.configurations[{index}]"
             _require_keys(config, _SERVICE_CONFIG_KEYS, _SERVICE_CONFIG_REQUIRED, cpath)
-            if config["protocol"] not in _CONFIG_PROTOCOLS:
+            if (
+                not isinstance(config["protocol"], str)
+                or config["protocol"] not in _CONFIG_PROTOCOLS
+            ):
                 raise _Invalid(
                     f"{cpath}.protocol", f"must be one of {sorted(_CONFIG_PROTOCOLS)}"
                 )
@@ -261,7 +317,7 @@ def _validate_entry(collection: str, entry: Any, path: str) -> None:
     if collection == "rules":
         _require_keys(entry, _RULE_KEYS, _RULE_REQUIRED, path)
         _require_name(entry["name"], f"{path}.name")
-        if entry["action"] not in _ACTIONS:
+        if not isinstance(entry["action"], str) or entry["action"] not in _ACTIONS:
             raise _Invalid(f"{path}.action", f"must be one of {sorted(_ACTIONS)}")
         _require_name_list(entry["sources"], f"{path}.sources", allow_any=True)
         _require_name_list(
@@ -330,7 +386,7 @@ def _normalize_operations(
             if not isinstance(raw, dict):
                 raise _Invalid(path, "must be an object")
             op = raw.get("op")
-            if op not in _OPS:
+            if not isinstance(op, str) or op not in _OPS:
                 raise _Invalid(f"{path}.op", f"must be one of {sorted(_OPS)}")
 
             if op == "set_policy_rules":
@@ -348,7 +404,10 @@ def _normalize_operations(
                 continue
 
             collection = raw.get("collection")
-            if collection not in WRITABLE_COLLECTIONS:
+            if (
+                not isinstance(collection, str)
+                or collection not in WRITABLE_COLLECTIONS
+            ):
                 return [], {
                     "code": "mss_collection_not_allowed",
                     "message": f"collection must be one of {list(WRITABLE_COLLECTIONS)}.",
@@ -382,23 +441,90 @@ def _normalize_operations(
             "message": "An operation failed validation.",
             "details": {"path": exc.path, "reason": exc.message},
         }
+    except TypeError as exc:  # backstop: a refusal, never a generic client_error
+        return [], {
+            "code": "mss_operation_invalid",
+            "message": "An operation failed validation.",
+            "details": {
+                "path": "operations",
+                "reason": f"unexpected value type: {exc}",
+            },
+        }
     return normalized, None
 
 
 def _entries(document: dict[str, Any], collection: str) -> list[dict[str, Any]]:
-    value = document.get(collection)
-    if not isinstance(value, list):
-        value = []
-        document[collection] = value
-    return value
+    """The collection list. Shape was validated by :func:`_validate_document_shape`."""
+    return document[collection]
 
 
 def _names(document: dict[str, Any], collection: str) -> list[str]:
     return [
-        _as_str(item.get("name"))
-        for item in document.get(collection) or []
-        if isinstance(item, dict)
+        name
+        for name in (_entry_name(item) for item in document.get(collection) or [])
+        if name is not None
     ]
+
+
+_RULE_LIST_FIELDS = ("sources", "destinations", "services")
+
+
+def _validate_document_shape(document: dict[str, Any]) -> dict[str, Any] | None:
+    """Refuse a wire document this tool cannot reason about.
+
+    The operations are validated against a schema; the document CVP returns is
+    not, and it is re-posted whole. A collection that is not a list, an entry
+    without a plain string ``name``, duplicate names, or a rule whose
+    ``sources`` is a string would either be silently rewritten or slip past
+    the blast-radius and reference checks. Returns refusal details or ``None``.
+    """
+
+    def bad(path: str, reason: str) -> dict[str, Any]:
+        return {
+            "code": "mss_document_malformed",
+            "message": "The current MSS Service document has a shape this tool refuses to rewrite.",
+            "details": {"path": path, "reason": reason},
+        }
+
+    for collection in (*WRITABLE_COLLECTIONS, "acceptedGroups", "monitorObjects"):
+        writable = collection in WRITABLE_COLLECTIONS
+        if collection not in document:
+            if writable:
+                return bad(f"$.{collection}", "missing")
+            continue
+        entries = document[collection]
+        if not isinstance(entries, list):
+            return bad(f"$.{collection}", "not a list")
+        seen: set[str] = set()
+        for index, entry in enumerate(entries):
+            path = f"$.{collection}[{index}]"
+            name = _entry_name(entry)
+            if name is None:
+                return bad(
+                    f"{path}.name", "entry is not an object with a plain non-empty name"
+                )
+            if name in seen:
+                return bad(f"{path}.name", f"duplicate name {name!r}")
+            seen.add(name)
+            if collection == "rules":
+                for field in _RULE_LIST_FIELDS:
+                    value = entry.get(field)
+                    if not isinstance(value, list) or not all(
+                        isinstance(v, str) for v in value
+                    ):
+                        return bad(f"{path}.{field}", "must be a list of strings")
+                monitor = entry.get("monitorName")
+                if monitor is not None and not isinstance(monitor, str):
+                    return bad(f"{path}.monitorName", "must be a string or absent")
+                if not isinstance(entry.get("action"), str):
+                    return bad(f"{path}.action", "must be a string")
+            if collection == "policies":
+                value = entry.get("policyRules")
+                if not isinstance(value, list) or not all(
+                    isinstance(v, str) for v in value
+                ):
+                    return bad(f"{path}.policyRules", "must be a list of strings")
+    return None
 
 
 def _apply_operations(
@@ -408,6 +534,7 @@ def _apply_operations(
     after = copy.deepcopy(document)
     summary: dict[str, list[str]] = {"added": [], "replaced": [], "removed": []}
     accepted_names = set(_names(after, "acceptedGroups"))
+    monitor_names = set(_names(after, "monitorObjects"))
 
     for index, op in enumerate(operations):
         path = f"operations[{index}]"
@@ -416,7 +543,7 @@ def _apply_operations(
         if kind == "set_policy_rules":
             policies = _entries(after, "policies")
             for policy in policies:
-                if isinstance(policy, dict) and policy.get("name") == op["policy"]:
+                if _entry_name(policy) == op["policy"]:
                     policy["policyRules"] = list(op["policy_rules"])
                     summary["replaced"].append(f"policies:{op['policy']}")
                     break
@@ -437,11 +564,7 @@ def _apply_operations(
 
         if kind == "remove":
             before = len(entries)
-            entries[:] = [
-                e
-                for e in entries
-                if not (isinstance(e, dict) and e.get("name") == op["name"])
-            ]
+            entries[:] = [e for e in entries if _entry_name(e) != op["name"]]
             if len(entries) == before:
                 return (
                     after,
@@ -461,6 +584,21 @@ def _apply_operations(
 
         entry = op["entry"]
         name = entry["name"]
+        if collection == "rules" and entry.get("monitorName") is not None:
+            if entry["monitorName"] not in monitor_names:
+                return (
+                    after,
+                    summary,
+                    {
+                        "code": "mss_operation_invalid",
+                        "message": "monitorName must name an existing monitor object.",
+                        "details": {
+                            "path": f"{path}.entry.monitorName",
+                            "reason": "unknown monitor object",
+                            "monitorName": entry["monitorName"],
+                        },
+                    },
+                )
         if collection == "staticGroups" and name in accepted_names:
             return (
                 after,
@@ -475,10 +613,14 @@ def _apply_operations(
                     },
                 },
             )
+        label = f"{collection}:{name}"
         for position, existing in enumerate(entries):
-            if isinstance(existing, dict) and existing.get("name") == name:
-                entries[position] = copy.deepcopy(entry)
-                summary["replaced"].append(f"{collection}:{name}")
+            if _entry_name(existing) == name:
+                # Merge, do not replace: keys the op does not name (an optional
+                # ``description``, or a field CVP adds later) survive the edit.
+                entries[position] = {**existing, **copy.deepcopy(entry)}
+                if label not in summary["added"] and label not in summary["replaced"]:
+                    summary["replaced"].append(label)
                 break
         else:
             if collection == "policies":
@@ -492,7 +634,7 @@ def _apply_operations(
                     },
                 )
             entries.append(copy.deepcopy(entry))
-            summary["added"].append(f"{collection}:{name}")
+            summary["added"].append(label)
 
     return after, summary, None
 
@@ -500,22 +642,18 @@ def _apply_operations(
 # --- result checks ----------------------------------------------------------
 
 
+def _field_is_any(rule: dict[str, Any], field: str) -> bool:
+    """``<any>`` anywhere in the list means any; a second element does not narrow it."""
+    value = rule.get(field)
+    return isinstance(value, list) and any(_is_any(item) for item in value)
+
+
 def _rule_is_all_any(rule: dict[str, Any]) -> bool:
-    return all(
-        isinstance(rule.get(field), list)
-        and len(rule[field]) == 1
-        and _is_any(rule[field][0])
-        for field in ("sources", "destinations", "services")
-    )
+    return all(_field_is_any(rule, f) for f in ("sources", "destinations", "services"))
 
 
 def _endpoints_any(rule: dict[str, Any]) -> bool:
-    return all(
-        isinstance(rule.get(field), list)
-        and len(rule[field]) == 1
-        and _is_any(rule[field][0])
-        for field in ("sources", "destinations")
-    )
+    return all(_field_is_any(rule, f) for f in ("sources", "destinations"))
 
 
 def _check_result(
@@ -523,19 +661,16 @@ def _check_result(
 ) -> tuple[dict[str, Any] | None, list[str]]:
     """Referential integrity, blast radius and advisory warnings on the result.
 
-    ``touched`` holds ``rules:<name>`` for rules this call added or replaced;
-    the ``mss_rule_broad`` warning is scoped to those so a pre-existing broad
-    rule does not nag on every unrelated edit. Refusals look at everything.
+    ``touched`` holds ``<collection>:<name>`` for entries this call added or
+    replaced. Refusals that judge an entry's *content* (fabric-wide drop, empty
+    policy, wide group) are scoped to touched entries, so state the UI left
+    behind cannot brick every unrelated edit — the same pre-existing oddity is
+    surfaced as a warning instead. Referential integrity looks at everything:
+    a ``remove`` that dangles a reference must refuse regardless.
     """
     groups = set(_names(after, "staticGroups")) | set(_names(after, "acceptedGroups"))
     services = set(_names(after, "services"))
-    rules = {
-        r["name"]: r
-        for r in after.get("rules") or []
-        if isinstance(r, dict) and "name" in r
-    }
-    monitors = set(_names(after, "monitorObjects"))
-
+    rules = {name: rule for rule in after["rules"] if (name := _entry_name(rule))}
     unresolved: list[dict[str, str]] = []
     for rule_name, rule in rules.items():
         for field, universe in (
@@ -543,7 +678,7 @@ def _check_result(
             ("destinations", groups),
             ("services", services),
         ):
-            for ref in rule.get(field) or []:
+            for ref in rule[field]:
                 if not _is_any(ref) and ref not in universe:
                     unresolved.append(
                         {
@@ -552,27 +687,15 @@ def _check_result(
                             "missing": ref,
                         }
                     )
-        monitor = rule.get("monitorName")
-        if monitor is not None and monitor not in monitors:
-            return {
-                "code": "mss_operation_invalid",
-                "message": "monitorName must name an existing monitor object.",
-                "details": {
-                    "path": f"rules:{rule_name}.monitorName",
-                    "reason": "unknown monitor object",
-                    "monitorName": monitor,
-                },
-            }, []
-    for policy in after.get("policies") or []:
-        if not isinstance(policy, dict):
-            continue
-        policy_rules = policy.get("policyRules") or []
-        if not policy_rules:
+    for policy in after["policies"]:
+        policy_name = _entry_name(policy)
+        policy_rules = policy["policyRules"]
+        if not policy_rules and f"policies:{policy_name}" in touched:
             return {
                 "code": "mss_operation_invalid",
                 "message": "A policy must keep at least one rule.",
                 "details": {
-                    "path": f"policies:{policy.get('name')}.policyRules",
+                    "path": f"policies:{policy_name}.policyRules",
                     "reason": "empty",
                 },
             }, []
@@ -580,7 +703,7 @@ def _check_result(
             if ref not in rules:
                 unresolved.append(
                     {
-                        "referrer": f"policies:{policy.get('name')}",
+                        "referrer": f"policies:{policy_name}",
                         "field": "policyRules",
                         "missing": ref,
                     }
@@ -595,33 +718,42 @@ def _check_result(
             },
         }, []
 
-    for rule_name, rule in rules.items():
-        if rule.get("action") == "drop" and _rule_is_all_any(rule):
-            return {
-                "code": "mss_rule_too_broad",
-                "message": "A drop rule with <any> sources, destinations and services drops the fabric at ingress.",
-                "details": {"rule": rule_name},
-            }, []
-
     warnings: list[str] = []
+    for rule_name, rule in rules.items():
+        if rule["action"] == "drop" and _rule_is_all_any(rule):
+            if f"rules:{rule_name}" in touched:
+                return {
+                    "code": "mss_rule_too_broad",
+                    "message": "A drop rule with <any> sources, destinations and services drops the fabric at ingress.",
+                    "details": {"rule": rule_name},
+                }, []
+            warnings.append(f"mss_rule_too_broad_existing:{rule_name}")
+    for group in after["staticGroups"]:
+        group_name = _entry_name(group)
+        if f"staticGroups:{group_name}" not in touched:
+            continue
+        for member in (group.get("membership") or {}).get("members") or []:
+            try:
+                network = ipaddress.ip_network(member, strict=False)
+            except ValueError:
+                continue
+            if network.prefixlen < _BROAD_PREFIX[network.version]:
+                warnings.append(f"mss_group_broad:{group_name}:{member}")
+                break
     for rule_name, rule in rules.items():
         if (
             f"rules:{rule_name}" in touched
-            and rule.get("action") == "drop"
+            and rule["action"] == "drop"
             and _endpoints_any(rule)
         ):
             warnings.append(f"mss_rule_broad:{rule_name}")
-    for policy in after.get("policies") or []:
-        if not isinstance(policy, dict):
-            continue
-        ordered = [rules[n] for n in policy.get("policyRules") or [] if n in rules]
+    for policy in after["policies"]:
+        ordered = [rules[n] for n in policy["policyRules"] if n in rules]
         for position, rule in enumerate(ordered):
-            if rule.get("action") == "forward" and _rule_is_all_any(rule):
-                if any(
-                    later.get("action") == "drop" for later in ordered[position + 1 :]
-                ):
+            if rule["action"] == "forward" and _rule_is_all_any(rule):
+                if any(later["action"] == "drop" for later in ordered[position + 1 :]):
                     warnings.append(
-                        f"mss_rule_shadowed:{policy.get('name')}:{rule['name']}"
+                        f"mss_rule_shadowed:{_entry_name(policy)}:{rule['name']}"
                     )
     return None, warnings
 
@@ -768,8 +900,15 @@ def set_cvp_mss_policy_inputs(
             tool,
             _INPUTS_SOURCE,
             "preflight_failed",
-            "Studio GET failed; refusing Inputs write.",
-            details={"studio_id": MSS_STUDIO_ID},
+            (
+                "Studio not found in the draft or mainline; refusing Inputs write."
+                if studio_status == "not_found"
+                else "Studio GET failed; refusing Inputs write."
+            ),
+            details={
+                "studio_id": MSS_STUDIO_ID,
+                "studio_status": studio_status or "malformed",
+            },
             workspace_id=workspace,
             warnings=studio_warnings,
         )
@@ -787,16 +926,40 @@ def set_cvp_mss_policy_inputs(
             workspace_id=workspace,
         )
 
-    document, source_workspace, load_error, warnings = _load_root_inputs(
+    document, source_workspace, load_error, load_warnings = _load_root_inputs(
         datadict, workspace, studio_id=MSS_STUDIO_ID
     )
+    warnings = [*ws_warnings, *studio_warnings, *load_warnings]
     if load_error or not isinstance(document, dict):
         return _refused(
             tool,
             _INPUTS_SOURCE,
             load_error or "inputs_path_unresolved",
             "Could not read the MSS Service root Inputs document.",
-            details={"studio_id": MSS_STUDIO_ID},
+            details={
+                "studio_id": MSS_STUDIO_ID,
+                "inputs_source_workspace_id": source_workspace,
+                "reason": (
+                    "root document is not a JSON object"
+                    if load_error is None
+                    else "root row missing, unparsable, or the stream was incomplete"
+                ),
+            },
+            workspace_id=workspace,
+            warnings=warnings,
+        )
+    shape_error = _validate_document_shape(document)
+    if shape_error:
+        return _refused(
+            tool,
+            _INPUTS_SOURCE,
+            shape_error["code"],
+            shape_error["message"],
+            details={
+                "studio_id": MSS_STUDIO_ID,
+                "inputs_source_workspace_id": source_workspace,
+                **shape_error["details"],
+            },
             workspace_id=workspace,
             warnings=warnings,
         )
@@ -830,11 +993,7 @@ def set_cvp_mss_policy_inputs(
             warnings=warnings,
         )
 
-    touched = {
-        name
-        for name in entry_summary["added"] + entry_summary["replaced"]
-        if name.startswith("rules:")
-    }
+    touched = set(entry_summary["added"]) | set(entry_summary["replaced"])
     result_error, result_warnings = _check_result(after, touched)
     if result_error:
         return _refused(

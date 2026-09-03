@@ -454,7 +454,7 @@ def test_lint_ignores_pre_existing_text_in_untouched_leaves():
         (
             "policies",
             {"name": "POL1", "policyRules": ["monitor", "monitor"]},
-            ".entry.policyRules",
+            ".entry.policyRules[1]",
         ),
         ("policies", {"name": "POL1", "policyRules": []}, ".entry.policyRules"),
     ],
@@ -540,6 +540,8 @@ def test_incomplete_inputs_stream_fails_closed(warning):
     with _mocked(nd_warnings=[warning]) as mocks:
         env = _call(_worked_example_ops())
     _refused_no_http(env, "preflight_failed", mocks)
+    mocks["inputs_get"].assert_called_once()
+    assert "root Inputs document" in _obj(env)["error"]["message"]
 
 
 def test_inputs_read_error_fails_closed():
@@ -685,6 +687,8 @@ def test_static_group_may_not_collide_with_agni_group():
         env = _call(ops)
     _refused_no_http(env, "mss_operation_invalid", mocks)
     assert _details(env)["path"] == "operations[0].entry.name"
+    assert _details(env)["reason"] == "collides with acceptedGroups"
+    mocks["workspace_get"].assert_called_once()
 
 
 def test_unknown_monitor_name_is_invalid():
@@ -700,6 +704,7 @@ def test_unknown_monitor_name_is_invalid():
         )
     _refused_no_http(env, "mss_operation_invalid", mocks)
     assert _details(env)["monitorName"] == "ghost"
+    assert _details(env)["path"] == "operations[0].entry.monitorName"
 
 
 def test_policies_upsert_existing_ok_new_refused_remove_refused():
@@ -957,3 +962,579 @@ def test_post_failure_is_resource_write_failed():
         env = _call(ops, confirm=True, token=token)
     assert _code(env) == "resource_write_failed"
     mocks["urlopen"].assert_not_called()
+
+
+# --- document shape (silent-failure review) ---------------------------------
+
+
+def _doc_with(**overrides):
+    doc = copy.deepcopy(POST_DOC)
+    doc.update(overrides)
+    return doc
+
+
+@pytest.mark.parametrize(
+    ("overrides", "path"),
+    [
+        ({"services": {"legacy": "map"}}, "$.services"),
+        ({"rules": "x"}, "$.rules"),
+        ({"rules": [*POST_DOC["rules"], "garbage"]}, "$.rules[4].name"),
+        (
+            {"rules": [*POST_DOC["rules"], {**_rule("r9"), "name": {"value": "r9"}}]},
+            "$.rules[4].name",
+        ),
+        (
+            {"rules": [*POST_DOC["rules"], {**_rule("r9"), "sources": "<any>"}]},
+            "$.rules[4].sources",
+        ),
+        (
+            {"rules": [*POST_DOC["rules"], {**_rule("r9"), "monitorName": ["m"]}]},
+            "$.rules[4].monitorName",
+        ),
+        ({"rules": [*POST_DOC["rules"], _rule("monitor")]}, "$.rules[4].name"),
+        (
+            {"policies": [{"name": "POL1", "policyRules": "monitor"}]},
+            "$.policies[0].policyRules",
+        ),
+        ({"acceptedGroups": [{"name": 3}]}, "$.acceptedGroups[0].name"),
+        ({"monitorObjects": "ztx"}, "$.monitorObjects"),
+    ],
+)
+def test_malformed_wire_document_is_refused_not_rewritten(overrides, path):
+    doc = _doc_with(**overrides)
+    if "staticGroups" in doc:
+        doc.pop("__never__", None)
+    with _mocked(rows=[_row("", doc)]) as mocks:
+        env = _call(
+            [{"op": "upsert", "collection": "staticGroups", "entry": _group()}],
+            expected=inputs_sha256(doc),
+        )
+    _refused_no_http(env, "mss_document_malformed", mocks)
+    assert _details(env)["path"] == path, _details(env)
+    assert _details(env)["inputs_source_workspace_id"] == ""
+
+
+def test_missing_writable_collection_is_refused():
+    doc = _doc_with()
+    del doc["policies"]
+    with _mocked(rows=[_row("", doc)]) as mocks:
+        env = _call(
+            [{"op": "upsert", "collection": "staticGroups", "entry": _group()}],
+            expected=inputs_sha256(doc),
+        )
+    _refused_no_http(env, "mss_document_malformed", mocks)
+    assert _details(env)["path"] == "$.policies"
+
+
+def test_duplicate_rule_names_cannot_hide_a_fabric_drop():
+    """Two rules named ``r``: dict-by-name would keep the harmless one."""
+    doc = _doc_with(
+        rules=[
+            *POST_DOC["rules"],
+            _rule("r", destinations=("<any>",), services=("<any>",)),
+            _rule("r", action="forward"),
+        ]
+    )
+    with _mocked(rows=[_row("", doc)]) as mocks:
+        env = _call(
+            [{"op": "upsert", "collection": "staticGroups", "entry": _group()}],
+            expected=inputs_sha256(doc),
+        )
+    _refused_no_http(env, "mss_document_malformed", mocks)
+    assert "duplicate" in _details(env)["reason"]
+
+
+def test_pre_existing_empty_policy_blocks_only_edits_that_touch_it():
+    doc = _doc_with(
+        policies=[*POST_DOC["policies"], {"name": "POL2", "policyRules": []}]
+    )
+    sha = inputs_sha256(doc)
+    with _mocked(rows=[_row("", doc)]) as mocks:
+        env = _call(
+            [{"op": "upsert", "collection": "staticGroups", "entry": _group()}],
+            expected=sha,
+        )
+    assert _obj(env)["outcome"] == "preview", env
+    mocks["urlopen"].assert_not_called()
+
+    with _mocked(rows=[_row("", doc)]) as mocks:
+        env = _call(
+            [
+                {
+                    "op": "upsert",
+                    "collection": "policies",
+                    "entry": {"name": "POL2", "description": "x", "policyRules": []},
+                }
+            ],
+            expected=sha,
+        )
+    _refused_no_http(env, "mss_operation_invalid", mocks)
+
+
+@pytest.mark.parametrize(
+    "operations",
+    [
+        [{"op": ["upsert"], "collection": "rules", "entry": _rule()}],
+        [{"op": "upsert", "collection": ["rules"], "entry": _rule()}],
+        [{"op": "upsert", "collection": "rules", "entry": _rule(action=["drop"])}],
+        [
+            {
+                "op": "upsert",
+                "collection": "services",
+                "entry": {**_service(), "protocols": {"a": 1}},
+            }
+        ],
+        [
+            {
+                "op": "upsert",
+                "collection": "services",
+                "entry": _service(protocol={"x": 1}),
+            }
+        ],
+        ["upsert"],
+    ],
+)
+def test_unhashable_or_wrong_typed_values_refuse_not_crash(operations):
+    with _mocked() as mocks:
+        env = _call(operations)
+    assert _code(env) in ("mss_operation_invalid", "mss_collection_not_allowed"), env
+    assert env["coverage"] == "none"
+    mocks["workspace_get"].assert_not_called()
+    mocks["urlopen"].assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("collection", "entry", "path_suffix"),
+    [
+        ("rules", _rule(sources=(" <ANY> ",)), ".entry.sources[0]"),
+        ("rules", _rule(sources=("<ANY>",)), ".entry.sources[0]"),
+        ("staticGroups", _group(name="<ANY>"), ".entry.name"),
+        ("staticGroups", _group(name=""), ".entry.name"),
+        (
+            "staticGroups",
+            {"name": "x", "membership": "10.0.0.1/32"},
+            ".entry.membership",
+        ),
+        (
+            "services",
+            _service(destinationports=" 80 , 443 "),
+            ".entry.configurations[0].destinationports",
+        ),
+        (
+            "services",
+            _service(destinationports=67),
+            ".entry.configurations[0].destinationports",
+        ),
+        (
+            "services",
+            _service(destinationports="67-"),
+            ".entry.configurations[0].destinationports",
+        ),
+        ("services", {**_service(), "configurations": []}, ".entry.configurations"),
+        ("rules", _rule(monitorName=""), ".entry.monitorName"),
+        (
+            "policies",
+            {"name": "POL1", "policyRules": ["<any>"]},
+            ".entry.policyRules[0]",
+        ),
+        (
+            "policies",
+            {"name": "POL1", "description": 3, "policyRules": ["monitor"]},
+            ".entry.description",
+        ),
+    ],
+)
+def test_more_schema_edges_refuse_with_path(collection, entry, path_suffix):
+    with _mocked() as mocks:
+        env = _call([{"op": "upsert", "collection": collection, "entry": entry}])
+    _refused_no_http(env, "mss_operation_invalid", mocks)
+    assert _details(env)["path"] == f"operations[0]{path_suffix}", _details(env)
+    mocks["workspace_get"].assert_not_called()
+
+
+def test_icmp_all_and_exact_any_are_accepted():
+    ops = [
+        {
+            "op": "upsert",
+            "collection": "services",
+            "entry": _service(protocol="icmp", icmpTypes="all"),
+        },
+        {
+            "op": "upsert",
+            "collection": "rules",
+            "entry": _rule(
+                "r-any",
+                sources=("<any>",),
+                destinations=("trogdor",),
+                services=("<any>",),
+            ),
+        },
+    ]
+    with _mocked() as mocks:
+        env = _call(ops)
+    assert _obj(env)["outcome"] == "preview", env
+    mocks["urlopen"].assert_not_called()
+
+
+# --- test-analyst pins ---------------------------------------------------------
+
+
+def test_digest_from_mainline_refused_when_overlay_exists():
+    """§D.9 step 4: the operator must re-read with the draft id once an overlay exists."""
+    with _mocked(rows=[_row("", POST_DOC), _row(WORKSPACE, PRE_DOC)]) as mocks:
+        env = _call(_worked_example_ops(), expected=POST_SHA)
+    _refused_no_http(env, "inputs_digest_mismatch", mocks)
+    assert _details(env)["inputs_source_workspace_id"] == WORKSPACE
+    assert _details(env)["current_inputs_sha256"] == PRE_SHA
+
+
+def test_lint_refuses_ops_even_when_document_already_contains_the_word():
+    doctored = _doc_with()
+    doctored["acceptedGroups"][0]["name"] = "AGNI-CH-shutdown-lab"
+    ops = [
+        {
+            "op": "upsert",
+            "collection": "policies",
+            "entry": {
+                "name": "POL1",
+                "description": "shutdown",
+                "policyRules": ["monitor"],
+            },
+        }
+    ]
+    with _mocked(rows=[_row("", doctored)]) as mocks:
+        env = _call(ops, expected=inputs_sha256(doctored))
+    _refused_no_http(env, "disruptive_content_forbidden", mocks)
+    mocks["workspace_get"].assert_not_called()
+
+
+def test_preview_token_binds_after_digest_and_normalized_operations():
+    from cvp_mcp.write_access import preview_token
+
+    ops = _worked_example_ops()
+    with _mocked(rows=[_row("", PRE_DOC)]):
+        env = _call(ops, expected=PRE_SHA)
+    expected_token = preview_token(
+        mss.TOOL_NAME,
+        {
+            "studio_id": STUDIO_ID,
+            "workspace_id": WORKSPACE,
+            "expected_inputs_sha256": PRE_SHA,
+            "operations": mss._normalize_operations(ops)[0],
+            "after_sha256": POST_SHA,
+        },
+    )
+    assert _obj(env)["preview_token"] == expected_token
+
+
+def test_token_is_bound_to_workspace_id():
+    ops = [{"op": "upsert", "collection": "staticGroups", "entry": _group()}]
+    with _mocked():
+        token = _obj(_call(ops))["preview_token"]
+    other = "ws-mcp-other-20260902-ffffffff"
+    other_ws = _workspace_value()
+    other_ws["value"]["key"]["workspaceId"] = other
+    with _mocked(workspace=other_ws) as mocks:
+        env = _call(ops, confirm=True, token=token, workspace_id=other)
+    _refused_no_http(env, "preview_required", mocks)
+
+
+@pytest.mark.parametrize(
+    "raw_inputs", [json.dumps([1, 2]), "{not json", json.dumps("str")]
+)
+def test_root_row_not_an_object_is_unresolved(raw_inputs):
+    row = {
+        "key": {"studioId": STUDIO_ID, "workspaceId": "", "path": {}},
+        "inputs": raw_inputs,
+    }
+    with _mocked(rows=[row]) as mocks:
+        env = _call(_worked_example_ops())
+    _refused_no_http(env, "inputs_path_unresolved", mocks)
+    assert "inputs_source_workspace_id" in _details(env)
+
+
+def test_accepted_envelope_shape_and_warnings_carried():
+    ops = [
+        {
+            "op": "upsert",
+            "collection": "rules",
+            "entry": _rule(
+                "drop-dns-everywhere",
+                destinations=("<any>",),
+                services=("dns-server-port",),
+            ),
+        }
+    ]
+    with _mocked():
+        token = _obj(_call(ops))["preview_token"]
+    with _mocked() as mocks:
+        env = _call(ops, confirm=True, token=token)
+    obj = _obj(env)
+    assert obj["outcome"] == "accepted", env
+    assert "preview_token" not in obj
+    body = _posted_body(mocks["urlopen"])
+    assert set(body) == {"key", "inputs"}
+    assert obj["request_body"] == body
+    assert env["warnings"] == ["mss_rule_broad:drop-dns-everywhere"]
+
+
+def test_same_name_twice_in_one_call_last_wins_and_is_listed_once():
+    ops = [
+        {
+            "op": "upsert",
+            "collection": "staticGroups",
+            "entry": _group(members=("10.0.3.9/32",)),
+        },
+        {
+            "op": "upsert",
+            "collection": "staticGroups",
+            "entry": _group(members=("10.0.3.10/32",)),
+        },
+    ]
+    with _mocked() as mocks:
+        env = _call(ops)
+    obj = _obj(env)
+    assert obj["outcome"] == "preview", env
+    posted = json.loads(obj["request_body"]["inputs"])
+    matches = [g for g in posted["staticGroups"] if g["name"] == "t-group"]
+    assert matches == [_group(members=("10.0.3.10/32",))]
+    assert obj["entries_added"] == ["staticGroups:t-group"]
+    assert obj["entries_replaced"] == []
+    mocks["urlopen"].assert_not_called()
+
+
+def test_missing_credentials_refuse_before_any_get():
+    with _mocked() as mocks:
+        env = mss.set_cvp_mss_policy_inputs(
+            {"cvtoken": "", "cvp": "cvp.example.com", "cert": None},
+            WORKSPACE,
+            POST_SHA,
+            [{"op": "upsert", "collection": "staticGroups", "entry": _group()}],
+        )
+    _refused_no_http(env, "preflight_failed", mocks)
+    mocks["workspace_get"].assert_not_called()
+
+
+def test_reorder_policy_then_remove_rule_in_one_call():
+    ops = [
+        {
+            "op": "set_policy_rules",
+            "policy": "POL1",
+            "policy_rules": ["drop-dhcp-from-pdu4", "drop-dhcp-to-pdu4", "monitor"],
+        },
+        {"op": "remove", "collection": "rules", "name": "drop-dns-to-pdu4"},
+    ]
+    for order in (ops, list(reversed(ops))):
+        with _mocked() as mocks:
+            env = _call(order)
+        obj = _obj(env)
+        assert obj["outcome"] == "preview", env
+        assert obj["entries_removed"] == ["rules:drop-dns-to-pdu4"]
+        assert obj["entries_replaced"] == ["policies:POL1"]
+        assert obj["changed_leaf_paths"] == ["$.policies[0].policyRules", "$.rules"]
+        mocks["urlopen"].assert_not_called()
+
+
+def test_services_and_rules_upsert_replace_yield_nested_paths():
+    rtsp = _entry("services", "rtsp-554")
+    rtsp["configurations"][0]["destinationports"] = "554,8554"
+    drop_dns = _entry("rules", "drop-dns-to-pdu4")
+    drop_dns["direction"] = False
+    ops = [
+        {"op": "upsert", "collection": "services", "entry": rtsp},
+        {"op": "upsert", "collection": "rules", "entry": drop_dns},
+    ]
+    with _mocked() as mocks:
+        env = _call(ops)
+    obj = _obj(env)
+    assert obj["outcome"] == "preview", env
+    assert obj["entries_replaced"] == ["services:rtsp-554", "rules:drop-dns-to-pdu4"]
+    assert obj["changed_leaf_paths"] == [
+        "$.rules[3].direction",
+        "$.services[4].configurations[0].destinationports",
+    ]
+    mocks["urlopen"].assert_not_called()
+
+
+def test_studio_and_workspace_warnings_reach_the_preview_envelope():
+    with _mocked(studio=[STUDIO_404, _studio_env()]) as mocks:
+        env = _call([{"op": "upsert", "collection": "staticGroups", "entry": _group()}])
+    assert _obj(env)["outcome"] == "preview", env
+    assert "http_error:404" in env["warnings"]
+    mocks["urlopen"].assert_not_called()
+
+
+def test_post_transport_failure_through_real_helper():
+    ops = [{"op": "upsert", "collection": "staticGroups", "entry": _group()}]
+    with _mocked():
+        token = _obj(_call(ops))["preview_token"]
+    with _mocked() as mocks:
+        mocks["urlopen"].side_effect = OSError("boom")
+        env = _call(ops, confirm=True, token=token)
+    assert _obj(env)["outcome"] == "refused"
+    assert _code(env) == "resource_write_failed"
+    assert _details(env)["reason"]
+    assert mocks["urlopen"].call_count == 1
+
+
+# --- hostile-review bypasses ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("entry", "path_suffix"),
+    [
+        (_rule(sources=("<any>", "trogdor")), ".entry.sources"),
+        (_rule(sources=("<any>", "<any>")), ".entry.sources[1]"),
+        (_rule(sources=("trogdor", "trogdor")), ".entry.sources[1]"),
+        (_rule(services=("<any>", "http")), ".entry.services"),
+    ],
+)
+def test_any_must_stand_alone_and_references_are_distinct(entry, path_suffix):
+    with _mocked() as mocks:
+        env = _call([{"op": "upsert", "collection": "rules", "entry": entry}])
+    _refused_no_http(env, "mss_operation_invalid", mocks)
+    assert _details(env)["path"] == f"operations[0]{path_suffix}", _details(env)
+    mocks["workspace_get"].assert_not_called()
+
+
+def test_monitor_rewritten_as_drop_with_padded_any_is_too_broad():
+    """The hostile-review repro: ``["<any>", "trogdor"]`` is still any."""
+    doc = _doc_with(
+        rules=[
+            *POST_DOC["rules"],
+            _rule("wide", destinations=("<any>",), services=("<any>",)),
+        ]
+    )
+    doc["rules"][-1]["sources"] = ["<any>", "trogdor"]  # bypass the op validator
+    sha = inputs_sha256(doc)
+    # Untouched pre-existing: surfaced, not blocking.
+    with _mocked(rows=[_row("", doc)]) as mocks:
+        env = _call(
+            [{"op": "upsert", "collection": "staticGroups", "entry": _group()}],
+            expected=sha,
+        )
+    assert _obj(env)["outcome"] == "preview", env
+    assert env["warnings"] == ["mss_rule_too_broad_existing:wide"]
+    mocks["urlopen"].assert_not_called()
+    # Touched: refused.
+    with _mocked(rows=[_row("", doc)]) as mocks:
+        env = _call(
+            [
+                {
+                    "op": "upsert",
+                    "collection": "rules",
+                    "entry": _rule(
+                        "wide", destinations=("<any>",), services=("<any>",)
+                    ),
+                }
+            ],
+            expected=sha,
+        )
+    _refused_no_http(env, "mss_rule_too_broad", mocks)
+
+
+@pytest.mark.parametrize(
+    ("members", "path_suffix"),
+    [
+        (("0.0.0.0/1", "128.0.0.0/1"), ".entry.membership.members"),
+        (("::/1", "8000::/1"), ".entry.membership.members"),
+        (("0.0.0.0/2", "64.0.0.0/2", "128.0.0.0/1"), ".entry.membership.members"),
+        (("10.0.3.4/8",), ".entry.membership.members[0]"),
+        ((" 10.0.3.4/32",), ".entry.membership.members[0]"),
+    ],
+)
+def test_group_cannot_cover_the_address_space_or_carry_host_bits(members, path_suffix):
+    with _mocked() as mocks:
+        env = _call(
+            [
+                {
+                    "op": "upsert",
+                    "collection": "staticGroups",
+                    "entry": _group(members=members),
+                }
+            ]
+        )
+    _refused_no_http(env, "mss_operation_invalid", mocks)
+    assert _details(env)["path"] == f"operations[0]{path_suffix}", _details(env)
+
+
+def test_wide_group_warns_but_is_allowed():
+    with _mocked() as mocks:
+        env = _call(
+            [
+                {
+                    "op": "upsert",
+                    "collection": "staticGroups",
+                    "entry": _group(members=("10.0.0.0/16",)),
+                }
+            ]
+        )
+    assert _obj(env)["outcome"] == "preview", env
+    assert env["warnings"] == ["mss_group_broad:t-group:10.0.0.0/16"]
+    mocks["urlopen"].assert_not_called()
+
+    with _mocked() as mocks:
+        env = _call(
+            [
+                {
+                    "op": "upsert",
+                    "collection": "staticGroups",
+                    "entry": _group(members=("10.0.3.0/24", "2001:db8::/64")),
+                }
+            ]
+        )
+    assert env["warnings"] == []
+
+
+def test_upsert_merges_and_preserves_keys_the_op_does_not_name():
+    # POL1 has ``description: null`` on the wire; an upsert without it keeps it.
+    ops = [
+        {
+            "op": "upsert",
+            "collection": "policies",
+            "entry": {
+                "name": "POL1",
+                "policyRules": POST_DOC["policies"][0]["policyRules"],
+            },
+        }
+    ]
+    with _mocked() as mocks:
+        env = _call(ops)
+    obj = _obj(env)
+    assert obj["outcome"] == "preview", env
+    assert obj["changed_leaves"] == 0
+    assert "inputs_unchanged" in env["warnings"]
+    posted = json.loads(obj["request_body"]["inputs"])
+    assert "description" in posted["policies"][0]
+
+    # Forward-compat: a key CVP adds later survives an upsert of that entry.
+    doc = _doc_with()
+    doc["rules"][0]["sequence"] = 7
+    monitor = _entry("rules", "monitor")
+    monitor["direction"] = False
+    with _mocked(rows=[_row("", doc)]) as mocks:
+        env = _call(
+            [{"op": "upsert", "collection": "rules", "entry": monitor}],
+            expected=inputs_sha256(doc),
+        )
+    obj = _obj(env)
+    assert obj["outcome"] == "preview", env
+    assert obj["changed_leaf_paths"] == ["$.rules[0].direction"]
+    assert json.loads(obj["request_body"]["inputs"])["rules"][0]["sequence"] == 7
+    mocks["urlopen"].assert_not_called()
+
+
+def test_fixture_entries_use_only_allowlisted_keys():
+    """Fails the day a live re-capture grows a key §D.4 does not know."""
+    allowed = {
+        "staticGroups": mss._GROUP_KEYS,
+        "services": mss._SERVICE_KEYS,
+        "rules": mss._RULE_KEYS,
+        "policies": mss._POLICY_KEYS,
+    }
+    for collection, keys in allowed.items():
+        for entry in POST_DOC[collection]:
+            assert set(entry) <= keys, (collection, entry["name"], set(entry) - keys)
+    for service in POST_DOC["services"]:
+        for config in service["configurations"]:
+            assert set(config) <= mss._SERVICE_CONFIG_KEYS

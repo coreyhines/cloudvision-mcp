@@ -164,6 +164,13 @@ def test_post_capitalized_request_key_also_checked():
     mock_open.assert_not_called()
 
 
+def test_submit_request_and_gate_are_gone():
+    """Final spec §A: submit is retired, not gated; nothing may grow it back."""
+    assert not hasattr(resource_write, "REQUEST_SUBMIT")
+    assert not hasattr(resource_write, "_submit_allowed")
+    assert resource_write.ALLOWED_REQUESTS == frozenset({"REQUEST_START_BUILD"})
+
+
 def test_post_start_build_allowed():
     body = dict(_key(), request=resource_write.REQUEST_START_BUILD)
     (obj, err), mock_open = _post(WORKSPACE_PATH, body)

@@ -52,3 +52,34 @@ All four are cheap to close and are **applied in the spec** below.
 ## Farm shape (checked)
 
 Buckets S / R / D are file-disjoint. S and M both touch `cloudvision_mcp.py` (docstring vs registration) in different waves — fine. M imports `inputs_digest` and `_load_root_inputs(studio_id=)` from R, so M cannot start until R merges; the spec already sequences it. §B/§C live verifies need only the current image and can run today.
+
+## Post-implementation code review (2026-09-02, branch `feat/studios-phase2-final`)
+
+Three reviewers on the diff: hostile code review, silent-failure hunt, test
+coverage. Findings applied in the fix commit; the spec §D.5 / §D.8 carry the
+new behaviour.
+
+| ID | Finding | Fix |
+| --- | --- | --- |
+| R-1 | `_entries` turned a non-list wire collection into `[]` and the confirm POSTed it; inside a writable key, so the scope check could not see it. | `_validate_document_shape` before apply: writable collections present and lists, entries objects with plain unique string names, rule/policy list fields lists of strings → `mss_document_malformed` with path. `_entries` no longer creates anything. |
+| R-2 | Unhashable caller values (`op: ["upsert"]`, `action: ["drop"]`) escaped `except _Invalid` as `TypeError` → generic `client_error` with no path. | `isinstance(str)` guards before every set-membership test; `except TypeError` backstop → `mss_operation_invalid`. |
+| R-3/4/6/7 | `_check_result` crashed or iterated strings character-wise on malformed pre-existing entries; `_names` unwrapped `{"value": …}` while apply compared raw `name`. | One `_entry_name()` (plain non-empty str or `None`) everywhere; shape check refuses before any of it runs. |
+| R-5 | Duplicate rule names on the wire: dict-by-name kept the last, hiding a fabric-wide drop; upsert replaced first, remove deleted all. | Shape check refuses duplicates. |
+| R-8 | Workspace / studio GET warnings dropped on the success path. | `warnings = [*ws, *studio, *load]`. |
+| R-9/10 | `inputs_path_unresolved` and studio `preflight_failed` lost the source workspace / status. | `inputs_source_workspace_id`, `reason`, `studio_status` in details. |
+| R-11 | `" <ANY> "` validated as the wildcard but stored literally; ports stored with whitespace. | Exact `<any>` token; lookalikes are reserved names; port tokens exact. |
+| T-12 | A pre-existing empty policy blocked every unrelated edit. | Empty-`policyRules` refusal scoped to policies this call touched (same rule as `mss_rule_broad`). |
+| C-1 | `_rule_is_all_any` required a **single-element** `["<any>"]`; `["<any>", "trogdor"]` is any on the wire and reached confirm with no warning — one upsert turned `monitor` into a fabric drop. | Membership, not equality, in both broadness helpers; `<any>` may not share a list with a name; duplicate references refused. |
+| C-2 | Two `/1` members (or `::/1` + `8000::/1`) cover the whole space past the `/0` check; `10.0.3.4/8` validated non-strict and was stored verbatim as a `/8`. | `strict=True` (host bits refused), per-family `collapse_addresses` union refused at `/0`, `mss_group_broad` warning wider than `/24` / `/64`. |
+| C-I3 | `_is_any` was case/whitespace-loose, so `" <ANY> "` skipped referential integrity and was posted as a literal group name. | Exact `<any>` for semantics; lookalikes are `mss_operation_invalid`. (Same fix as R-11.) |
+| C-I4 | `upsert` replaced the whole entry against a closed key set: omitting `description` deleted it; any field CVP adds later would be deleted by the first upsert. | Merge over the existing entry; `test_fixture_entries_use_only_allowlisted_keys` flags a schema drift on re-capture. |
+| C-I5 | Content refusals (`monitorName`, empty policy, fabric drop) were global, so UI-left state would brick every edit; the `monitorName` refusal used a `rules:<name>` path while every other `mss_operation_invalid` uses `operations[N]…`. | `monitorName` checked per op with an `operations[N].entry.monitorName` path; fabric-drop and empty-policy refusals scoped to touched entries, pre-existing cases surfaced as `mss_rule_too_broad_existing:<rule>` warnings. Referential integrity stays global. |
+| C-L | Spec drift: `mss_rule_broad` scoping, lint step, ` <ANY> ` test, registration test claim; terse tool docstring. | §D.4/§D.5/§D.8 corrected; docstring names the ops, collections and where the digest comes from. |
+| T-* | Missing pins: overlay-vs-mainline digest mistake, F-C1 both halves, token composition, token bound to workspace, root row not an object, accepted envelope shape, last-wins upsert, missing credentials, reorder+remove, nested replace paths, transport failure through the real helper, registration guard (lost with the submit suite), `REQUEST_SUBMIT` absent from `resource_write`. | Added. |
+
+Not taken: refusing `immutable: "true"` string flags (consistent with 2.0/2.1;
+separate change if wanted); `inputs_root_ambiguous` when several root rows share
+a workspace (touches the 2.0 loader; fail-closed today via digest mismatch);
+dropping `default=str` from `canonical_json` (spec-canonical, never fires on
+parsed JSON); `client_error` logging with `exc_info` (shared helper, separate
+change).

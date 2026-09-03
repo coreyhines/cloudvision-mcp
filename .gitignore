@@ -13,3 +13,6 @@ headroom_memory.db
 *.db
 
 # Keep docs/superpowers/ tracked for approved design specs and plans.
+
+# SDD scratch (per-plan ledgers/briefs/diffs)
+.superpowers/

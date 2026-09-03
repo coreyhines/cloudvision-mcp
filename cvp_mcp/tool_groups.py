@@ -22,6 +22,7 @@ from cvp_mcp.members import (
     probes,
     routing,
     studios,
+    studios_write,
     topology,
 )
 
@@ -175,3 +176,16 @@ def build_groups() -> list[GroupedTool]:
             members=studios.members(),
         ),
     ]
+
+
+def build_write_group() -> GroupedTool:
+    """Build the opt-in grouped studio write tool definition."""
+    return GroupedTool(
+        name="studios_write",
+        description=(
+            "Draft-only studio and workspace writes: never submits; never "
+            "approves/executes change controls; dry-run unless confirm + matching "
+            "preview_token; drafts only ws-mcp-*."
+        ),
+        members=studios_write.members(),
+    )

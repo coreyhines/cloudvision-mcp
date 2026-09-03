@@ -10,34 +10,6 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from cvp_mcp.env import env_datadict_from_os
-from cvp_mcp.errors import client_error
-from cvp_mcp.grpc.studio_crud import (
-    create_cvp_studio as studio_crud_create,
-)
-from cvp_mcp.grpc.studio_crud import (
-    delete_cvp_studio as studio_crud_delete,
-)
-from cvp_mcp.grpc.studio_inputs_generic import (
-    set_cvp_studio_inputs as studio_inputs_set,
-)
-from cvp_mcp.grpc.studio_mss_inputs import (
-    set_cvp_mss_policy_inputs as studio_mss_set_policy_inputs,
-)
-from cvp_mcp.grpc.studio_tags import (
-    assign_cvp_studio_tags as studio_tags_assign,
-)
-from cvp_mcp.grpc.studios_write import (
-    build_cvp_workspace as studios_build_workspace,
-)
-from cvp_mcp.grpc.studios_write import (
-    create_cvp_workspace as studios_create_workspace,
-)
-from cvp_mcp.grpc.studios_write import (
-    delete_cvp_workspace as studios_delete_workspace,
-)
-from cvp_mcp.grpc.studios_write import (
-    set_cvp_access_interface_description as studios_set_access_description,
-)
 from cvp_mcp.members.compliance import (
     compliance_bugs,
     compliance_designed_config,
@@ -72,6 +44,17 @@ from cvp_mcp.members.studios import (
     studios_list_workspaces,
     studios_search_templates,
     studios_tags,
+)
+from cvp_mcp.members.studios_write import (
+    studios_write_assign_tags,
+    studios_write_build,
+    studios_write_create_studio,
+    studios_write_create_workspace,
+    studios_write_delete_studio,
+    studios_write_delete_workspace,
+    studios_write_set_description,
+    studios_write_set_inputs,
+    studios_write_set_mss_inputs,
 )
 from cvp_mcp.members.topology import topology_lldp, topology_map
 from cvp_mcp.rate_limit import rate_limited_tool
@@ -679,22 +662,13 @@ if writes_enabled():
         preview_token: str | None = None,
     ) -> dict:
         """Create a draft workspace. Dry-run unless confirm=True and preview_token matches."""
-        datadict = get_env_vars()
-        try:
-            return studios_create_workspace(
-                datadict,
-                workspace_id,
-                display_name,
-                description=description,
-                confirm=confirm,
-                preview_token_value=preview_token,
-            )
-        except Exception as e:
-            return client_error(
-                "create_workspace_failed",
-                log_exc=e,
-                context="create_cvp_workspace",
-            )
+        return studios_write_create_workspace(
+            workspace_id,
+            display_name,
+            description=description,
+            confirm=confirm,
+            preview_token=preview_token,
+        )
 
     @mcp.tool()
     @tool_enabled("delete_cvp_workspace")
@@ -704,20 +678,11 @@ if writes_enabled():
         preview_token: str | None = None,
     ) -> dict:
         """Delete a pending draft workspace. Dry-run unless confirm=True and preview_token matches."""
-        datadict = get_env_vars()
-        try:
-            return studios_delete_workspace(
-                datadict,
-                workspace_id,
-                confirm=confirm,
-                preview_token_value=preview_token,
-            )
-        except Exception as e:
-            return client_error(
-                "delete_workspace_failed",
-                log_exc=e,
-                context="delete_cvp_workspace",
-            )
+        return studios_write_delete_workspace(
+            workspace_id,
+            confirm=confirm,
+            preview_token=preview_token,
+        )
 
     @mcp.tool()
     @tool_enabled("build_cvp_workspace")
@@ -728,21 +693,12 @@ if writes_enabled():
         preview_token: str | None = None,
     ) -> dict:
         """Start a workspace build (REQUEST_START_BUILD). Poll with get_cvp_workspace_build."""
-        datadict = get_env_vars()
-        try:
-            return studios_build_workspace(
-                datadict,
-                workspace_id,
-                request_id=request_id,
-                confirm=confirm,
-                preview_token_value=preview_token,
-            )
-        except Exception as e:
-            return client_error(
-                "build_workspace_failed",
-                log_exc=e,
-                context="build_cvp_workspace",
-            )
+        return studios_write_build(
+            workspace_id,
+            request_id=request_id,
+            confirm=confirm,
+            preview_token=preview_token,
+        )
 
     @mcp.tool()
     @tool_enabled("set_cvp_access_interface_description")
@@ -756,24 +712,15 @@ if writes_enabled():
         preview_token: str | None = None,
     ) -> dict:
         """Compare-and-set one access-studio port description. Does not submit or shut ports."""
-        datadict = get_env_vars()
-        try:
-            return studios_set_access_description(
-                datadict,
-                workspace_id,
-                device_id,
-                interface,
-                expected_current_description,
-                new_description,
-                confirm=confirm,
-                preview_token_value=preview_token,
-            )
-        except Exception as e:
-            return client_error(
-                "set_access_description_failed",
-                log_exc=e,
-                context="set_cvp_access_interface_description",
-            )
+        return studios_write_set_description(
+            workspace_id,
+            device_id,
+            interface,
+            expected_current_description,
+            new_description,
+            confirm=confirm,
+            preview_token=preview_token,
+        )
 
     @mcp.tool()
     @tool_enabled("assign_cvp_studio_tags")
@@ -786,23 +733,14 @@ if writes_enabled():
         preview_token: str | None = None,
     ) -> dict:
         """Compare-and-set a studio's tag query. Does not submit the workspace."""
-        datadict = get_env_vars()
-        try:
-            return studio_tags_assign(
-                datadict,
-                studio_id,
-                workspace_id,
-                query,
-                expected_current_query,
-                confirm=confirm,
-                preview_token_value=preview_token,
-            )
-        except Exception as e:
-            return client_error(
-                "assign_studio_tags_failed",
-                log_exc=e,
-                context="assign_cvp_studio_tags",
-            )
+        return studios_write_assign_tags(
+            studio_id,
+            workspace_id,
+            query,
+            expected_current_query,
+            confirm=confirm,
+            preview_token=preview_token,
+        )
 
     @mcp.tool()
     @tool_enabled("set_cvp_studio_inputs")
@@ -815,23 +753,14 @@ if writes_enabled():
         preview_token: str | None = None,
     ) -> dict:
         """Set studio inputs at a path. Dry-run unless confirm=True and preview_token matches."""
-        datadict = get_env_vars()
-        try:
-            return studio_inputs_set(
-                datadict,
-                studio_id,
-                workspace_id,
-                path_values,
-                inputs,
-                confirm=confirm,
-                preview_token_value=preview_token,
-            )
-        except Exception as e:
-            return client_error(
-                "set_studio_inputs_failed",
-                log_exc=e,
-                context="set_cvp_studio_inputs",
-            )
+        return studios_write_set_inputs(
+            studio_id,
+            workspace_id,
+            path_values,
+            inputs,
+            confirm=confirm,
+            preview_token=preview_token,
+        )
 
     @mcp.tool()
     @tool_enabled("create_cvp_studio")
@@ -845,24 +774,15 @@ if writes_enabled():
         preview_token: str | None = None,
     ) -> dict:
         """Create a studio in a workspace. Dry-run unless confirm=True and preview_token matches."""
-        datadict = get_env_vars()
-        try:
-            return studio_crud_create(
-                datadict,
-                workspace_id,
-                studio_id,
-                display_name,
-                template_body=template_body,
-                description=description,
-                confirm=confirm,
-                preview_token_value=preview_token,
-            )
-        except Exception as e:
-            return client_error(
-                "create_studio_failed",
-                log_exc=e,
-                context="create_cvp_studio",
-            )
+        return studios_write_create_studio(
+            workspace_id,
+            studio_id,
+            display_name,
+            template_body=template_body,
+            description=description,
+            confirm=confirm,
+            preview_token=preview_token,
+        )
 
     @mcp.tool()
     @tool_enabled("delete_cvp_studio")
@@ -873,21 +793,12 @@ if writes_enabled():
         preview_token: str | None = None,
     ) -> dict:
         """Delete a studio in a workspace. Dry-run unless confirm=True and preview_token matches."""
-        datadict = get_env_vars()
-        try:
-            return studio_crud_delete(
-                datadict,
-                workspace_id,
-                studio_id,
-                confirm=confirm,
-                preview_token_value=preview_token,
-            )
-        except Exception as e:
-            return client_error(
-                "delete_studio_failed",
-                log_exc=e,
-                context="delete_cvp_studio",
-            )
+        return studios_write_delete_studio(
+            workspace_id,
+            studio_id,
+            confirm=confirm,
+            preview_token=preview_token,
+        )
 
     @mcp.tool()
     @tool_enabled("set_cvp_mss_policy_inputs")
@@ -906,22 +817,13 @@ if writes_enabled():
         rules, policies. expected_inputs_sha256 comes from
         get_cvp_studio_inputs("studio-mss-service").items[].inputs_sha256.
         """
-        datadict = get_env_vars()
-        try:
-            return studio_mss_set_policy_inputs(
-                datadict,
-                workspace_id,
-                expected_inputs_sha256,
-                operations,
-                confirm=confirm,
-                preview_token_value=preview_token,
-            )
-        except Exception as e:
-            return client_error(
-                "set_mss_policy_inputs_failed",
-                log_exc=e,
-                context="set_cvp_mss_policy_inputs",
-            )
+        return studios_write_set_mss_inputs(
+            workspace_id,
+            expected_inputs_sha256,
+            operations,
+            confirm=confirm,
+            preview_token=preview_token,
+        )
 
 
 def main(args):

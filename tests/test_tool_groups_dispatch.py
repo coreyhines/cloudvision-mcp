@@ -4,7 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cvp_mcp.tool_groups import build_groups
+from cvp_mcp.tool_groups import build_groups, build_write_group
+from cvp_mcp.write_access import WRITES_ENV
 
 
 def test_inventory_get_returns_dict_not_str(monkeypatch):
@@ -176,6 +177,53 @@ def test_studios_description_cross_references_designed_config():
 
     assert "compliance" in studios.description
     assert "designed_config" in studios.description
+
+
+def test_studios_write_group_catalog_and_confirm_refusal(monkeypatch):
+    """Write dispatch preserves preview-token refusal without making a write."""
+    from cvp_mcp.members import studios_write
+
+    monkeypatch.setenv(WRITES_ENV, "1")
+    monkeypatch.setattr(
+        studios_write,
+        "env_datadict_from_os",
+        lambda: {"cvtoken": "token", "cvp": "cvp.example.com", "cert": None},
+    )
+    monkeypatch.setattr(
+        "cvp_mcp.grpc.studios.get_json_with_bearer",
+        lambda *_args, **_kwargs: (None, "http_error:404"),
+    )
+    urlopen = MagicMock()
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+
+    group = build_write_group()
+    result = group.execute(
+        {
+            "action": "create_workspace",
+            "workspace_id": "ws-mcp-dispatch-test",
+            "display_name": "dispatch test",
+            "confirm": True,
+        }
+    )
+
+    assert group.name == "studios_write"
+    assert set(group.members) == {
+        "create_workspace",
+        "delete_workspace",
+        "build",
+        "set_description",
+        "set_inputs",
+        "assign_tags",
+        "create_studio",
+        "delete_studio",
+        "set_mss_inputs",
+    }
+    assert "never submits" in group.description
+    assert "never approves/executes change controls" in group.description
+    assert "dry-run unless confirm + matching preview_token" in group.description
+    assert "drafts only ws-mcp-*" in group.description
+    assert result["object"]["error"]["code"] == "preview_required"
+    urlopen.assert_not_called()
 
 
 @pytest.mark.parametrize(

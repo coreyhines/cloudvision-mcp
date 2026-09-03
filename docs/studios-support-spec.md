@@ -131,11 +131,11 @@ Each tool returns `tool_envelope(...)` only. List tools use `items`; singletons 
 `object`. Never add parallel top-level keys besides envelope fields (`collected_at`,
 `coverage`, `warnings`, `data_source`, `device_id` when applicable).
 
-Register in `cloudvision_mcp.py` with `@mcp.tool()` and `@tool_enabled("<same_name>")`.
-Today `tool_enabled(tool_name)` only honors `CVP_MCP_DISABLED_TOOLS` at **call time**; it
-does **not** take `writes=True`. Phase 1 uses that decorator as-is. Phase 2 adds a
-**separate** write registry gate (below), not a fictional `writes=` argument on the
-current decorator.
+Register grouped tools in `cloudvision_mcp.py` by passing each `GroupedTool` from
+`build_groups()` to `register_grouped_tool()`. Member actions dispatch through their
+group name, and `CVP_MCP_DISABLED_TOOLS` accepts `group` or `group.action` keys at call
+time. Register `studios_write` only when the separate write registry gate is enabled
+(below).
 
 Reuse `fetch_uri_with_bearer` for raw/keyed single-object GET; use
 `get_ndjson_all_values_with_bearer` for `/all`. Do not use `get_json_with_bearer` on
@@ -344,8 +344,8 @@ After `REQUEST_START_BUILD`:
    - **Terminal failure:** `BUILD_STATE_FAIL`, `BUILD_STATE_CANCELED`
    - **Non-terminal (keep polling):** `BUILD_STATE_IN_PROGRESS` (protobuf; not seen in
      historical `/all` dump), plus any unknown value → warn and keep polling until timeout
-3. Do not call `submit_cvp_workspace` unless state is `BUILD_STATE_SUCCESS` and build
-   `error` is empty.
+3. After a successful, error-free build, submit the workspace only in the CloudVision
+   UI. This MCP server does not expose a submit action.
 
 Observed companion enums (not build state, but useful for envelopes):
 

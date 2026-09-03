@@ -1,4 +1,5 @@
 from cvp_mcp.grouped_tool import GroupedTool, MemberSpec
+from cvp_mcp.rate_limit import reset_rate_limit_buckets
 
 
 def _echo(**kwargs):
@@ -70,3 +71,56 @@ def test_strips_wrong_action_fields_and_omits_none():
 def test_empty_string_required_is_missing():
     out = _group().execute({"action": "get", "device_id": "  "})
     assert out["error"] == "action_args_invalid"
+
+
+def test_disable_whole_group(monkeypatch):
+    monkeypatch.setenv("CVP_MCP_DISABLED_TOOLS", "inventory")
+    out = _group().execute({"action": "get", "device_id": "x"})
+    assert out["error"] == "tool_disabled"
+    assert out["tool"] == "inventory"
+
+
+def test_disable_whole_group_also_disables_help(monkeypatch):
+    monkeypatch.setenv("CVP_MCP_DISABLED_TOOLS", "inventory")
+    out = _group().execute({"action": "help"})
+    assert out["error"] == "tool_disabled"
+    assert out["tool"] == "inventory"
+
+
+def test_disable_one_action(monkeypatch):
+    monkeypatch.setenv("CVP_MCP_DISABLED_TOOLS", "inventory.search")
+    assert (
+        _group().execute({"action": "get", "device_id": "x"})["echo"]["device_id"]
+        == "x"
+    )
+    assert (
+        _group().execute({"action": "search", "query": "abc"})["error"]
+        == "tool_disabled"
+    )
+    assert (
+        _group().execute({"action": "search", "query": "abc"})["tool"]
+        == "inventory.search"
+    )
+    assert "actions" in _group().execute({"action": "help"})
+
+
+def test_rate_limit_exceeded_on_member():
+    reset_rate_limit_buckets()
+    group = GroupedTool(
+        name="inventory",
+        description="Inventory ops",
+        members={
+            "list": MemberSpec(
+                action="list",
+                description="List all",
+                required=[],
+                properties={},
+                call=_echo,
+                rate_limit_key="inventory.list",
+            ),
+        },
+    )
+    for _ in range(6):
+        assert group.execute({"action": "list"}) == {"echo": {}}
+    out = group.execute({"action": "list"})
+    assert out == {"error": "rate_limit_exceeded", "tool": "inventory.list"}

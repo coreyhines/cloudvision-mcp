@@ -6,7 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from cvp_mcp.rate_limit import check_rate_limit
 from cvp_mcp.schema_fields import SHARED_FIELDS, is_shared
+from cvp_mcp.tool_access import disabled_tools, is_tool_disabled
 
 HELP_ACTION = "help"
 
@@ -143,6 +145,16 @@ class GroupedTool:
             cleaned[key] = value
         return cleaned
 
+    def _tool_disabled_envelope(self, action: str) -> dict[str, str] | None:
+        action_key = f"{self.name}.{action}"
+        disabled = disabled_tools()
+        if is_tool_disabled(action_key):
+            tool = action_key if action_key in disabled else self.name
+            return {"error": "tool_disabled", "tool": tool}
+        if is_tool_disabled(self.name):
+            return {"error": "tool_disabled", "tool": self.name}
+        return None
+
     def _missing_required(
         self, member: MemberSpec, cleaned: dict[str, Any]
     ) -> list[str]:
@@ -160,6 +172,8 @@ class GroupedTool:
         action = params.pop("action", None)
 
         if action == HELP_ACTION:
+            if is_tool_disabled(self.name):
+                return {"error": "tool_disabled", "tool": self.name}
             return self.help()
 
         if action not in self.members:
@@ -180,5 +194,14 @@ class GroupedTool:
                 "action": action,
                 "required": missing,
             }
+
+        disabled = self._tool_disabled_envelope(action)
+        if disabled is not None:
+            return disabled
+
+        if member.rate_limit_key is not None:
+            rate_err = check_rate_limit(member.rate_limit_key)
+            if rate_err is not None:
+                return rate_err
 
         return member.call(**cleaned)

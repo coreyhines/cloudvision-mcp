@@ -1,6 +1,7 @@
 # Spec: Studios Phase 2 final — MSS root Inputs CAS, submit retirement, standing live verify
 
-Status: **revised after adversarial review, awaiting approval** (2026-09-02;
+Status: **implemented on `feat/studios-phase2-final`** (2026-09-02; capture gate
+passed, §D.4 corrected from the fixture;
 findings F-C1–F-C4, F-I1–F-I8 applied — see
 `docs/research/studios-phase2-final-adversarial-review.md`). Supersedes
 `docs/studios-phase2-3-mss-root-inputs-spec.md` (its content is carried here with
@@ -182,6 +183,17 @@ service or rule is added; 2.3 as written cannot reproduce that and **must not be
 implemented** until the mapper contract is understood. Record the finding and
 re-spec. If not found, proceed.
 
+**Outcome (2026-09-02 capture):** passed. `hiddenIntersectedGroupsMapper` is `[]`,
+`hiddenPolicyIdMapper` still only `POL1 → 256`, device/VRF mappers unchanged. The UI
+wrote nothing outside the four collections. Fixture committed; pinned by
+`test_fixture_hidden_mappers_do_not_reference_the_change`.
+
+Corrections the fixture forced on §D.4 (fixture wins): `monitorName` is stored on
+**drop** rules too (`ztx-7230` on all three); rules carry **no `description`**
+key; new service configurations **omit `icmpTypes`** (old ones have `"all"`);
+the DNS service is `dns-server-port` with three single-port configurations, not a
+comma list; `direction` is a JSON boolean; `packet` is `"any"`.
+
 ### D.1 Read side (`get_cvp_studio_inputs`)
 
 Add `inputs_sha256` to every item, computed with `inputs_digest.inputs_sha256`
@@ -239,8 +251,8 @@ with path. Types are checked. **Subject to the D.0 fixture.**
 | Collection | Accepted keys | Constraints |
 | --- | --- | --- |
 | `staticGroups` | `name`, `membership.members` | `members`: non-empty list of IPv4/IPv6 CIDR strings (`ipaddress.ip_network(strict=False)`); **`prefixlen == 0` refused** (`0.0.0.0/0`, `::/0` are `<any>` under another name — F-C2). `name` must not collide with any `acceptedGroups[].name` (F-C4). No `staticExceptionList` / `enableStaticExceptionList`. |
-| `services` | `name`, `protocols`, `configurations[]` with `protocol`, `sourceports`, `destinationports`, `icmpTypes` | `protocols` ∈ `TCP/UDP`, `ICMP`. `protocol` ∈ `tcp`, `udp`, `icmp`. Ports: `all`, single `1–65535`, comma list, `a-b` range, or comma list of those. `icmpTypes`: `all` or comma list of ints 0–255. `configurations` non-empty. |
-| `rules` | `name`, `description`, `action`, `sources`, `destinations`, `services`, `packet`, `direction`, `monitorName` | `action` ∈ `forward`, `drop`. `sources`/`destinations`: non-empty lists of group names or `<any>`. `services`: non-empty list of service names or `<any>`. `packet` ∈ `any`. `direction`: type per fixture. `monitorName` only with `action: forward` and must name an existing `monitorObjects[].name`. |
+| `services` | `name`, `protocols`, `configurations[]` with `protocol`, `sourceports`, `destinationports`, optional `icmpTypes` | `protocols` ∈ `TCP/UDP`, `ICMP`. `protocol` ∈ `tcp`, `udp`, `icmp`. Ports: `all`, single `1–65535`, `a-b` range, or comma list of those. `icmpTypes` (optional): `all` or comma list of ints 0–255. `configurations` non-empty. |
+| `rules` | `name`, `action`, `sources`, `destinations`, `services`, `packet`, `direction`, optional `monitorName` | No `description` (the wire has none). `action` ∈ `forward`, `drop`. `sources`/`destinations`: non-empty lists of group names or `<any>`. `services`: non-empty list of service names or `<any>`. `packet` = `any`. `direction`: bool. `monitorName` allowed on any action, must name an existing `monitorObjects[].name`. |
 | `policies` | `name`, `description`, `policyRules` | `policyRules`: list of rule names, unique. |
 
 **Referential integrity** on the **result** document after all ops: every group
@@ -359,11 +371,12 @@ Audit INFO per parent: tool, `workspace_id`, `studio_id`, outcome,
 Operator intent: drop UDP/67 both ways and UDP/TCP 53 + UDP 5353 **to** the PDU,
 ahead of the forward-all `monitor` rule in `POL1`.
 
-**Regenerate the JSON below from the D.0 fixture before use** (F-I7). The entry
-bodies here (`direction: true`, `packet: "any"`, `protocols: "TCP/UDP"`) are
-what the operator typed into the UI, transcribed from memory; the fixture holds
-the same three rules and three services as the wire actually stored them, and
-that wins. This block is illustrative until then.
+The JSON below is illustrative (transcribed before the capture). The canonical
+form is `_worked_example_ops()` in `tests/test_studio_mss_inputs.py`, built from
+the fixture entries verbatim: no rule `description`, `monitorName: "ztx-7230"` on
+every rule, no `icmpTypes`, and the DNS service named `dns-server-port` with three
+single-port configurations. `test_worked_example_reproduces_post_change_fixture`
+proves those ops turn the pre-change document into the fixture, digest-equal.
 
 ```
 get_cvp_studio_inputs(studio_id="studio-mss-service")  -> items[0].inputs_sha256 = "<digest>"

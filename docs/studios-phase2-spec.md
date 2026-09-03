@@ -1,7 +1,7 @@
 # Spec: Studios Phase 2 — workspace write tools
 
-Status: **2.0 is implementable** (description CAS on Access Interface Configuration).
-2.1 submit remains gated. AssignedTags `/all` is live on this tenant. Revised 2026-08-22 after live
+Status: 2.0 / 2.1 / 2.2 shipped. **Submit retired 2026-09-02**; 2.3 MSS root Inputs CAS
+and the standing live verifies are in `docs/studios-phase2-final-spec.md`. AssignedTags `/all` is live on this tenant. Revised 2026-08-22 after live
 Inputs capture + adversarial review
 (`docs/research/studios-phase2-adversarial-review.md`). Parent:
 `docs/studios-support-spec.md`.
@@ -19,11 +19,9 @@ to the snake_case in the envelope.
 | Envelope helper | `tool_envelope(..., obj=)` → JSON key `object` |
 | Call-time deny list | `CVP_MCP_DISABLED_TOOLS` via `tool_enabled` |
 | Writes env | `CLOUDVISION_MCP_ALLOW_WRITES` exact `"1"` |
-| Submit env | `CLOUDVISION_MCP_ALLOW_SUBMIT` exact `"1"` |
 | Resource prefix | `/api/resources/` (Phase 1 `cvp_mcp/grpc/studios.py`) |
 | Mainline workspace | `""` (empty string). MCP **never** writes it. |
-| Build request enum | `REQUEST_START_BUILD` |
-| Submit request enum | `REQUEST_SUBMIT` |
+| Build request enum | `REQUEST_START_BUILD` (the **only** allowed request; submit retired) |
 | Build success | `BUILD_STATE_SUCCESS` |
 | Build fail / cancel | `BUILD_STATE_FAIL`, `BUILD_STATE_CANCELED` |
 | Draft workspace | `WORKSPACE_STATE_PENDING` |
@@ -38,7 +36,7 @@ to the snake_case in the envelope.
 | Write helper module | `cvp_mcp/grpc/studios_write.py` |
 | Gate module | `cvp_mcp/write_access.py` |
 
-Unset, `""`, `"0"`, `"true"`, `"yes"`, and JSON `true` are **off** for both env gates. Only the stripped string `"1"` is on.
+Unset, `""`, `"0"`, `"true"`, `"yes"`, and JSON `true` are **off** for the writes env gate. Only the stripped string `"1"` is on.
 
 ## Why, and what 2.0 is for
 
@@ -57,18 +55,20 @@ That job does **not** need: tag replace, studio create/delete, or submit.
 | Slice | Tools | Ship when |
 | --- | --- | --- |
 | **2.0** | `create_cvp_workspace`; `delete_cvp_workspace`; `set_cvp_access_interface_description`; `build_cvp_workspace` | Writes env `"1"`. Locator fixture: `tests/fixtures/inputs_ethernet6_720xp24_locator.json` |
-| **2.1** | `assign_cvp_studio_tags` (no unassign-all); generic `set_cvp_studio_inputs`; `submit_cvp_workspace` | Tags: expected-current required. Submit: **unregistered** until Workspace `lastModifiedAt` confirmed |
-| **2.2** | `create_cvp_studio`; `delete_cvp_studio` | After 2.0; templates must never contain interface shutdown; no ChangeControlConfig |
+| **2.1** | `assign_cvp_studio_tags` (no unassign-all); generic `set_cvp_studio_inputs` | Shipped. Tags: expected-current required (`""` valid = unassigned) |
+| **2.2** | `create_cvp_studio`; `delete_cvp_studio` | Shipped. Templates must never contain interface shutdown; no ChangeControlConfig |
+| **2.3** | `set_cvp_mss_policy_inputs` | `docs/studios-phase2-final-spec.md` §D |
+| **Submit** | retired 2026-09-02 | never — the human submits the reviewed workspace in the CVP UI |
 
 `get_cvp_studio_assigned_tags` can ship with 2.0 as a **best-effort read** (`GET AssignedTags/all` is live; no-row is `query=""`) but is **not** required for description CAS. Generic `set_cvp_studio_inputs` is **not** 2.0.
 
 ## Goals
 
-1. Same CVP loop as a human: workspace → inputs → build → human review → optional submit.
+1. Same CVP loop as a human: workspace → inputs → build → human review and submit in the CVP UI.
 2. Default **dry-run**. Mutate only with `confirm=True` and writes env `"1"`.
    Changing env after process start does **not** register tools; restart the MCP
    process. Dry-run is unavailable when writes are unregistered (tools are absent).
-3. Submit is a second opt-in and never approves/executes a CC.
+3. The MCP never submits. The human reviews the workspace diff in the CVP UI and submits there.
 4. Never write mainline. Never call ChangeControlConfig.
 5. Never emit `shutdown` / `no shutdown` on a switchport from MCP.
 
@@ -138,10 +138,9 @@ Enforce **before** building the HTTP request. Tests must hit the helper directly
    - `/api/resources/studio/v1/StudioConfig` (2.2)
    Any other path, including `changecontrol/*` and `configlet/*`, raises.
 2. **`request` allowlist:** if `request` is present on the **top-level body**, value
-   ∈ `{REQUEST_START_BUILD, REQUEST_SUBMIT}` (the only values observed on this
-   tenant). Reject **any other string**. Do not hard-code guessed names such as
-   `REQUEST_SUBMIT_FORCE` / `REQUEST_ROLLBACK` until `arista.workspace.v1.Request`
-   is captured in a fixture.
+   must be `REQUEST_START_BUILD`. Reject **any other string** (`request_not_allowed`),
+   including `REQUEST_SUBMIT` — submit is retired, not gated. Do not hard-code
+   guessed names such as `REQUEST_SUBMIT_FORCE` / `REQUEST_ROLLBACK`.
 3. **Envelope key denylist** (WorkspaceConfig / StudioConfig **only**, top-level and
    `requestParams` / `request_params`): reject `start`, `schedule`. Do **not** scan
    the InputsConfig `inputs` JSON string for these keys — that false-positives
@@ -157,13 +156,11 @@ Registration of write tools is a **separate** filter in `cvp_mcp/write_access.py
 
 | Gate | On | Default | Off |
 | --- | --- | --- | --- |
-| `CLOUDVISION_MCP_ALLOW_WRITES` | `"1"` | off | Do not register 2.0/2.1/2.2 writes. Runtime: `error="writes_disabled"`, no POST/DELETE. |
-| `CLOUDVISION_MCP_ALLOW_SUBMIT` | `"1"` **and** `SUBMIT_STALENESS_FIELD` set | off | Submit unregistered. Runtime: `submit_disabled`. |
+| `CLOUDVISION_MCP_ALLOW_WRITES` | `"1"` | off | Do not register 2.0/2.1/2.2/2.3 writes. Runtime: `error="writes_disabled"`, no POST/DELETE. |
 | `CVP_MCP_DISABLED_TOOLS` | comma names | empty | Independent deny |
 | `confirm` | every write | `False` | Dry-run: validate + documented GETs only. **Not sufficient alone.** |
 | `workspace_id` | `strip()`, non-empty, `^ws-mcp-`, not `^builtin-` (case-insensitive) | — | else `workspace_id_required` / `builtin_workspace_forbidden` / `invalid_workspace_id` |
 | `preview_token` | required on `confirm=True` | — | `preview_required` |
-| `SUBMIT_STALENESS_FIELD` | non-`None` constant in `write_access.py` | `None` | Submit **unregistered** even if both env vars are `"1"` |
 
 Dry-run order:
 
@@ -178,9 +175,6 @@ status → `preflight_failed`, no POST/DELETE. A warning is never enough to proc
 
 `get_cvp_designed_config` is **mainline**. It is a before-snapshot, not the
 workspace review. Humans review the workspace diff in the CVP UI.
-
-Helper: `REQUEST_SUBMIT` is allowed only when the submit env is `"1"` **and**
-`SUBMIT_STALENESS_FIELD` is set. The helper checks this; tools must not bypass it.
 
 DELETE uses `delete_resource_config(path, params)` — path matched exactly
 (no query string in the allowlist entry); query values URL-encoded by the helper.
@@ -202,12 +196,12 @@ Hard-code `request` per tool. Never take it from the model.
      poll get_cvp_workspace_build until BUILD_STATE_SUCCESS|FAIL|CANCELED
 
 2.1  assign_cvp_studio_tags    (optional; expected_current_query required)
-     submit_cvp_workspace       (only if registered)
+2.3  set_cvp_mss_policy_inputs (MSS Service root; digest CAS)
 
-     human approves/executes CC in CVP UI — never MCP
+     human reviews the workspace diff, submits, approves/executes CC in CVP UI — never MCP
 ```
 
-Submit updates **mainline designed config** even with no device CC executed.
+Human submit (CVP UI) updates **mainline designed config** even with no device CC executed.
 This CVaaS tenant (2026-08-20): submit CCs stay **pending approval**. Re-check if
 tenant Change Control settings change.
 
@@ -288,7 +282,7 @@ On refusal, `error` is `{ "code": "<code>", "message": "...", "details": {} }`.
 `coverage` is `none` on refuse, `full` on preview/accepted when preflights ran.
 Do not put `error` as a top-level envelope key.
 
-Normative codes: `writes_disabled`, `submit_disabled`, `workspace_id_required`,
+Normative codes: `writes_disabled`, `workspace_id_required`,
 `builtin_workspace_forbidden`, `workspace_not_found`, `workspace_id_exists`,
 `workspace_state_unknown`, `workspace_not_pending`, `build_in_progress`,
 `workspace_read_failed`, `studio_not_found`, `studio_immutable`,
@@ -349,7 +343,9 @@ allowed here — that is how a studio emits `shutdown` without the word appearin
 **No** `replace_all_inputs` until a later
 explicit revision. Empty `path_values` → `root_path_forbidden`. Resource
 `path.values` is not a JSON key path into `inputs`. Access Interfaces' only
-Resource row is `[]` and stays 2.0 `set_cvp_access_interface_description`.
+Resource row is `[]` and stays 2.0 `set_cvp_access_interface_description`. MSS Service
+(`studio-mss-service`) is also a single root row; its edits are **2.3**
+`set_cvp_mss_policy_inputs` (`docs/studios-phase2-final-spec.md` §D), not this tool.
 
 ### `build_cvp_workspace` (2.0)
 
@@ -374,16 +370,11 @@ On this tenant `responses.values` is keyed by `request_id` ≈ `buildId`. Confir
 | **Replace** | Whole query. Empty **new** query is **forbidden** in 2.1 (no unassign-all). |
 | **Preflight** | Overlay-then-mainline (draft overlay if present, else mainline `""`). Omitted/`None`/non-str `expected_current_query` → `expected_current_query_required`. Mismatch vs resolved current → `current_query_mismatch`. Dry-run: previous query; device preview or `target_preview_unresolved`. |
 
-### `submit_cvp_workspace` (2.1, unregistered until staleness known)
+### `submit_cvp_workspace`
 
-| | |
-| --- | --- |
-| **Endpoint** | `POST /api/resources/workspace/v1/WorkspaceConfig` |
-| **Body** | `REQUEST_SUBMIT` only |
-| **Parameters** | `workspace_id: str`, `build_id: str`, `workspace_staleness_token: str`, `request_id: str \| None = None`, `confirm: bool = False`, `allow_submit: bool = False` — `build_id` and `workspace_staleness_token` have **no defaults**; empty → `staleness_token_required`. |
-| **Gates** | Writes env `"1"`; `CLOUDVISION_MCP_ALLOW_SUBMIT=="1"`; `SUBMIT_STALENESS_FIELD` set; `confirm=True`; `allow_submit=True`; `preview_token` match. Env off beats `allow_submit`. |
-| **Staleness check** | `build_id` + Workspace `last_modified_at` (wire `lastModifiedAt`; already on Phase 1 `get_cvp_workspace`). Re-GET workspace + build; refuse unless `BUILD_STATE_SUCCESS`, token matches, no edits after that build. Proves the workspace is unchanged, **not** that a human reviewed. Humans: CVP UI diff + CC approval. Still **2.1** / `CLOUDVISION_MCP_ALLOW_SUBMIT`. |
-| **Returns** | `outcome: "accepted"`, `done: false`. `cc_ids` only if in that POST body. Empty `ccIds` = unknown, not “no CC.” Never `outcome: "succeeded"`. |
+Retired 2026-09-02. Never registered; library removed. The MCP stops at build;
+the human reviews and submits the workspace in the CVP UI. See
+`docs/studios-phase2-final-spec.md` §A.
 
 ### `create_cvp_studio` / `delete_cvp_studio` (2.2)
 
@@ -391,7 +382,7 @@ Upsert StudioConfig / `remove: true`. Refuse `immutable` / `from_package`.
 MCP studio templates **must never** contain interface `shutdown` / `no shutdown`.
 No `allow_disruptive` exception. Also refuse `no interface`, `reload`,
 `write erase`. Prefer inputs on existing studios. Delete sequence: unassign tags
-→ remove studio in the **same** workspace → build → review → submit.
+→ remove studio in the **same** workspace → build → human review and submit in the CVP UI.
 
 ## Caller inputs
 
@@ -402,7 +393,6 @@ No `allow_disruptive` exception. Also refuse `no interface`, `reload`,
 | Tags | query | `get_cvp_studio_assigned_tags` |
 | Workspace | unique id | caller; GET uniqueness |
 | Build | `request_id` | UUIDv4 if omitted |
-| Submit | `build_id` + `last_modified_at` | after human review |
 
 ## Files (when implementing 2.0)
 
@@ -430,14 +420,13 @@ Tools:
 
 - `confirm=False` → no mutate HTTP.
 - Writes unregistered unless `CLOUDVISION_MCP_ALLOW_WRITES=="1"`.
-- Submit unregistered unless slice 2.1 **and** both env vars **and** staleness fixture.
 - 2.1 generic Inputs: empty `path_values` → `root_path_forbidden`. 2.0 description CAS **must** POST `path.values: []` for this studio.
 - Delete non-`WORKSPACE_STATE_PENDING` → refuse.
 - Lint: interface `shutdown` in template/inputs.
 - Staging: create → description CAS → build → delete workspace, no submit; ids `ws-mcp-test-*`.
 - `expected_current_description` mismatch → `current_description_mismatch`, no POST.
 - Mutate with missing/mismatched `preview_token` → `preview_required`, no HTTP.
-- Submit unregistered when `SUBMIT_STALENESS_FIELD is None` even if both env vars are `"1"`.
+- `REQUEST_SUBMIT` on a WorkspaceConfig body → `request_not_allowed`, no request built.
 - `adapterDetails.enabled: false` on generic Inputs → `input_key_not_allowed`, no HTTP.
 
 ## Open (blocking)
@@ -446,9 +435,9 @@ Tools:
 
 | Item | Blocks |
 | --- | --- |
-| InputsConfig POST of a patched root tree (read shape captured; POST untried) | First 2.0 dry-run + test workspace |
-| Full `Workspace.Request` protobuf enum | Helper allowlist (observed: `REQUEST_START_BUILD`, `REQUEST_SUBMIT`) |
-| Workspace `last_modified_at` | **Captured on Workspace/all.** Phase 1 keyed `get_cvp_workspace` already maps it. 2.1 submit uses `object.last_modified_at`. |
+| InputsConfig POST of a patched root tree (read shape captured; POST untried) | First 2.0 live loop — still open, `docs/studios-phase2-final-spec.md` §B |
+| Full `Workspace.Request` protobuf enum | **Closed 2026-09-02:** submit retired; allowlist is `{REQUEST_START_BUILD}` |
+| Workspace `last_modified_at` | **Closed 2026-09-02:** submit retired; no staleness proof needed |
 | Tag query → device serial preview | 2.1 dry-run warning only |
 | Server reject of mainline `workspaceId=""` on InputsConfig | Client already refuses; probe optional |
 | CC auto-approve/execute | **Closed 2026-08-20:** pending; human execute |
@@ -472,7 +461,8 @@ Tools:
 | `set_cvp_studio_inputs` | 2.1 generic; no root replace |
 | `build_cvp_workspace` | 2.0 |
 | `assign_cvp_studio_tags` | 2.1 |
-| `submit_cvp_workspace` | 2.1 unregistered until staleness |
+| `submit_cvp_workspace` | retired 2026-09-02 (never registered; library removed) |
 | `create_cvp_studio` / `delete_cvp_studio` | 2.2 |
+| `set_cvp_mss_policy_inputs` | 2.3 (`docs/studios-phase2-final-spec.md`) |
 
 No ChangeControlConfig. No configlets.

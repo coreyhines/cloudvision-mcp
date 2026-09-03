@@ -363,12 +363,13 @@ Polling is **only** in read tools / the agent loop — never inside a write tool
 
 Phase 1 is shipped. Phase 2.0 (description CAS) is **specified from live Inputs**
 (root document + `tags.query` locator). Do not register write tools until a human
-sets `CLOUDVISION_MCP_ALLOW_WRITES=1`. Submit needs a second env gate. Change
-Control execute stays in the CVP UI.
+sets `CLOUDVISION_MCP_ALLOW_WRITES=1`. The MCP never submits; the human submits the
+reviewed workspace in the CVP UI (submit retired 2026-09-02,
+`docs/studios-phase2-final-spec.md`). Change Control execute stays in the CVP UI.
 
 The Phase 2 spec is sliced: **2.0** description-only workspace inputs + build;
-**2.1** tag assign + submit (submit unregistered until Workspace staleness is
-confirmed); **2.2** studio create/delete. Adversarial review:
+**2.1** tag assign + generic Inputs; **2.2** studio create/delete; **2.3** MSS Service
+root Inputs CAS (`docs/studios-phase2-final-spec.md`). Submit: retired. Adversarial review:
 [`docs/research/studios-phase2-adversarial-review.md`](research/studios-phase2-adversarial-review.md).
 
 ## Testing (phase 1)

@@ -435,7 +435,7 @@ Tools:
 
 | Item | Blocks |
 | --- | --- |
-| InputsConfig POST of a patched root tree (read shape captured; POST untried) | First 2.0 live loop — still open, `docs/studios-phase2-final-spec.md` §B |
+| InputsConfig POST of a patched root tree | **Closed 2026-09-02:** live §B verified on deployed image (operator notes outside this repo) |
 | Full `Workspace.Request` protobuf enum | **Closed 2026-09-02:** submit retired; allowlist is `{REQUEST_START_BUILD}` |
 | Workspace `last_modified_at` | **Closed 2026-09-02:** submit retired; no staleness proof needed |
 | Tag query → device serial preview | 2.1 dry-run warning only |

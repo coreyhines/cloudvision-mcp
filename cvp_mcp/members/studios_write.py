@@ -245,8 +245,15 @@ def members() -> dict[str, MemberSpec]:
     }
     studio_id = {"studio_id": {"type": "string", "description": "Studio id."}}
     confirmation = {
-        "confirm": {"type": "boolean", "default": False},
-        "preview_token": {"type": "string"},
+        "confirm": {
+            "type": "boolean",
+            "default": False,
+            "description": "Set true only when supplying the matching preview token.",
+        },
+        "preview_token": {
+            "type": "string",
+            "description": "Token returned by the matching dry-run preview.",
+        },
     }
     return {
         "create_workspace": MemberSpec(
@@ -291,10 +298,25 @@ def members() -> dict[str, MemberSpec]:
             ],
             properties={
                 **workspace_id,
-                "device_id": {"type": "string"},
-                "interface": {"type": "string"},
-                "expected_current_description": {"type": "string"},
-                "new_description": {"type": "string"},
+                "device_id": {
+                    "type": "string",
+                    "description": (
+                        "Device id used verbatim in the interface:<iface>@<device_id> "
+                        "tag locator; no hostname, FQDN, or MAC resolution is performed."
+                    ),
+                },
+                "interface": {
+                    "type": "string",
+                    "description": "Interface name used in the target tag locator.",
+                },
+                "expected_current_description": {
+                    "type": "string",
+                    "description": "Current description required for compare-and-set.",
+                },
+                "new_description": {
+                    "type": "string",
+                    "description": "Replacement access-interface description.",
+                },
                 **confirmation,
             },
             call=studios_write_set_description,
@@ -306,8 +328,19 @@ def members() -> dict[str, MemberSpec]:
             properties={
                 **studio_id,
                 **workspace_id,
-                "path_values": {"type": "array", "items": {"type": "string"}},
-                "inputs": {},
+                "path_values": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Exact non-root Studio Inputs resource path to replace."
+                    ),
+                },
+                "inputs": {
+                    "description": (
+                        "Full replacement document at path_values; changed leaves "
+                        "must be allowed by the write helper."
+                    )
+                },
                 **confirmation,
             },
             call=studios_write_set_inputs,
@@ -357,8 +390,21 @@ def members() -> dict[str, MemberSpec]:
             required=["workspace_id", "expected_inputs_sha256", "operations"],
             properties={
                 **workspace_id,
-                "expected_inputs_sha256": {"type": "string"},
-                "operations": {"type": "array", "items": {"type": "object"}},
+                "expected_inputs_sha256": {
+                    "type": "string",
+                    "description": (
+                        "64-hex inputs_sha256 from studios.inputs for "
+                        "studio-mss-service."
+                    ),
+                },
+                "operations": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": (
+                        "MSS edits using op upsert|remove|set_policy_rules against "
+                        "staticGroups|services|rules|policies."
+                    ),
+                },
                 **confirmation,
             },
             call=studios_write_set_mss_inputs,

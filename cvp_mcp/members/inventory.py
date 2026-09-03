@@ -101,7 +101,7 @@ def inventory_search(query: str) -> dict:
             obj={
                 "query": normalized_query,
                 "match_count": len(items),
-                "next_step": "get_cvp_lldp_neighbors(device_id=<serial_number>)",
+                "next_step": ('topology(action="lldp", device_id=<serial_number>)'),
             },
         )
     except Exception as exc:

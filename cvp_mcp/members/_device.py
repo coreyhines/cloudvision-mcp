@@ -25,8 +25,8 @@ def device_not_found_envelope(
         "from candidates and re-call with device_id=<serial_number>."
         if ambiguous and candidate_rows
         else (
-            "No device matched. Run search_cvp_inventory or "
-            "get_cvp_all_inventory first, then pass device_id as the "
+            "No device matched. Run inventory.search or inventory.list first, "
+            "then pass device_id as the "
             "CloudVision serial_number "
             "(not a model name like 720xp)."
         )
@@ -39,7 +39,10 @@ def device_not_found_envelope(
     obj: dict = {
         "device_id_input": device_input,
         "hint": hint,
-        "next_step": "search_cvp_inventory(query) -> get_cvp_lldp_neighbors(serial_number)",
+        "next_step": (
+            'inventory(action="search", query=...) -> '
+            'topology(action="lldp", device_id=<serial_number>)'
+        ),
     }
     if candidate_rows:
         obj["candidates"] = candidate_rows

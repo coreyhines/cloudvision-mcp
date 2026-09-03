@@ -97,6 +97,50 @@ def test_inventory_list_uses_group_rate_limit_key():
     assert group.members["list"].rate_limit_key == "inventory.list"
 
 
+def test_device_not_found_hints_use_grouped_tool_names():
+    """Device resolution guidance never advertises removed flat tools."""
+    from cvp_mcp.members._device import device_not_found_envelope
+
+    result = device_not_found_envelope("missing", "test")
+    guidance = " ".join([result["object"]["hint"], result["object"]["next_step"]])
+
+    assert not any(
+        prefix in guidance for prefix in ("get_cvp_", "search_cvp_", "map_cvp_")
+    )
+    assert "inventory" in guidance
+    assert "topology" in guidance
+
+
+def test_inventory_search_next_step_uses_grouped_tool_name(monkeypatch):
+    """Inventory search guidance never advertises removed flat tools."""
+    from cvp_mcp.members import inventory
+
+    channel_context = MagicMock()
+    channel_context.__enter__.return_value = MagicMock()
+    monkeypatch.setattr(
+        inventory, "env_datadict_from_os", lambda: {"cvp": "cvp.example"}
+    )
+    monkeypatch.setattr(inventory, "createConnection", lambda _env: MagicMock())
+    monkeypatch.setattr(
+        inventory.grpc,
+        "secure_channel",
+        lambda _target, _creds: channel_context,
+    )
+    monkeypatch.setattr(
+        inventory,
+        "search_inventory_candidates",
+        lambda _env, _query, channel=None: ([], []),
+    )
+
+    result = inventory.inventory_search("missing")
+    next_step = result["object"]["next_step"]
+
+    assert not any(
+        prefix in next_step for prefix in ("get_cvp_", "search_cvp_", "map_cvp_")
+    )
+    assert "topology" in next_step
+
+
 def test_batch_a_group_actions_match_frozen_catalog():
     """Extracted groups expose exactly their catalog actions."""
     groups = {group.name: set(group.members) for group in build_groups()}
@@ -222,6 +266,11 @@ def test_studios_write_group_catalog_and_confirm_refusal(monkeypatch):
     assert "never approves/executes change controls" in group.description
     assert "dry-run unless confirm + matching preview_token" in group.description
     assert "drafts only ws-mcp-*" in group.description
+    schema = group.input_schema["properties"]
+    assert "used verbatim" in schema["device_id"]["description"]
+    assert "hostname, FQDN, or MAC resolution" in schema["device_id"]["description"]
+    assert "studios.inputs" in schema["expected_inputs_sha256"]["description"]
+    assert "upsert|remove|set_policy_rules" in schema["operations"]["description"]
     assert result["object"]["error"]["code"] == "preview_required"
     urlopen.assert_not_called()
 

@@ -555,7 +555,7 @@ def assign_cvp_studio_tags(
         "resource_time": None,
     }
 
-    if not confirm:
+    if confirm is not True:
         fields["preview_token"] = preview_token(tool, token_args)
         return _outcome(
             tool,

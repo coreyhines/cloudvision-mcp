@@ -256,6 +256,22 @@ def test_create_confirm_with_stale_token_refuses():
     mocks["urlopen"].assert_not_called()
 
 
+def test_create_string_confirm_remains_preview_even_with_matching_token():
+    with _mocked() as mocks:
+        preview = studios_write.create_cvp_workspace(DATADICT, WORKSPACE, "mcp test")
+        env = studios_write.create_cvp_workspace(
+            DATADICT,
+            WORKSPACE,
+            "mcp test",
+            confirm="false",
+            preview_token_value=_obj(preview)["preview_token"],
+        )
+
+    assert _obj(env)["outcome"] == "preview"
+    assert _obj(env)["dry_run"] is True
+    mocks["urlopen"].assert_not_called()
+
+
 def test_create_confirm_posts_workspace_config_once():
     with _mocked() as mocks:
         preview = studios_write.create_cvp_workspace(DATADICT, WORKSPACE, "mcp test")

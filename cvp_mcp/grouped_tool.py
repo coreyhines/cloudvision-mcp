@@ -69,7 +69,10 @@ class GroupedTool:
 
         for field_name, spec in raw.items():
             if is_shared(field_name):
-                properties[field_name] = SHARED_FIELDS[field_name]
+                merged = dict(SHARED_FIELDS[field_name])
+                if spec.get("description"):
+                    merged["description"] = spec["description"]
+                properties[field_name] = merged
                 continue
             merged = dict(spec)
             text = spec.get("description", field_name)
@@ -151,8 +154,6 @@ class GroupedTool:
         if is_tool_disabled(action_key):
             tool = action_key if action_key in disabled else self.name
             return {"error": "tool_disabled", "tool": tool}
-        if is_tool_disabled(self.name):
-            return {"error": "tool_disabled", "tool": self.name}
         return None
 
     def _missing_required(

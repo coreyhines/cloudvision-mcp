@@ -41,6 +41,14 @@ def test_schema_requires_only_action_and_enums_members_plus_help():
     }
 
 
+def test_shared_field_prefers_member_description():
+    g = _group()
+
+    assert (
+        g.input_schema["properties"]["device_id"]["description"] == "Serial or hostname"
+    )
+
+
 def test_help_lists_required_and_optional():
     help_out = _group().execute({"action": "help"})
     actions = {row["action"]: row for row in help_out["actions"]}

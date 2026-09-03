@@ -52,10 +52,12 @@ Typical patterns:
 Disable sensitive tools via comma-separated env var (server-side):
 
 ```
-CVP_MCP_DISABLED_TOOLS=get_cvp_device_config,get_cvp_routes,get_cvp_bgp_status
+CVP_MCP_DISABLED_TOOLS=device.config,routing.routes,routing.bgp
 ```
 
-Disabled tools return `{"error": "tool_disabled", "tool": "<name>"}`.
+List a group (for example, `routing`) to disable all of its actions, or a
+`group.action` key to disable one action. Disabled tools remain in the catalog
+and return `{"error": "tool_disabled", "tool": "<group or group.action>"}`.
 
 ### URI fetch allowlist
 
@@ -122,26 +124,39 @@ Connector tools (LLDP, inventory, topology map, etc.) read **`CVP`** and **`CVPT
 
 Responses for the newer tools use a common envelope: `device_id`, `collected_at`, `data_source`, `coverage`, `warnings`, and either `items` or `object`.
 
-| Tool | Purpose | Typical `data_source` |
+Every MCP tool takes a required `action`; use `action=help` to inspect that
+group's parameters and defaults.
+
+| Group tool | Actions |
+| --- | --- |
+| `inventory` | `get`, `list`, `search` |
+| `endpoints` | `get`, `list`, `filter` |
+| `device` | `config`, `interfaces`, `vlans`, `ip_interfaces`, `features`, `health` |
+| `overlay` | `evpn`, `vxlan` |
+| `routing` | `bgp`, `routes` |
+| `topology` | `lldp`, `map` |
+| `events` | `list`, `search` |
+| `flow` | `get` |
+| `probes` | `list`, `get` |
+| `compliance` | `bugs`, `lifecycle`, `designed_config`, `config_status`, `image_status` |
+| `meta` | `probe_apis` |
+| `studios` | `list`, `get`, `inputs`, `search_templates`, `list_workspaces`, `get_workspace`, `get_build`, `tags` |
+
+| `group.action` | Purpose | Typical `data_source` |
 | --- | --- | --- |
-| `get_cvp_probe_arista_apis` | Installed `arista.*.v1` Python API bundles | local package introspection |
-| `get_cvp_device_config` | Config summary URIs + optional running-config body | `resource_api:configstatus.v1`; if URIs/APIs are missing, **Connector fallback** scans Sysdb/Smash + analytics `Devices/...` paths for a running-config-like blob |
-| `get_cvp_interfaces` | Interface admin/oper, speed, MTU, counters | `connector:device:Sysdb/interface` |
-| `get_cvp_lldp_neighbors` | LLDP neighbor rows (`remoteSystem` and `remoteSystemByMsap` per port; `neighbor_source` on each row). Tries **literal** `portStatus/Ethernet*` paths (Telemetry Browser style) before wildcards; optional args `port_name`, `remote_neighbor_key` when Aeris shows a fixed path. Normalized rows now include rich remote metadata when present: management addresses, system description, capabilities, VLAN/PVID hints, and LLDP-MED payloads. | `connector:device:Sysdb/l2discovery/lldp` (falls back to legacy `Sysdb/lldp` paths) |
-| `map_cvp_network_topology` | Full-fabric LLDP sweep over CVP inventory. Default `lldp_port_source=auto` probes LLDP only on **Sysdb oper-up** physical ports (`Ethernet*`, `Management*`, `Port-Channel*`) when Connector returns interface data (much faster than scanning every `Ethernet1..N`); if that list is empty, it falls back to the model-based `Ethernet1..N` sweep. Use `lldp_port_source=oper_up_only` to **disable fallback sweep** and skip devices with no oper-up list, or `lldp_port_source=full_range` for the legacy full sweep. Then probes additional neighbor indices (`2..8`) on ports where LLDP returned data to capture multi-neighbor adjacencies. Returns `topology` (nodes, links, edges, stats) plus `text` in `output_format` **json**, **mermaid**, **table** (markdown), or **containerlab** (YAML lab sketch — **images are placeholders**). Optional `device_serial_allowlist`, `include_inactive_devices`, `topology_name`, `topology_node_scope` (`full_inventory` vs `connected` — only nodes that have LLDP edges). Response now includes `execution_guidance` with batching best practices for agents. | `inventory+connector:lldp_topology_scan` |
-| `get_cvp_vlans` | Switchport / VLAN hints | `connector:device:Sysdb/bridging` |
-| `get_cvp_ip_interfaces` | L3 addressing hints | `connector:device:Sysdb/ip` |
-| `get_cvp_events` | Structured CVP events (`GetAll` + filters) | `resource_api:event.v1` |
-| `search_cvp_events` | Substring search over normalized event fields | `resource_api:event.v1+client_search` |
-| `get_cvp_bgp_status` | BGP snapshot | `connector:device:Sysdb/routing/bgp` |
-| `get_cvp_routes` | RIB-like entries | `connector:device:Sysdb/routing` |
-| `get_cvp_features` | Feature-related Sysdb | `connector:device:Sysdb/feature` |
-| `get_cvp_evpn` | EVPN Sysdb | `connector:device:Sysdb/evpn` |
-| `get_cvp_vxlan` | VxLAN Sysdb | `connector:device:Sysdb/vxlan` |
-| `get_cvp_system_health` | Version / environment / platform | `connector:device:Sysdb/sys+environment` |
-| `get_cvp_endpoint_location` | Single endpoint lookup by IP, MAC, or hostname (DNS-resolve FQDN → IP when needed) | `resource_api:endpointlocation.v1` (`GetOne`) |
-| `get_cvp_all_endpoint_locations` | **LLDP-seeded** bulk endpoint locations: inventory → LLDP neighbors → deduped search keys → `GetSome` (with `GetOne` fallback). Returns `devices`, `endpoints`, `seed_stats`, `warnings`. | `inventory+connector:lldp` → `resource_api:endpointlocation.v1` |
-| `get_cvp_endpoint_locations_filtered` | Same LLDP-seeded pipeline as above, scoped to one switch when `device_id` resolves; client-side filter by serial, interface, and/or VLAN after lookup. | same as bulk |
+| `meta.probe_apis` | Installed `arista.*.v1` Python API bundles | local package introspection |
+| `device.config` | Config summary URIs + optional running-config body | `resource_api:configstatus.v1`; Connector fallback scans Sysdb/Smash and analytics paths |
+| `device.interfaces` | Interface admin/oper, speed, MTU, counters | `connector:device:Sysdb/interface` |
+| `topology.lldp` | LLDP neighbor rows, including rich remote metadata when present | `connector:device:Sysdb/l2discovery/lldp` |
+| `topology.map` | Bounded full-fabric LLDP sweep with JSON, Mermaid, table, or containerlab output | `inventory+connector:lldp_topology_scan` |
+| `device.vlans` / `device.ip_interfaces` | VLAN/switchport and L3 addressing hints | `connector:device:Sysdb/bridging` / `connector:device:Sysdb/ip` |
+| `events.list` / `events.search` | Structured events or client-side substring search | `resource_api:event.v1` |
+| `routing.bgp` / `routing.routes` | BGP snapshot or RIB-like entries | `connector:device:Sysdb/routing` |
+| `device.features` / `overlay.evpn` / `overlay.vxlan` / `device.health` | Feature, overlay, and system state | Connector Sysdb |
+| `endpoints.get` | Single endpoint lookup by IP, MAC, or hostname | `resource_api:endpointlocation.v1` |
+| `endpoints.list` / `endpoints.filter` | LLDP-seeded bulk endpoint lookup, optionally filtered | inventory + LLDP + EndpointLocation |
+| `compliance.designed_config` | Designed CLI and studio provenance | `service_api:compliancecheck.getconfig` |
+| `compliance.config_status` / `compliance.image_status` | Product compliance status; may be unavailable on some tenants | configstatus / imagestatus Resource APIs |
 
 Connector-based tools are best-effort: EOS paths differ by release, so `coverage` may be `partial` and `warnings` may explain empty results.
 
@@ -149,17 +164,22 @@ Connector-based tools are best-effort: EOS paths differ by release, so `coverage
 
 Registered only when `CLOUDVISION_MCP_ALLOW_WRITES=1` is set before the process starts. Every one is a **dry-run** unless called with `confirm=True` and the `preview_token` from a matching dry-run; every one refuses the mainline workspace and only drafts `ws-mcp-*` workspaces. **None of them can submit a workspace, approve or execute a change control** — the operator reviews the built workspace in the CloudVision UI and submits there. Spec: [`docs/studios-phase2-spec.md`](docs/studios-phase2-spec.md) and [`docs/studios-phase2-final-spec.md`](docs/studios-phase2-final-spec.md).
 
-| Tool | Purpose |
+| Action | Purpose |
 | --- | --- |
-| `create_cvp_workspace` / `delete_cvp_workspace` | Draft workspace lifecycle (delete only while `WORKSPACE_STATE_PENDING`) |
-| `build_cvp_workspace` | `REQUEST_START_BUILD`; poll with `get_cvp_workspace` / `get_cvp_workspace_build` |
-| `set_cvp_access_interface_description` | Compare-and-set one port description in `studio-campus-access-interfaces` |
-| `set_cvp_studio_inputs` | Generic path-scoped Inputs write, description-only leaf allowlist, never the root path |
-| `assign_cvp_studio_tags` | Replace a studio's tag query with `expected_current_query` CAS |
-| `create_cvp_studio` / `delete_cvp_studio` | Studio upsert / remove with EOS lint on templates |
-| `set_cvp_mss_policy_inputs` | Compare-and-set MSS Service (`studio-mss-service`) static groups, services, rules and policy rule order via a bounded operation vocabulary; CAS on `inputs_sha256` from `get_cvp_studio_inputs` |
+| `studios_write.create_workspace` / `studios_write.delete_workspace` | Draft workspace lifecycle (delete only while `WORKSPACE_STATE_PENDING`) |
+| `studios_write.build` | `REQUEST_START_BUILD`; poll with `studios.get_workspace` / `studios.get_build` |
+| `studios_write.set_description` | Compare-and-set one port description in `studio-campus-access-interfaces` |
+| `studios_write.set_inputs` | Generic path-scoped Inputs write, description-only leaf allowlist, never the root path |
+| `studios_write.assign_tags` | Replace a studio's tag query with `expected_current_query` CAS |
+| `studios_write.create_studio` / `studios_write.delete_studio` | Studio upsert / remove with EOS lint on templates |
+| `studios_write.set_mss_inputs` | Compare-and-set MSS Service policy inputs; CAS on `inputs_sha256` from `studios.inputs` |
 
-Claude Code in auto mode has a permission classifier that can deny MCP write calls without a prompt. Allowlist the write tools in `permissions.allow` (for example `mcp__cloudvision-mcp__create_cvp_workspace`, `…__delete_cvp_workspace`, `…__build_cvp_workspace`, `…__set_cvp_access_interface_description`, `…__set_cvp_studio_inputs`, `…__assign_cvp_studio_tags`, `…__create_cvp_studio`, `…__delete_cvp_studio`, `…__set_cvp_mss_policy_inputs`); the dry-run / `preview_token` gate is what protects the write, and none of these can submit.
+Claude Code in auto mode can deny MCP calls without a prompt. Allowlist the
+group tools in `permissions.allow`, for example:
+`mcp__cloudvision-mcp__inventory`, `mcp__cloudvision-mcp__studios`,
+`mcp__cloudvision-mcp__studios_write`, and
+`mcp__cloudvision-mcp__compliance`. The write group's dry-run /
+`preview_token` gate still applies, and no action can submit.
 
 ### Endpoint locations
 
@@ -180,11 +200,11 @@ Hard failures (missing credentials, device not found for filter) return `error` 
 
 Use this workflow when you need relevant and eventually complete LLDP data across mixed device models.
 
-1. Run `get_cvp_all_inventory` and keep active EOS serials.
-2. Run `get_cvp_lldp_neighbors` per device.
+1. Run `inventory.list` and keep active EOS serials.
+2. Run `topology.lldp` per device.
 3. If a device returns `lldp_data_unparsed`, do **not** treat it as "no neighbors":
    - retry with `port_name` for concrete interfaces, or
-   - run `map_cvp_network_topology` in **batches** (`device_serial_allowlist`, 1-5 devices).
+   - run `topology.map` in **batches** (`device_serial_allowlist`, 1-5 devices).
 4. Keep batch calls bounded with `max_ethernet_ports` to avoid long sweeps.
 5. Merge results across batches and dedupe links using:
    - `local_serial + local_port + (remote_eth_addr or remote_chassis_id)`.
@@ -202,7 +222,7 @@ The LLDP tools are additive and best-effort, but agents can rely on this contrac
 - New keys are additive (never replace existing keys).
 - Missing LLDP TLVs are represented by omitted keys or empty values (not errors).
 
-### `get_cvp_lldp_neighbors` row contract (`items[]`)
+### `topology.lldp` row contract (`items[]`)
 
 Common/stable keys:
 
@@ -249,7 +269,7 @@ Example `items[]` row:
 }
 ```
 
-### `map_cvp_network_topology` contract (`topology.edges[]` and `topology.links[]`)
+### `topology.map` contract (`topology.edges[]` and `topology.links[]`)
 
 `topology.edges[]` includes local/remote adjacency identity plus rich remote metadata:
 

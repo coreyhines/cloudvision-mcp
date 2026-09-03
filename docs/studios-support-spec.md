@@ -13,10 +13,10 @@ on 720xp-24; answering it required hand-rolled curl against CloudVision.
 
 **Phase 1 answers**
 
-- Which studios are assigned / contribute to a device (`get_cvp_designed_config` →
+- Which studios are assigned / contribute to a device (`compliance.designed_config` →
   `sources` with `CONFIG_TYPE_STUDIO`).
 - Which studio **source templates / schemas** mention a substring
-  (`search_cvp_studio_templates`), with JSON paths so UI labels are not mistaken for CLI.
+  (`studios.search_templates`), with JSON paths so UI labels are not mistaken for CLI.
 - Workspace and build status so a human can review before any later submit.
 
 **Phase 1 does not answer** per-line attribution (“this exact CLI line came from studio X
@@ -25,7 +25,7 @@ line N”). Template search is **not** a substitute for designed-config provenan
 `logging host`. Configlet provenance is **out of scope for v1** (endpoints exist; no MCP
 tools yet). Line-level merge of studio + configlet + CLI remains a later phase.
 
-A second motivation: `get_cvp_device_config` tries configstatus first (403 on this
+A second motivation: `device.config` tries configstatus first (403 on this
 homelab’s Resource API), then falls back to compliance GetConfig for **running** config.
 Designed-config read must use the same compliance RPC with `type` parameterized
 (`DESIGNED_CONFIG`), not configstatus URIs. **`get_config` now accepts `config_type=`**
@@ -99,7 +99,7 @@ switches' TerminAttr config is the gRPC telemetry ingest address, not the REST A
 | `GET Studio/all` | includes empty-`workspaceId` rows | List + search source for **mainline** |
 | `GET StudioConfig/all` | **0** empty-`workspaceId` rows (345 nonempty) | Package/workspace copies only |
 
-**Implication:** `search_cvp_studio_templates` walks **`Studio/all`** (or keyed `Studio` GETs), **not** `StudioConfig/all`. The old worked example that implied mainline bodies came from `StudioConfig/all` was wrong; EOS Event Handler mainline is readable via keyed `Studio` (`logging` appears in that body). `StudioConfig` keyed GETs work for **non-empty** package workspace ids (e.g. `eos-event-handler-pkg-v0.0.x-…`).
+**Implication:** `studios.search_templates` walks **`Studio/all`** (or keyed `Studio` GETs), **not** `StudioConfig/all`. The old worked example that implied mainline bodies came from `StudioConfig/all` was wrong; EOS Event Handler mainline is readable via keyed `Studio` (`logging` appears in that body). `StudioConfig` keyed GETs work for **non-empty** package workspace ids (e.g. `eos-event-handler-pkg-v0.0.x-…`).
 
 ### Resource API `/all` NDJSON (phase 1 implementer rules)
 
@@ -239,7 +239,7 @@ Existing running-config code POSTs to
 `config_type=`** (`RUNNING_CONFIG` default | `DESIGNED_CONFIG`). Do not add a second POST
 client.
 
-#### `get_cvp_designed_config`
+#### `compliance.designed_config`
 
 | | |
 | --- | --- |
@@ -255,7 +255,7 @@ client.
 Optional later: diff running vs designed by calling GetConfig twice with different `type`
 and merging in the client — **not** in v1.
 
-#### `get_cvp_studios`
+#### `studios.list`
 
 | | |
 | --- | --- |
@@ -268,7 +268,7 @@ and merging in the client — **not** in v1.
 `immutable` / `from_package` / `in_use` come from `StudioSummary` when present — prefer
 these over name regex for later write refusals.
 
-#### `get_cvp_studio`
+#### `studios.get`
 
 | | |
 | --- | --- |
@@ -278,7 +278,7 @@ these over name regex for later write refusals.
 | **When body=False** | Omit template source; return `template_bytes`, `template_sha256` (hex SHA-256 of UTF-8 Mako source). Always return `input_schema` field names so Phase 2 callers can draft inputs. |
 | **When body=True** | Include full Mako; warn if payload > 100 KB. |
 
-#### `get_cvp_studio_inputs`
+#### `studios.inputs`
 
 Current **instance** values (schema ≠ values). Required so later writes are not guessed.
 
@@ -291,7 +291,7 @@ Current **instance** values (schema ≠ values). Required so later writes are no
 | **Returns** | Prefer `items[]` when multiple path rows match; if only the root `path: {}` row exists, still return `items` of length 1. Each item: `{studio_id, workspace_id, path_values, inputs}` |
 | **Fixture** | `tests/fixtures/inputs_mainline_topology_sample.json` (truncated) |
 
-#### `search_cvp_studio_templates`
+#### `studios.search_templates`
 
 Finds studios whose **source** (template body and/or input schema) mentions a pattern.
 **Not** a substitute for designed-config provenance.
@@ -308,7 +308,7 @@ Worked example (re-verified 2026-08-21): keyed mainline
 *EOS Event Handler* and the body contains `logging` (often in input-schema labels). Use
 JSON paths so UI labels are not mistaken for rendered CLI.
 
-#### `get_cvp_workspaces`
+#### `studios.list_workspaces`
 
 | | |
 | --- | --- |
@@ -316,7 +316,7 @@ JSON paths so UI labels are not mistaken for rendered CLI.
 | **Parameters** | none in v1 |
 | **Returns** | `items[]` with snake_case `state`, `cc_ids` (from `ccIds`), and **build id / request id** fields as present — not full nested build blobs |
 
-#### `get_cvp_workspace` / `get_cvp_workspace_build`
+#### `studios.get_workspace` / `studios.get_build`
 
 | | |
 | --- | --- |
@@ -328,7 +328,7 @@ JSON paths so UI labels are not mistaken for rendered CLI.
 
 Live enums and mapping: `tests/fixtures/workspace_build_enums.json` (2026-08-21).
 
-`build_cvp_workspace` (Phase 2) returns `request_id` only. On this tenant,
+`studios_write.build` (Phase 2) returns `request_id` only. On this tenant,
 `Workspace.responses.values` is keyed by that `request_id`, and build success messages
 are of the form `Build <uuid> finished successfully` where `<uuid>` equals the map key —
 so **`request_id` is typically also `buildId`**. Confirm by reading
@@ -336,9 +336,9 @@ so **`request_id` is typically also `buildId`**. Confirm by reading
 
 After `REQUEST_START_BUILD`:
 
-1. Poll `get_cvp_workspace(workspace_id)` until `responses.values[<request_id>]` is
+1. Poll `studios.get_workspace` with `workspace_id` until `responses.values[<request_id>]` is
    present **or** 30s timeout.
-2. Poll `get_cvp_workspace_build(workspace_id, build_id=request_id)` until `state` is
+2. Poll `studios.get_build` with `workspace_id` and `build_id=request_id` until `state` is
    terminal:
    - **Success:** `BUILD_STATE_SUCCESS`
    - **Terminal failure:** `BUILD_STATE_FAIL`, `BUILD_STATE_CANCELED`
@@ -378,7 +378,7 @@ Extend host-allowlist tests (`_is_uri_host_allowed_cvp_host`). Add NDJSON fixtur
 trailing blank line; missing `displayName`; last-write-wins duplicate key. Assert list
 tools do **not** use first-object-only fetch.
 
-For `search_cvp_studio_templates`, fixture with a match inside nested `inputSchema`
+For `studios.search_templates`, fixture with a match inside nested `inputSchema`
 description and another inside a template body; assert JSON paths differ.
 
 Add fixtures under `tests/fixtures/`:
@@ -396,14 +396,14 @@ Unit-test `get_ndjson_all_values_with_bearer` last-wins / invalid-line behaviour
 
 | Tool | Phase | HTTP (summary) |
 | --- | --- | --- |
-| `get_cvp_studios` | 1 | GET Studio/all (full NDJSON) |
-| `get_cvp_studio` | 1 | GET Studio keyed (mainline `workspaceId=""`) |
-| `get_cvp_studio_inputs` | 1 | GET Inputs/all + client filter |
-| `search_cvp_studio_templates` | 1 | GET Studio/all + client search |
-| `get_cvp_workspaces` | 1 | GET Workspace/all |
-| `get_cvp_workspace` | 1 | GET Workspace keyed |
-| `get_cvp_workspace_build` | 1 | GET WorkspaceBuild keyed |
-| `get_cvp_designed_config` | 1 | POST compliance GetConfig `DESIGNED_CONFIG` |
+| `studios.list` | 1 | GET Studio/all (full NDJSON) |
+| `studios.get` | 1 | GET Studio keyed (mainline `workspaceId=""`) |
+| `studios.inputs` | 1 | GET Inputs/all + client filter |
+| `studios.search_templates` | 1 | GET Studio/all + client search |
+| `studios.list_workspaces` | 1 | GET Workspace/all |
+| `studios.get_workspace` | 1 | GET Workspace keyed |
+| `studios.get_build` | 1 | GET WorkspaceBuild keyed |
+| `compliance.designed_config` | 1 | POST compliance GetConfig `DESIGNED_CONFIG` |
 | Phase 2 write tools | 2 | see [`studios-phase2-spec.md`](studios-phase2-spec.md) |
 
 No MCP tools for ChangeControlConfig POST/DELETE in v1. No configlet tools in v1.

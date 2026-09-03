@@ -14,7 +14,7 @@ Make 2.1 tag assign and generic Inputs behave correctly on this CVaaS tenant:
 ## Non-goals
 
 - Register `submit_cvp_workspace`.
-- Change 2.0 `set_cvp_access_interface_description` (including `studios_write._refused`).
+- Change 2.0 `studios_write.set_description` (including `studios_write._refused`).
 - Tag API `tag/v1` (403 on this token).
 - Invent AssignedTags rows for studios that have none.
 - Switch AssignedTags reads to keyed GetOne (`AssignedTags?key.studioId=&key.workspaceId=`). Unprobed; a 404 there must not become `assigned_tags_unavailable`.
@@ -94,7 +94,7 @@ Workspace id on POST is the **draft**, never `""`. Mainline is not written. Firs
 
 `path_values` is **Resource** `Inputs.key.path.values`, not a JSON pointer into `inputs`.
 
-`get_cvp_studio_inputs` already returns `path_values` per row. Use that list.
+`studios.inputs` already returns `path_values` per row. Use that list.
 
 On lookup miss, refuse `inputs_path_not_found` with:
 
@@ -103,7 +103,7 @@ On lookup miss, refuse `inputs_path_not_found` with:
   "studio_id": "…",
   "path_values": ["campus"],
   "available_path_values": [[]],
-  "hint": "Use set_cvp_access_interface_description for this studio’s only Resource row (path_values []). Generic Inputs cannot POST the root."
+  "hint": "Use studios_write.set_description for this studio’s only Resource row (path_values []). Generic Inputs cannot POST the root."
 }
 ```
 
@@ -119,9 +119,9 @@ Do **not** add a generic root POST. That would bypass 2.0 CAS.
 
 ## 4. Overlay studio GET
 
-Generic Inputs must not call `get_cvp_studio(..., "")` only.
+Generic Inputs must not read only `studios.get` with the mainline workspace.
 
-**Import** `_read_studio_anywhere` from `cvp_mcp.grpc.studio_crud`. Do not extract a twin into `studios.py`. Do not change `get_cvp_studio()` (2.0 description CAS stays mainline).
+**Import** `_read_studio_anywhere` from `cvp_mcp.grpc.studio_crud`. Do not extract a twin into `studios.py`. Do not change the `studios.get` implementation (2.0 description CAS stays mainline).
 
 Fallthrough is **404/`not_found` only**:
 
@@ -152,7 +152,7 @@ AssignedTags (`tests/test_studio_tags.py`):
 
 Generic Inputs (`tests/test_studio_inputs_generic.py`):
 
-- Miss includes `available_path_values: [[]]` and `details.hint` naming `set_cvp_access_interface_description`.
+- Miss includes `available_path_values: [[]]` and `details.hint` naming `studios_write.set_description`.
 - Generic `[]` → `root_path_forbidden`, no HTTP.
 - Studio GET: overlay 200 used; overlay 404 then mainline 200 succeeds; overlay non-404 `read_failed` does **not** fall through.
 
@@ -168,17 +168,17 @@ Existing 2.0 description tests unchanged.
 | `tests/test_studio_inputs_generic.py` | cases in §5 |
 | `docs/studios-phase2-spec.md` | **replace** named sentences in §7 (not an additive paragraph) |
 
-Do not register submit. Do not edit `studios_write.py` / description CAS. Do not edit `studios.py` `get_cvp_studio`. `studio_crud.py` is import-only (no behavior change).
+Do not register submit. Do not edit `studios_write.py` / description CAS. Do not edit the `studios.get` implementation in `studios.py`. `studio_crud.py` is import-only (no behavior change).
 
 ## 7. Parent spec replacements (bucket D)
 
 Replace, do not append:
 
-1. `docs/studios-phase2-spec.md` `get_cvp_studio_assigned_tags` paragraph that says `GET AssignedTags/all` is **unprobed** and 404-or-empty → `assigned_tags_unavailable` / do not invent a query. New text: `/all` is live (200). 404 or empty **body** stays unavailable. Complete 200 with 0 rows for this studio+workspace → `query=""`, coverage full. Incomplete `/all` → `assigned_tags_read_failed`, not `""`.
-2. Same file `assign_cvp_studio_tags`: `expected_current_query` remains required as a parameter; **`""` is a valid value** (unassigned). Omitted/non-str still `expected_current_query_required`. Preflight uses overlay-then-mainline resolver.
-3. Inventory row `get_cvp_studio_assigned_tags` | 2.0 optional read (URL unprobed) → URL probed; no-row is `query=""`.
+1. `docs/studios-phase2-spec.md` `studios.tags` paragraph that says `GET AssignedTags/all` is **unprobed** and 404-or-empty → `assigned_tags_unavailable` / do not invent a query. New text: `/all` is live (200). 404 or empty **body** stays unavailable. Complete 200 with 0 rows for this studio+workspace → `query=""`, coverage full. Incomplete `/all` → `assigned_tags_read_failed`, not `""`.
+2. Same file `studios_write.assign_tags`: `expected_current_query` remains required as a parameter; **`""` is a valid value** (unassigned). Omitted/non-str still `expected_current_query_required`. Preflight uses overlay-then-mainline resolver.
+3. Inventory row `studios.tags` | 2.0 optional read (URL unprobed) → URL probed; no-row is `query=""`.
 4. Open table row ``GET AssignedTags/all` URL` → closed: `/all` 200 on this tenant.
-5. One sentence under `set_cvp_studio_inputs`: Resource `path.values` ≠ JSON keys; Access Interfaces only row is `[]` and stays 2.0 description CAS.
+5. One sentence under `studios_write.set_inputs`: Resource `path.values` ≠ JSON keys; Access Interfaces only row is `[]` and stays 2.0 description CAS.
 
 Do not revive `tag_query_mismatch`. Keep `current_query_mismatch`.
 
@@ -186,10 +186,10 @@ Do not revive `tag_query_mismatch`. Keep `current_query_mismatch`.
 
 Same MCP host, writes on, submit off:
 
-1. `get_cvp_studio_assigned_tags(studio-campus-access-interfaces)` → `query=""`, coverage full (mainline).
+1. `studios.tags` for `studio-campus-access-interfaces` → `query=""`, coverage full (mainline).
 2. Create `ws-mcp-*`. Assign CAS GET is overlay-then-mainline (same resolver). Preview only with expected `""` unless a human wants a real tag change. Do not confirm by default.
 3. If a human confirms: re-GET — new row keyed to the **draft**; mainline still has no row. Then delete the draft.
-4. `set_cvp_studio_inputs` with `["campus"]` → `inputs_path_not_found` + `available_path_values: [[]]` + hint.
+4. `studios_write.set_inputs` with `["campus"]` → `inputs_path_not_found` + `available_path_values: [[]]` + hint.
 5. Create overlay studio, then generic Inputs must not fail Studio GET with mainline 404.
 6. Delete the draft workspace.
 

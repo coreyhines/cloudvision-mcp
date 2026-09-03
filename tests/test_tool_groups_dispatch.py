@@ -38,6 +38,35 @@ def test_inventory_get_returns_dict_not_str(monkeypatch):
     assert out == {"serial_number": "SERIAL1"}
 
 
+def test_inventory_get_missing_resolved_record_returns_error_dict(monkeypatch):
+    """A resolved serial with no inventory record still returns a dictionary."""
+    from cvp_mcp.members import inventory
+
+    channel = MagicMock()
+    channel_context = MagicMock()
+    channel_context.__enter__.return_value = channel
+    monkeypatch.setattr(
+        inventory, "env_datadict_from_os", lambda: {"cvp": "cvp.example"}
+    )
+    monkeypatch.setattr(inventory, "createConnection", lambda _env: MagicMock())
+    monkeypatch.setattr(
+        inventory.grpc, "secure_channel", lambda _target, _creds: channel_context
+    )
+    monkeypatch.setattr(
+        inventory,
+        "resolve_device_to_serial",
+        lambda _env, _device_id, channel=None: ("SERIAL1", None, [], []),
+    )
+    monkeypatch.setattr(
+        inventory, "grpc_one_inventory_serial", lambda _channel, _serial: None
+    )
+
+    out = inventory.inventory_get("SERIAL1")
+
+    assert isinstance(out, dict)
+    assert "error" in out
+
+
 @pytest.mark.parametrize(
     ("group_name", "action", "params"),
     [

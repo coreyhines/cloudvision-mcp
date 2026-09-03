@@ -45,6 +45,13 @@ def inventory_get(device_id: str) -> dict:
                 return error
             if device is None:
                 device = grpc_one_inventory_serial(channel, serial)
+            if device is None:
+                return {
+                    "error": "device_not_found",
+                    "device_id_input": (device_id or "").strip(),
+                    "device_id_resolved": serial,
+                    "warnings": [*warnings, "inventory_record_not_found"],
+                }
     except Exception as exc:
         logging.error("Error fetching device %s: %s", device_id, exc)
         return {"error": "Device fetch failed"}

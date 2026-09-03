@@ -13,13 +13,10 @@ import json
 import os
 
 WRITES_ENV = "CLOUDVISION_MCP_ALLOW_WRITES"
-SUBMIT_ENV = "CLOUDVISION_MCP_ALLOW_SUBMIT"
 
-# ``None`` means submit is unregistered: a value here is a human-confirmed
-# staleness field (Workspace ``lastModifiedAt``) that the submit helper must
-# check. Until it is set, ``submit_enabled`` stays False even when both env
-# vars are ``"1"``.
-SUBMIT_STALENESS_FIELD: str | None = None
+# There is deliberately no submit gate. Workspace submit was retired
+# 2026-09-02 (docs/studios-phase2-final-spec.md §A): the MCP stops at build and
+# the human reviews and submits the workspace in the CVP UI.
 
 
 def _env_is_one(name: str) -> bool:
@@ -29,16 +26,6 @@ def _env_is_one(name: str) -> bool:
 def writes_enabled() -> bool:
     """Return True only when ``CLOUDVISION_MCP_ALLOW_WRITES`` is exactly ``"1"``."""
     return _env_is_one(WRITES_ENV)
-
-
-def submit_enabled() -> bool:
-    """Return True only when writes are on, submit env is ``"1"`` and the
-    staleness field has been registered (not ``None``)."""
-    return (
-        writes_enabled()
-        and SUBMIT_STALENESS_FIELD is not None
-        and _env_is_one(SUBMIT_ENV)
-    )
 
 
 def preview_token(tool_name: str, args: dict) -> str:

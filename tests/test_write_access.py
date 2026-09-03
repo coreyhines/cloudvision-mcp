@@ -2,14 +2,19 @@
 
 import cvp_mcp.write_access as wa
 from cvp_mcp.write_access import (
-    SUBMIT_ENV,
     WRITES_ENV,
     check_preview_token,
     preview_token,
-    submit_enabled,
     validate_workspace_id,
     writes_enabled,
 )
+
+
+def test_no_submit_gate_exists():
+    """Submit is retired (final spec §A); nothing here may grow a second gate."""
+    assert not hasattr(wa, "submit_enabled")
+    assert not hasattr(wa, "SUBMIT_ENV")
+    assert not hasattr(wa, "SUBMIT_STALENESS_FIELD")
 
 
 def test_writes_enabled_only_when_one(monkeypatch):
@@ -25,27 +30,6 @@ def test_writes_enabled_only_when_one(monkeypatch):
     # Surrounding whitespace is stripped before comparison, so " 1 " is on.
     monkeypatch.setenv(WRITES_ENV, " 1 ")
     assert writes_enabled() is True
-
-
-def test_submit_disabled_when_staleness_field_unset(monkeypatch):
-    monkeypatch.setattr(wa, "SUBMIT_STALENESS_FIELD", None, raising=False)
-    monkeypatch.setenv(WRITES_ENV, "1")
-    monkeypatch.setenv(SUBMIT_ENV, "1")
-    assert submit_enabled() is False
-
-
-def test_submit_enabled_when_all_set(monkeypatch):
-    monkeypatch.setattr(wa, "SUBMIT_STALENESS_FIELD", "lastModifiedAt", raising=False)
-    monkeypatch.setenv(WRITES_ENV, "1")
-    monkeypatch.setenv(SUBMIT_ENV, "1")
-    assert submit_enabled() is True
-
-
-def test_submit_disabled_when_writes_off(monkeypatch):
-    monkeypatch.setattr(wa, "SUBMIT_STALENESS_FIELD", "lastModifiedAt", raising=False)
-    monkeypatch.delenv(WRITES_ENV, raising=False)
-    monkeypatch.setenv(SUBMIT_ENV, "1")
-    assert submit_enabled() is False
 
 
 def test_preview_token_stable_and_order_independent():

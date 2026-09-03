@@ -41,10 +41,12 @@ DELETE_PATH_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 
-# Only values observed on this tenant. Do not add guessed enum names.
+# The only request this helper may send. ``REQUEST_SUBMIT`` was removed on
+# purpose (submit retired 2026-09-02, docs/studios-phase2-final-spec.md §A):
+# the MCP stops at build and a human submits the workspace in the CVP UI. Do
+# not add guessed enum names.
 REQUEST_START_BUILD = "REQUEST_START_BUILD"
-REQUEST_SUBMIT = "REQUEST_SUBMIT"
-ALLOWED_REQUESTS: frozenset[str] = frozenset({REQUEST_START_BUILD, REQUEST_SUBMIT})
+ALLOWED_REQUESTS: frozenset[str] = frozenset({REQUEST_START_BUILD})
 
 # Envelope keys that could schedule or auto-start work outside the MCP flow.
 _DENIED_ENVELOPE_KEYS: frozenset[str] = frozenset({"start", "schedule"})
@@ -68,27 +70,8 @@ def _normalize_base(base_url: str | None) -> str:
     return (base_url or "").strip().rstrip("/")
 
 
-def _submit_allowed() -> bool:
-    """True only when ``cvp_mcp.write_access.submit_enabled`` exists and is on.
-
-    Fail-close: an unimportable or raising gate means submit stays off. Submit
-    itself is spec 2.1 and stays unregistered until the Workspace staleness
-    field is confirmed, so this is expected to be False in 2.0/2.2.
-    """
-    try:
-        from cvp_mcp.write_access import submit_enabled  # noqa: PLC0415
-    except Exception:
-        logging.info("resource_write: submit gate unavailable; treating as disabled")
-        return False
-    try:
-        return bool(submit_enabled() if callable(submit_enabled) else submit_enabled)
-    except Exception:
-        logging.info("resource_write: submit gate raised; treating as disabled")
-        return False
-
-
 def _check_request_field(body: dict[str, Any]) -> str | None:
-    """Validate the top-level ``request`` enum, including the submit gate."""
+    """Validate the top-level ``request`` enum against :data:`ALLOWED_REQUESTS`."""
     for field in ("request", "Request"):
         if field not in body:
             continue
@@ -96,8 +79,6 @@ def _check_request_field(body: dict[str, Any]) -> str | None:
         if not isinstance(value, str) or value not in ALLOWED_REQUESTS:
             logging.error("resource_write: request value not allowed")
             return "request_not_allowed"
-        if value == REQUEST_SUBMIT and not _submit_allowed():
-            return "submit_disabled"
     return None
 
 

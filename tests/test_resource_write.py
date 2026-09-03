@@ -5,12 +5,10 @@ not reach CloudVision at all.
 """
 
 import json
-import sys
 from unittest.mock import patch
 
 import pytest
 
-from cvp_mcp import write_access
 from cvp_mcp.grpc import resource_write
 
 BASE = "https://cvp.example.com"
@@ -134,9 +132,17 @@ def test_post_change_control_config_never_calls_urlopen():
 
 @pytest.mark.parametrize(
     "request_value",
-    ["REQUEST_ROLLBACK", "REQUEST_SUBMIT_FORCE", "REQUEST_UNSPECIFIED", "", "start"],
+    [
+        "REQUEST_SUBMIT",
+        "REQUEST_ROLLBACK",
+        "REQUEST_SUBMIT_FORCE",
+        "REQUEST_UNSPECIFIED",
+        "",
+        "start",
+    ],
 )
 def test_post_unknown_request_never_calls_urlopen(request_value):
+    """``REQUEST_SUBMIT`` is in this list on purpose: submit is retired, not gated."""
     body = dict(_key(), request=request_value)
     (obj, err), mock_open = _post(WORKSPACE_PATH, body)
     assert obj is None
@@ -163,58 +169,6 @@ def test_post_start_build_allowed():
     (obj, err), mock_open = _post(WORKSPACE_PATH, body)
     assert err is None
     assert mock_open.call_count == 1
-
-
-# --- submit gate ------------------------------------------------------------
-
-
-def test_post_submit_disabled_when_write_access_missing(monkeypatch):
-    """Fail-close: an unimportable gate module must refuse, not POST."""
-    monkeypatch.setitem(sys.modules, "cvp_mcp.write_access", None)
-    body = dict(_key(), request=resource_write.REQUEST_SUBMIT)
-    (obj, err), mock_open = _post(WORKSPACE_PATH, body)
-    assert obj is None
-    assert err == "submit_disabled"
-    mock_open.assert_not_called()
-
-
-def test_post_submit_disabled_when_gate_false():
-    with patch.object(resource_write, "_submit_allowed", return_value=False):
-        body = dict(_key(), request=resource_write.REQUEST_SUBMIT)
-        (obj, err), mock_open = _post(WORKSPACE_PATH, body)
-    assert err == "submit_disabled"
-    mock_open.assert_not_called()
-
-
-def test_post_submit_allowed_when_gate_true():
-    with patch.object(resource_write, "_submit_allowed", return_value=True):
-        body = dict(_key(), request=resource_write.REQUEST_SUBMIT)
-        (obj, err), mock_open = _post(WORKSPACE_PATH, body)
-    assert err is None
-    assert mock_open.call_count == 1
-
-
-def test_post_submit_refused_through_real_env_gate(monkeypatch):
-    """No patching of ``_submit_allowed``: the real env gate must refuse."""
-    monkeypatch.delenv(write_access.WRITES_ENV, raising=False)
-    monkeypatch.delenv(write_access.SUBMIT_ENV, raising=False)
-    body = dict(_key(), request=resource_write.REQUEST_SUBMIT)
-    (obj, err), mock_open = _post(WORKSPACE_PATH, body)
-    assert obj is None
-    assert err == "submit_disabled"
-    mock_open.assert_not_called()
-
-
-def test_post_submit_refused_when_staleness_field_unregistered(monkeypatch):
-    """Both env vars on is not enough: submit stays 2.1-unregistered."""
-    monkeypatch.setenv(write_access.WRITES_ENV, "1")
-    monkeypatch.setenv(write_access.SUBMIT_ENV, "1")
-    monkeypatch.setattr(write_access, "SUBMIT_STALENESS_FIELD", None)
-    body = dict(_key(), request=resource_write.REQUEST_SUBMIT)
-    (obj, err), mock_open = _post(WORKSPACE_PATH, body)
-    assert obj is None
-    assert err == "submit_disabled"
-    mock_open.assert_not_called()
 
 
 # --- envelope key denylist --------------------------------------------------

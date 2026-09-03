@@ -810,3 +810,46 @@ def test_is_root_path_accepts_only_empty_paths():
     assert studios_write._is_root_path({}) is True
     assert studios_write._is_root_path({"path": {"values": []}}) is True
     assert studios_write._is_root_path({"path": {"values": ["campus"]}}) is False
+
+
+# --- _load_root_inputs(studio_id=) (final spec bucket R) --------------------
+
+
+def _other_studio_row(studio_id, workspace_id, document):
+    return {
+        "key": {"studioId": studio_id, "workspaceId": workspace_id, "path": {}},
+        "inputs": json.dumps(document),
+    }
+
+
+def test_load_root_inputs_defaults_to_access_interface_studio():
+    access = _inputs_document()
+    mss = {"rules": [], "policies": []}
+    rows = [_inputs_row("", access), _other_studio_row("studio-mss-service", "", mss)]
+    with _mocked(inputs=rows):
+        document, source, err, _ = studios_write._load_root_inputs(DATADICT, WORKSPACE)
+    assert err is None
+    assert source == ""
+    assert document == access
+
+
+def test_load_root_inputs_filters_by_studio_id():
+    access = _inputs_document()
+    mss = {"rules": [], "policies": []}
+    rows = [_inputs_row("", access), _other_studio_row("studio-mss-service", "", mss)]
+    with _mocked(inputs=rows):
+        document, source, err, _ = studios_write._load_root_inputs(
+            DATADICT, WORKSPACE, studio_id="studio-mss-service"
+        )
+    assert err is None
+    assert source == ""
+    assert document == mss
+
+
+def test_load_root_inputs_missing_studio_is_unresolved():
+    with _mocked(inputs=[_inputs_row("", _inputs_document())]):
+        document, _, err, _ = studios_write._load_root_inputs(
+            DATADICT, WORKSPACE, studio_id="studio-mss-service"
+        )
+    assert document is None
+    assert err == "inputs_path_unresolved"

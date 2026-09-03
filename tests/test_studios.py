@@ -10,6 +10,7 @@ from cvp_mcp.grpc.config_async_flow import (
     extract_designed_sources,
     studio_keys_from_sources,
 )
+from cvp_mcp.grpc.inputs_digest import inputs_sha256
 from cvp_mcp.grpc.studios import (
     _summarize_studio,
     _walk_string_hits,
@@ -133,6 +134,21 @@ def test_get_cvp_studio_inputs_filters_all() -> None:
     assert out["items"][0]["path_values"] == []
     assert isinstance(out["items"][0]["inputs"], dict)
     assert out["items"][0]["inputs"]["devices"][0]["hostname"] == "720xp-48"
+    assert out["items"][0]["inputs_sha256"] == inputs_sha256(out["items"][0]["inputs"])
+
+
+def test_get_cvp_studio_inputs_unparsable_row_has_no_digest() -> None:
+    value = {
+        "key": {"studioId": "TOPOLOGY", "workspaceId": "", "path": {}},
+        "inputs": "{not json",
+    }
+    with patch(
+        "cvp_mcp.grpc.studios.get_ndjson_all_values_with_bearer",
+        return_value=([value], None, []),
+    ):
+        out = get_cvp_studio_inputs(_DATADICT, "TOPOLOGY")
+    assert out["items"][0]["inputs"] == "{not json"
+    assert out["items"][0]["inputs_sha256"] is None
 
 
 def test_search_cvp_studio_templates() -> None:

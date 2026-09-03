@@ -21,6 +21,7 @@ from cvp_mcp.grpc.config_async_flow import (
     studio_keys_from_sources,
 )
 from cvp_mcp.grpc.envelope import tool_envelope
+from cvp_mcp.grpc.inputs_digest import inputs_sha256
 from cvp_mcp.grpc.uri_fetch import (
     get_json_with_bearer,
     get_ndjson_all_values_with_bearer,
@@ -317,12 +318,16 @@ def get_cvp_studio_inputs(
             path_values = []
         elif not isinstance(path_values, list):
             path_values = [path_values]
+        parsed_inputs = _parse_inputs_field(value.get("inputs"))
         items.append(
             {
                 "studio_id": row_sid,
                 "workspace_id": row_wid,
                 "path_values": path_values,
-                "inputs": _parse_inputs_field(value.get("inputs")),
+                "inputs": parsed_inputs,
+                # CAS token for the 2.3 MSS root write; ``None`` when the row
+                # did not parse (the write side refuses that row anyway).
+                "inputs_sha256": inputs_sha256(parsed_inputs),
             }
         )
     return tool_envelope(

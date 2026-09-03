@@ -22,7 +22,7 @@ Slice-specific rules:
 * Caller free text (template body, display name, description) is linted for
   EOS-disruptive config. There is deliberately no ``allow_disruptive`` flag.
 * Delete is a ``StudioConfig`` POST carrying ``remove: true``. ChangeControl is
-  never touched here; the operator still has to build, review and submit.
+  never touched here; the operator still has to build, then review and submit in the CVP UI.
 
 The envelope, preflight and lint helpers are imported from
 :mod:`cvp_mcp.grpc.studios_write` rather than copied so that 2.0 and 2.2
@@ -491,7 +491,7 @@ def delete_cvp_studio(
     ChangeControl write. The studio must exist (workspace overlay or mainline),
     must not be ``immutable`` / ``from_package``, and must not be ``in_use``:
     the documented sequence is unassign tags → remove studio in the *same*
-    workspace → build → review → submit.
+    workspace → build → review and submit in the CVP UI.
     """
     tool = "delete_cvp_studio"
     if not writes_enabled():

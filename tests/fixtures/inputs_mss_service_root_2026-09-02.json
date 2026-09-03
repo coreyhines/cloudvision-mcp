@@ -1,0 +1,472 @@
+{
+  "studio_id": "studio-mss-service",
+  "workspace_id": "",
+  "path_values": [],
+  "inputs": {
+    "acceptedGroups": [
+      {
+        "name": "AGNI-CH-Generic",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Private",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-cameras",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-printers",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-net-admins",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-wifi-guests",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-wireless_81",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-mobile-admin",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-wifi_clients",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-TRENDnet_Inc_",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-homeassistant",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-wired_clients",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-trusted-wifi-users",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-ASRock_Incorporation",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Reolink_Innovation_Limited",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-REALTEK_SEMICONDUCTOR_CORP_",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-TP-Link_Corporation_Limited",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-CLOUD_NETWORK_TECHNOLOGY_SINGAPORE_PTE_LTD_",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Apple_iPhone",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Model_3",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Apple_Inc_",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-SoundTouch_20",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Amcrest_Technologies",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Lumi_United_Technology_Co_Ltd",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Harmony_Hub",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Synology_NAS",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-QLogic_Corporation",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Super_Micro_Computer_Inc_",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-IEEE_Registration_Authority",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Mac_OS_X",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-wifi-camera",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Linux",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Apple_OS",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Segment:Default",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Apple_iOS_Device",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Segment:wireless_81",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Segment:IoT-roborock",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Segment:wireless_7_camera",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Segment:camera-macauth-client-vlan7",
+        "source": "AGNI-CH"
+      },
+      {
+        "name": "AGNI-CH-Segment:trusted-macauth-client-vlan2",
+        "source": "AGNI-CH"
+      }
+    ],
+    "acceptedSensors": [],
+    "hiddenDeviceMapper": [
+      {
+        "deviceId": "JPE19151499",
+        "deviceType": "TOR switch",
+        "interfaceIp": "172.16.0.1",
+        "interfaceName": "Loopback1"
+      },
+      {
+        "deviceId": "HBG254804R6",
+        "deviceType": "TOR switch",
+        "interfaceIp": "172.16.0.2",
+        "interfaceName": "Loopback1"
+      }
+    ],
+    "hiddenIntersectedGroupsMapper": [],
+    "hiddenPolicyIdMapper": [
+      {
+        "hiddenPolicyId": 256,
+        "hiddenPolicyName": "POL1"
+      }
+    ],
+    "hiddenVrfMapper": [
+      {
+        "vrfKey": 0,
+        "vrfName": "default"
+      }
+    ],
+    "ignoredGroups": [
+      {
+        "name": "AGNI-CH-Security_Solutions",
+        "source": "AGNI-CH"
+      }
+    ],
+    "monitorObjects": [
+      {
+        "activeTimeout": 1800000,
+        "exporterInterface": "Loopback1",
+        "monitorCluster": [
+          {
+            "monitorNodeId": {
+              "tags": {
+                "query": "device:WTW23350044"
+              }
+            }
+          }
+        ],
+        "monitorNode": {
+          "tags": {
+            "query": "device:WTW23350044"
+          }
+        },
+        "name": "ztx-7230",
+        "rateLimit": 100000,
+        "truncation": true,
+        "tunnelDestinationIp": "172.16.0.4",
+        "tunnelSourceInterface": "Loopback1"
+      }
+    ],
+    "policies": [
+      {
+        "description": null,
+        "name": "POL1",
+        "policyRules": [
+          "drop-dhcp-from-pdu4",
+          "drop-dhcp-to-pdu4",
+          "drop-dns-to-pdu4",
+          "monitor"
+        ]
+      }
+    ],
+    "redirectObjects": [],
+    "rules": [
+      {
+        "action": "forward",
+        "destinations": [
+          "<any>"
+        ],
+        "direction": true,
+        "monitorName": "ztx-7230",
+        "name": "monitor",
+        "packet": "any",
+        "services": [
+          "<any>"
+        ],
+        "sources": [
+          "<any>"
+        ]
+      },
+      {
+        "action": "drop",
+        "destinations": [
+          "<any>"
+        ],
+        "direction": true,
+        "monitorName": "ztx-7230",
+        "name": "drop-dhcp-from-pdu4",
+        "packet": "any",
+        "services": [
+          "dhcp-server-replies"
+        ],
+        "sources": [
+          "pdu4-trendnet"
+        ]
+      },
+      {
+        "action": "drop",
+        "destinations": [
+          "pdu4-trendnet"
+        ],
+        "direction": true,
+        "monitorName": "ztx-7230",
+        "name": "drop-dhcp-to-pdu4",
+        "packet": "any",
+        "services": [
+          "dhcp-server-port"
+        ],
+        "sources": [
+          "<any>"
+        ]
+      },
+      {
+        "action": "drop",
+        "destinations": [
+          "pdu4-trendnet"
+        ],
+        "direction": true,
+        "monitorName": "ztx-7230",
+        "name": "drop-dns-to-pdu4",
+        "packet": "any",
+        "services": [
+          "dns-server-port"
+        ],
+        "sources": [
+          "<any>"
+        ]
+      }
+    ],
+    "securityDomains": [
+      {
+        "inputs": {
+          "securityDomain": {
+            "domainPolicies": [
+              {
+                "name": "POL1",
+                "vrf": "default"
+              }
+            ]
+          }
+        },
+        "tags": {
+          "query": "security-domain:ZTSEC"
+        }
+      }
+    ],
+    "services": [
+      {
+        "configurations": [
+          {
+            "destinationports": "9100",
+            "icmpTypes": "all",
+            "protocol": "tcp",
+            "sourceports": "all"
+          }
+        ],
+        "name": "ip-printing",
+        "protocols": "TCP/UDP"
+      },
+      {
+        "configurations": [
+          {
+            "destinationports": "80",
+            "icmpTypes": "all",
+            "protocol": "tcp",
+            "sourceports": "all"
+          }
+        ],
+        "name": "http",
+        "protocols": "TCP/UDP"
+      },
+      {
+        "configurations": [
+          {
+            "destinationports": "443",
+            "icmpTypes": "all",
+            "protocol": "tcp",
+            "sourceports": "all"
+          }
+        ],
+        "name": "https",
+        "protocols": "TCP/UDP"
+      },
+      {
+        "configurations": [
+          {
+            "destinationports": "all",
+            "icmpTypes": "all",
+            "protocol": "tcp",
+            "sourceports": "all"
+          }
+        ],
+        "name": "ping-icmp",
+        "protocols": "ICMP"
+      },
+      {
+        "configurations": [
+          {
+            "destinationports": "554",
+            "icmpTypes": "all",
+            "protocol": "tcp",
+            "sourceports": "all"
+          }
+        ],
+        "name": "rtsp-554",
+        "protocols": "TCP/UDP"
+      },
+      {
+        "configurations": [
+          {
+            "destinationports": "all",
+            "protocol": "udp",
+            "sourceports": "67"
+          }
+        ],
+        "name": "dhcp-server-replies",
+        "protocols": "TCP/UDP"
+      },
+      {
+        "configurations": [
+          {
+            "destinationports": "67",
+            "protocol": "udp",
+            "sourceports": "all"
+          }
+        ],
+        "name": "dhcp-server-port",
+        "protocols": "TCP/UDP"
+      },
+      {
+        "configurations": [
+          {
+            "destinationports": "53",
+            "protocol": "tcp",
+            "sourceports": "all"
+          },
+          {
+            "destinationports": "53",
+            "protocol": "udp",
+            "sourceports": "all"
+          },
+          {
+            "destinationports": "5353",
+            "protocol": "udp",
+            "sourceports": "all"
+          }
+        ],
+        "name": "dns-server-port",
+        "protocols": "TCP/UDP"
+      }
+    ],
+    "sslProfileName": "aristaControlPlaneSensorMTLS",
+    "staticGroups": [
+      {
+        "membership": {
+          "members": [
+            "10.0.8.80/32"
+          ]
+        },
+        "name": "trogdor"
+      },
+      {
+        "membership": {
+          "members": [
+            "10.0.2.2/32"
+          ]
+        },
+        "name": "pi5-pihole"
+      },
+      {
+        "membership": {
+          "members": [
+            "10.0.8.80/32"
+          ]
+        },
+        "name": "laptops"
+      },
+      {
+        "membership": {
+          "members": [
+            "10.0.3.3/32"
+          ]
+        },
+        "name": "fedora1-server"
+      },
+      {
+        "membership": {
+          "members": [
+            "10.0.3.4/32"
+          ]
+        },
+        "name": "pdu4-trendnet"
+      }
+    ]
+  }
+}

@@ -1,23 +1,23 @@
 # Spec: Studios Phase 2 final — MSS root Inputs CAS, submit retirement, standing live verify
 
-Status: **implemented on `feat/studios-phase2-final`** (2026-09-02; capture gate
-passed, §D.4 corrected from the fixture;
-findings F-C1–F-C4, F-I1–F-I8 applied — see
-`docs/research/studios-phase2-final-adversarial-review.md`). Supersedes
-`docs/studios-phase2-3-mss-root-inputs-spec.md` (its content is carried here with
-corrections). Parent: `docs/studios-phase2-spec.md`. Sibling (shipped):
-`docs/studios-phase2-followon-fix-spec.md`.
+Status: **implemented on `main`** (merged #17/#18; capture gate passed, §D.4
+corrected from the fixture; findings F-C1–F-C4, F-I1–F-I8 applied — see
+`docs/research/studios-phase2-final-adversarial-review.md`). Live §B/§C/§D.9
+verified 2026-09-02 on the deployed image (operator notes outside this repo).
+Supersedes `docs/studios-phase2-3-mss-root-inputs-spec.md` (its content is
+carried here with corrections). Parent: `docs/studios-phase2-spec.md`. Sibling
+(shipped): `docs/studios-phase2-followon-fix-spec.md`.
 
 This is the last Phase 2 spec. It contains everything from Phase 2 that is not
 finished and still stands, plus one decision that closes the rest:
 
 | Item | Where from | State today |
 | --- | --- | --- |
-| **A.** Retire workspace submit | User decision 2026-09-02 | Library exists (`workspace_submit.py`), never registered |
-| **B.** 2.0 live loop never run | `studios-phase2-session-2026-08-22.md` "Not done (by design): live CVaaS POST" | Only `create_cvp_workspace` has been exercised live (2026-09-02) |
-| **C.** 2.1 §8 live verify never run | `studios-phase2-followon-fix-session-2026-08-22.md` "Still open" | Code merged (#16), unverified on tenant |
-| **D.** 2.3 MSS Service root Inputs CAS | `studios-phase2-3-mss-root-inputs-spec.md` | Nothing exists; fixture not in repo |
-| **E.** Client-side permission allowlist note | 2.3 draft §9 | Undocumented |
+| **A.** Retire workspace submit | User decision 2026-09-02 | Done on `main` (#17) |
+| **B.** 2.0 live loop | `studios-phase2-session-2026-08-22.md` | **Closed** 2026-09-02 (live verify) |
+| **C.** 2.1 §8 live verify | `studios-phase2-followon-fix-session-2026-08-22.md` | **Closed** 2026-09-02 (live verify) |
+| **D.** 2.3 MSS Service root Inputs CAS | `studios-phase2-3-mss-root-inputs-spec.md` | Code on `main`; **§D.9 live closed** 2026-09-02 |
+| **E.** Client-side permission allowlist note | 2.3 draft §9 | README shipped; Claude Code allowlist still operator-side |
 
 Not standing (closed, do not carry): tag-query → device-serial preview stays a
 2.1 dry-run warning (`target_preview_unresolved`), not a blocker. Server-side
@@ -113,7 +113,9 @@ Run (writes on, coordinator, not farmed), in this order, before 2.3 is enabled:
 5. Open the workspace in the CVP UI and confirm the diff is one description line. **Do not submit.**
 6. `delete_cvp_workspace` → `accepted`.
 
-Record the outcome in `docs/research/studios-phase2-live-verify-<date>.md` and flip the parent's Open row to closed.
+Record the outcome in operator notes outside this repo (tenant serials / IPs /
+hostnames must not land under `docs/research/`) and flip the parent's Open row
+to closed.
 
 ## C. 2.1 §8 live verify (standing since 2026-08-22)
 

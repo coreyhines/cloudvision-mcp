@@ -3,7 +3,6 @@ from unittest.mock import MagicMock, patch
 
 import grpc
 
-import cloudvision_mcp as mcp_mod
 from cvp_mcp.grpc import endpoint
 from cvp_mcp.members import endpoints as endpoint_members
 
@@ -188,7 +187,7 @@ def test_get_cvp_all_endpoint_locations_pipeline(monkeypatch):
                     "cvp_mcp.members.endpoints.grpc_one_inventory_serial",
                     return_value={"serial_number": "SN1", "hostname": "720xp-24"},
                 ):
-                    out = mcp_mod.get_cvp_all_endpoint_locations()
+                    out = endpoint_members.endpoint_list()
 
     assert out["endpoints"][0]["hostname"] == "pi5"
     assert out["seed_stats"]["unique_search_keys"] == 1
@@ -203,7 +202,7 @@ def test_get_cvp_all_endpoint_locations_missing_credentials(monkeypatch):
         lambda: {"cvp": "", "cvtoken": ""},
     )
 
-    out = mcp_mod.get_cvp_all_endpoint_locations()
+    out = endpoint_members.endpoint_list()
 
     assert out["error"] == "missing_cloudvision_credentials"
     assert "missing_CVP" in out["warnings"]
@@ -229,7 +228,7 @@ def test_get_cvp_all_endpoint_locations_seed_failure(monkeypatch):
             "cvp_mcp.members.endpoints.seed_endpoint_search_keys",
             side_effect=RuntimeError("inventory down"),
         ):
-            out = mcp_mod.get_cvp_all_endpoint_locations()
+            out = endpoint_members.endpoint_list()
 
     assert out["error"] == "seed_failed:inventory down"
     assert out["warnings"] == []
@@ -293,7 +292,7 @@ def test_get_cvp_endpoint_locations_filtered_smoke(monkeypatch):
                         "cvp_mcp.members.endpoints.grpc_one_inventory_serial",
                         return_value={"serial_number": "SN1"},
                     ):
-                        out = mcp_mod.get_cvp_endpoint_locations_filtered(
+                        out = endpoint_members.endpoint_filter(
                             device_id="720xp-24", interface="Ethernet6"
                         )
 
@@ -308,7 +307,7 @@ def test_get_cvp_endpoint_locations_filtered_missing_credentials(monkeypatch):
         lambda: {"cvp": "h:443", "cvtoken": ""},
     )
 
-    out = mcp_mod.get_cvp_endpoint_locations_filtered(device_id="SN1")
+    out = endpoint_members.endpoint_filter(device_id="SN1")
 
     assert out["error"] == "missing_cloudvision_credentials"
     assert "missing_CVPTOKEN" in out["warnings"]

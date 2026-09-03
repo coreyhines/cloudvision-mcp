@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import grpc
 
 from cvp_mcp.grpc import device_resolve
+from cvp_mcp.members.topology import topology_lldp
 
 
 class _FakeNotFound(grpc.RpcError):
@@ -229,8 +230,6 @@ def test_lldp_tool_resolves_hostname_before_connector(
     mock_lldp: MagicMock,
     mock_resolve: MagicMock,
 ) -> None:
-    from cloudvision_mcp import get_cvp_lldp_neighbors
-
     mock_env.return_value = {"cvp": "test.example:443", "cvtoken": "tok"}
     mock_conn.return_value = MagicMock()
     ctx = MagicMock()
@@ -245,7 +244,7 @@ def test_lldp_tool_resolves_hostname_before_connector(
         "object": {},
     }
 
-    result = get_cvp_lldp_neighbors("720xp-24")
+    result = topology_lldp("720xp-24")
 
     mock_lldp.assert_called_once()
     assert mock_lldp.call_args[0][1] == "JPE19151499"
@@ -264,8 +263,6 @@ def test_lldp_tool_unknown_device(
     mock_channel: MagicMock,
     mock_resolve: MagicMock,
 ) -> None:
-    from cloudvision_mcp import get_cvp_lldp_neighbors
-
     mock_env.return_value = {"cvp": "test.example:443", "cvtoken": "tok"}
     mock_conn.return_value = MagicMock()
     ctx = MagicMock()
@@ -278,7 +275,7 @@ def test_lldp_tool_unknown_device(
         [_PHYSICAL, _PHYSICAL_48],
     )
 
-    result = get_cvp_lldp_neighbors("720xp")
+    result = topology_lldp("720xp")
 
     assert "device_ambiguous" in result.get("warnings", [])
     assert result["coverage"] == "none"

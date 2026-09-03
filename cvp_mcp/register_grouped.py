@@ -42,5 +42,5 @@ def register_grouped_tool(mcp: FastMCP, group: GroupedTool) -> None:
     handler.__annotations__ = annotations
     mcp.add_tool(handler, name=group.name, description=group.description)
     # MCP SDK FastMCP has no FunctionTool(parameters=…) (unlike standalone fastmcp).
-    # Overwrite list_tools schema after signature-based registration (mcp[cli]<2).
+    # Overwrite list_tools schema after signature-based registration (mcp[cli]>=1.29.1,<2).
     mcp._tool_manager._tools[group.name].parameters = group.input_schema

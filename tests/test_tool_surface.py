@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from cvp_mcp.tool_groups import ALWAYS_ON_GROUPS, build_groups
+from cvp_mcp.tool_groups import ALWAYS_ON_GROUPS, build_groups, build_write_group
 from cvp_mcp.write_access import WRITES_ENV
 
 FLAT_PREFIXES = (
@@ -62,12 +62,24 @@ def test_writes_on_adds_only_grouped_write_tool(monkeypatch):
     assert "submit_cvp_workspace" not in names
 
 
-def test_every_group_help_lists_all_members(monkeypatch):
-    module = _reload(monkeypatch, None)
-    expected = {group.name: set(group.members) for group in build_groups()}
+def _assert_group_help(module, groups) -> None:
+    expected = {group.name: set(group.members) for group in groups}
 
     for name in _tool_names(module):
         result = asyncio.run(module.mcp.call_tool(name, {"action": "help"}))
         payload = json.loads(result[0].text)
         actions = {action["action"] for action in payload["actions"]}
         assert actions == expected[name]
+
+
+def test_every_read_group_help_lists_all_members(monkeypatch):
+    module = _reload(monkeypatch, None)
+    _assert_group_help(module, build_groups())
+
+
+def test_write_group_help_lists_all_nine_members(monkeypatch):
+    module = _reload(monkeypatch, "1")
+    write_group = build_write_group()
+
+    assert len(write_group.members) == 9
+    _assert_group_help(module, [*build_groups(), write_group])

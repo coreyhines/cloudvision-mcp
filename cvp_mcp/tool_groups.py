@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from cvp_mcp.grouped_tool import GroupedTool
+from cvp_mcp.members import device, endpoints, inventory, overlay, routing
 
 DOCSTRING_SURFACE = "46 operations behind 12 names (13 with writes)"
 
@@ -95,5 +96,31 @@ def iter_member_actions() -> Iterator[str]:
 
 
 def build_groups() -> list[GroupedTool]:
-    """Build grouped tool definitions (empty until members are wired)."""
-    return []
+    """Build grouped tool definitions whose members have been extracted."""
+    return [
+        GroupedTool(
+            name="inventory",
+            description="Get, list, or search CloudVision inventory devices.",
+            members=inventory.members(),
+        ),
+        GroupedTool(
+            name="endpoints",
+            description="Get, list, or filter endpoint locations.",
+            members=endpoints.members(),
+        ),
+        GroupedTool(
+            name="device",
+            description="Read device configuration and operational state.",
+            members=device.members(),
+        ),
+        GroupedTool(
+            name="overlay",
+            description="Read device EVPN and VxLAN operational state.",
+            members=overlay.members(),
+        ),
+        GroupedTool(
+            name="routing",
+            description="Read device BGP and route operational state.",
+            members=routing.members(),
+        ),
+    ]

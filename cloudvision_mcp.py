@@ -11,44 +11,24 @@ from typing import Any
 import grpc
 from mcp.server.fastmcp import FastMCP
 
-from cvp_mcp.env import cvp_credentials_missing_reasons, env_datadict_from_os
+from cvp_mcp.env import env_datadict_from_os
 from cvp_mcp.errors import client_error
 from cvp_mcp.grpc.bugs import grpc_all_bug_exposure
 from cvp_mcp.grpc.capability import probe_arista_v1_packages
-from cvp_mcp.grpc.config import grpc_get_device_config
 from cvp_mcp.grpc.connector import conn_get_info_bugs
 from cvp_mcp.grpc.device_resolve import (
     resolve_device_to_serial,
-    search_inventory_candidates,
     summarize_inventory_candidates,
 )
-from cvp_mcp.grpc.endpoint import (
-    endpoint_location_matches_filters,
-    grpc_endpoints_for_search_keys,
-    grpc_one_endpoint_location,
-)
-from cvp_mcp.grpc.endpoint_seed import seed_endpoint_search_keys
 from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.events import grpc_get_cvp_events, grpc_search_cvp_events
 from cvp_mcp.grpc.flow import conn_get_flow_data
 from cvp_mcp.grpc.hostname_resolve import resolve_endpoint_query
-from cvp_mcp.grpc.interfaces import (
-    grpc_get_interfaces,
-    grpc_get_ip_interfaces,
-    grpc_get_vlans,
-)
-from cvp_mcp.grpc.inventory import grpc_all_inventory, grpc_one_inventory_serial
+from cvp_mcp.grpc.inventory import grpc_one_inventory_serial
 from cvp_mcp.grpc.lifecycle import grpc_all_device_lifecycle
 from cvp_mcp.grpc.lldp import LLDP_DATA_SOURCE, grpc_get_lldp_neighbors
 from cvp_mcp.grpc.monitor import grpc_all_probe_status, grpc_one_probe_status
 from cvp_mcp.grpc.network_map import grpc_map_network_topology
-from cvp_mcp.grpc.overlay import (
-    grpc_get_evpn,
-    grpc_get_features,
-    grpc_get_system_health,
-    grpc_get_vxlan,
-)
-from cvp_mcp.grpc.routing import grpc_get_bgp_status, grpc_get_routes
 from cvp_mcp.grpc.studio_crud import (
     create_cvp_studio as studio_crud_create,
 )
@@ -104,6 +84,22 @@ from cvp_mcp.grpc.studios_write import (
     set_cvp_access_interface_description as studios_set_access_description,
 )
 from cvp_mcp.grpc.utils import _is_lab_device, createConnection
+from cvp_mcp.members.device import (
+    device_config,
+    device_features,
+    device_health,
+    device_interfaces,
+    device_ip_interfaces,
+    device_vlans,
+)
+from cvp_mcp.members.endpoints import endpoint_filter, endpoint_get, endpoint_list
+from cvp_mcp.members.inventory import (
+    inventory_get,
+    inventory_list,
+    inventory_search,
+)
+from cvp_mcp.members.overlay import overlay_evpn, overlay_vxlan
+from cvp_mcp.members.routing import routing_bgp, routing_routes
 from cvp_mcp.rate_limit import rate_limited_tool
 from cvp_mcp.tool_access import tool_enabled
 from cvp_mcp.transport_security_config import build_transport_security
@@ -190,17 +186,6 @@ mcp = FastMCP(
 # async function to return creds
 def get_env_vars():
     return env_datadict_from_os()
-
-
-def _endpoint_search_queries(search_term: str) -> list[str]:
-    """Try resolved IP first, then the raw string (CVP may index by hostname or IP)."""
-    st = (search_term or "").strip()
-    if not st:
-        return [st]
-    resolved = resolve_endpoint_query(st)
-    if resolved != st:
-        return [resolved, st]
-    return [st]
 
 
 def _resolve_device_serial(
@@ -294,7 +279,7 @@ def _attach_device_resolution(
 
 
 @mcp.tool()
-def get_cvp_one_device(device_id) -> str:
+def get_cvp_one_device(device_id) -> dict:
     """
     Prints out information about a single device in CVP
     For one switch it gets the serial number, system mac address,
@@ -304,39 +289,7 @@ def get_cvp_one_device(device_id) -> str:
     ``device_id``: Accepts CloudVision serial number (canonical for device datasets),
     hostname, FQDN, or system MAC; resolved to serial before querying.
     """
-    datadict = get_env_vars()
-    logging.debug(f"CVP Get One Device Tool - {device_id}")
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, device, warns, candidates = _resolve_device_serial(
-                        datadict, device_id, channel=channel
-                    )
-                    if not serial:
-                        err = {
-                            "error": (
-                                "device_ambiguous"
-                                if "device_ambiguous" in warns
-                                else "device_not_found"
-                            ),
-                            "device_id_input": (device_id or "").strip(),
-                            "warnings": warns,
-                        }
-                        rows = summarize_inventory_candidates(candidates)
-                        if rows:
-                            err["candidates"] = rows
-                        return json.dumps(err, indent=2)
-                    if device is None:
-                        device = grpc_one_inventory_serial(channel, serial)
-            case "http":
-                device = ""
-    except Exception as e:
-        logging.error(f"Error fetching device {device_id}: {e}")
-        return '{"error": "Device fetch failed"}'
-    logging.debug(json.dumps(device, indent=2))
-    return json.dumps(device, indent=2)
+    return inventory_get(device_id)
 
 
 @mcp.tool()
@@ -351,23 +304,7 @@ def get_cvp_all_inventory() -> dict:
     Per device: serial, system MAC, hostname, EOS version, streaming status,
     device type, hardware revision, FQDN, domain name, model.
     """
-    datadict = get_env_vars()
-    all_devices = {}
-    logging.info("CVP Get all Tool")
-    match CVP_TRANSPORT:
-        case "grpc":
-            connCreds = createConnection(datadict)
-            with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                all_active, all_inactive = grpc_all_inventory(
-                    channel, exclude_access_points=True
-                )
-                all_devices["streaming_active"] = all_active
-                all_devices["streaming_inactive"] = all_inactive
-        case "http":
-            return {"error": "grpc_only"}
-    logging.debug(json.dumps(all_devices))
-    # return(json.dumps(all_devices, indent=2))
-    return all_devices
+    return inventory_list()
 
 
 @mcp.tool()
@@ -382,45 +319,7 @@ def search_cvp_inventory(query: str) -> dict:
 
     Requires at least three characters in ``query``.
     """
-    datadict = get_env_vars()
-    q = (query or "").strip()
-    if len(q) < 3:
-        return tool_envelope(
-            data_source="inventory:search",
-            coverage="none",
-            items=[],
-            warnings=["query_too_short"],
-            obj={
-                "query": q,
-                "hint": "Provide at least 3 characters (e.g. 720xp, spine-1).",
-            },
-        )
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    matches, warns = search_inventory_candidates(
-                        datadict, q, channel=channel
-                    )
-                    items = summarize_inventory_candidates(matches)
-                    return tool_envelope(
-                        data_source="inventory:search",
-                        coverage="full" if items else "none",
-                        items=items,
-                        warnings=warns,
-                        obj={
-                            "query": q,
-                            "match_count": len(items),
-                            "next_step": "get_cvp_lldp_neighbors(device_id=<serial_number>)",
-                        },
-                    )
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error(
-            "inventory_search_failed", log_exc=e, context="search_cvp_inventory"
-        )
+    return inventory_search(query)
 
 
 # ===================================================
@@ -627,36 +526,7 @@ def get_cvp_endpoint_location(search_term: str) -> dict:
     (same idea as OPNsense MCP resolve-then-query); if the IP lookup returns nothing,
     the original search term is tried as a fallback.
     """
-    datadict = get_env_vars()
-    all_devices = {}
-    all_data = {}
-    all_endpoints = []
-    logging.info("CVP Get Endpoint Location")
-    match CVP_TRANSPORT:
-        case "grpc":
-            connCreds = createConnection(datadict)
-            with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                for q in _endpoint_search_queries(search_term):
-                    all_endpoints = grpc_one_endpoint_location(channel, q)
-                    if all_endpoints:
-                        break
-                # Gather information about the source switches for analytics
-                for _endpoint in all_endpoints:
-                    logging.debug(f"END FOR: {_endpoint} - {_endpoint.keys()}")
-                    for _device in _endpoint["location_list"]:
-                        serial_number = _device["device_id"]["value"]
-                        if serial_number not in all_devices.keys():
-                            all_devices[serial_number] = grpc_one_inventory_serial(
-                                channel, serial_number
-                            )
-        case "http":
-            logging.info("CVP HTTP Request for all devices")
-            all_devices = ""
-    all_data["devices"] = all_devices
-    all_data["endpoints"] = all_endpoints
-    logging.debug(json.dumps(all_data))
-    # return(json.dumps(all_data, indent=2))
-    return all_data
+    return endpoint_get(search_term)
 
 
 @mcp.tool()
@@ -673,60 +543,7 @@ def get_cvp_all_endpoint_locations(
     Optional ``device_serial_allowlist`` limits LLDP seeding to those switch
     serials. ``max_search_keys`` caps how many deduped keys are looked up.
     """
-    datadict = get_env_vars()
-    cred_miss = cvp_credentials_missing_reasons(datadict)
-    if cred_miss:
-        return {"error": "missing_cloudvision_credentials", "warnings": cred_miss}
-    all_devices = {}
-    logging.info("CVP Get All Endpoint Locations")
-    match CVP_TRANSPORT:
-        case "grpc":
-            connCreds = createConnection(datadict)
-            warnings: list[str] = []
-            try:
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    seed = seed_endpoint_search_keys(
-                        datadict,
-                        channel,
-                        device_serials=device_serial_allowlist,
-                    )
-                    warnings.extend(seed["warnings"])
-                    search_keys = seed["search_keys"]
-                    if (
-                        max_search_keys is not None
-                        and len(search_keys) > max_search_keys
-                    ):
-                        truncated = len(search_keys) - max_search_keys
-                        warnings.append(f"search_keys_truncated:{truncated}")
-                        search_keys = search_keys[:max_search_keys]
-                    lookup = grpc_endpoints_for_search_keys(channel, search_keys)
-                    warnings.extend(lookup["warnings"])
-                    all_endpoints = lookup["endpoints"]
-                    for _endpoint in all_endpoints:
-                        for _device in _endpoint["location_list"]:
-                            serial_number = _device["device_id"]["value"]
-                            if serial_number not in all_devices:
-                                all_devices[serial_number] = grpc_one_inventory_serial(
-                                    channel, serial_number
-                                )
-                    seed_stats = {
-                        **seed["seed_stats"],
-                        "getsome_hits": lookup["hits"],
-                        "getsome_misses": lookup["misses"],
-                        "lookup_method": lookup["method"],
-                    }
-                    return {
-                        "devices": all_devices,
-                        "endpoints": all_endpoints,
-                        "seed_stats": seed_stats,
-                        "warnings": warnings,
-                    }
-            except Exception as e:
-                logging.error("Endpoint location pipeline failed: %s", e)
-                return {"error": f"seed_failed:{e}", "warnings": warnings}
-        case "http":
-            logging.info("CVP HTTP Request for all devices")
-            return {"error": "grpc_only", "warnings": []}
+    return endpoint_list(device_serial_allowlist, max_search_keys)
 
 
 @mcp.tool()
@@ -740,90 +557,7 @@ def get_cvp_endpoint_locations_filtered(
     ``device_id``: optional; serial, hostname, FQDN, or system MAC (resolved to serial).
     Provide at least one filter; results are narrowed client-side after GetSome/GetOne lookup.
     """
-    datadict = get_env_vars()
-    cred_miss = cvp_credentials_missing_reasons(datadict)
-    if cred_miss:
-        return {"error": "missing_cloudvision_credentials", "warnings": cred_miss}
-    all_devices = {}
-    logging.info(
-        f"CVP Get Filtered Endpoint Locations: device={device_id} intf={interface} vlan={vlan_id}"
-    )
-    if device_id is None and interface is None and vlan_id is None:
-        logging.warning(
-            "get_cvp_endpoint_locations_filtered called with no filters; "
-            "this may return a large result set."
-        )
-    filter_device_id = device_id
-    match CVP_TRANSPORT:
-        case "grpc":
-            connCreds = createConnection(datadict)
-            warnings: list[str] = []
-            try:
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    if filter_device_id:
-                        serial, _info, warns, candidates = _resolve_device_serial(
-                            datadict, filter_device_id, channel=channel
-                        )
-                        if not serial:
-                            err = {
-                                "error": (
-                                    "device_ambiguous"
-                                    if "device_ambiguous" in warns
-                                    else "device_not_found"
-                                ),
-                                "device_id_input": (filter_device_id or "").strip(),
-                                "warnings": warns,
-                            }
-                            rows = summarize_inventory_candidates(candidates)
-                            if rows:
-                                err["candidates"] = rows
-                            return err
-                        filter_device_id = serial
-                    seed = seed_endpoint_search_keys(
-                        datadict,
-                        channel,
-                        device_serials=[filter_device_id] if filter_device_id else None,
-                    )
-                    warnings.extend(seed["warnings"])
-                    lookup = grpc_endpoints_for_search_keys(
-                        channel, seed["search_keys"]
-                    )
-                    warnings.extend(lookup["warnings"])
-                    all_endpoints = [
-                        ep
-                        for ep in lookup["endpoints"]
-                        if endpoint_location_matches_filters(
-                            ep,
-                            device_id=filter_device_id,
-                            interface=interface,
-                            vlan_id=vlan_id,
-                        )
-                    ]
-                    for _endpoint in all_endpoints:
-                        for _device in _endpoint["location_list"]:
-                            serial_number = _device["device_id"]["value"]
-                            if serial_number not in all_devices:
-                                all_devices[serial_number] = grpc_one_inventory_serial(
-                                    channel, serial_number
-                                )
-                    seed_stats = {
-                        **seed["seed_stats"],
-                        "getsome_hits": lookup["hits"],
-                        "getsome_misses": lookup["misses"],
-                        "lookup_method": lookup["method"],
-                    }
-                    return {
-                        "devices": all_devices,
-                        "endpoints": all_endpoints,
-                        "seed_stats": seed_stats,
-                        "warnings": warnings,
-                    }
-            except Exception as e:
-                logging.error("Filtered endpoint location pipeline failed: %s", e)
-                return {"error": f"seed_failed:{e}", "warnings": warnings}
-        case "http":
-            logging.info("CVP HTTP Request for all devices")
-            return {"error": "grpc_only", "warnings": []}
+    return endpoint_filter(device_id, interface, vlan_id)
 
 
 # ===================================================
@@ -849,24 +583,7 @@ def get_cvp_device_config(device_id: str, include_running_config: bool = False) 
 
     ``device_id``: serial, hostname, FQDN, or system MAC (resolved to serial internally).
     """
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    return grpc_get_device_config(
-                        channel,
-                        datadict,
-                        device_id,
-                        include_running_config=include_running_config,
-                    )
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error(
-            "device_config_failed", log_exc=e, context="get_cvp_device_config"
-        )
+    return device_config(device_id, include_running_config)
 
 
 @mcp.tool()
@@ -875,30 +592,7 @@ def get_cvp_interfaces(device_id: str) -> dict:
 
     ``device_id``: serial, hostname, FQDN, or system MAC (resolved to serial before Connector queries).
     """
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns, candidates = _resolve_device_serial(
-                        datadict, device_id, channel=channel
-                    )
-                    if not serial:
-                        return _device_not_found_envelope(
-                            device_id,
-                            "connector:device:Sysdb/interface",
-                            warns,
-                            candidates,
-                        )
-                    result = grpc_get_interfaces(datadict, serial)
-                    return _attach_device_resolution(result, device_id, serial, warns)
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error(
-            "interfaces_failed", log_exc=e, context="get_cvp_interfaces"
-        )
+    return device_interfaces(device_id)
 
 
 @mcp.tool()
@@ -907,28 +601,7 @@ def get_cvp_vlans(device_id: str) -> dict:
 
     ``device_id``: serial, hostname, FQDN, or system MAC (resolved to serial before Connector queries).
     """
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns, candidates = _resolve_device_serial(
-                        datadict, device_id, channel=channel
-                    )
-                    if not serial:
-                        return _device_not_found_envelope(
-                            device_id,
-                            "connector:device:Sysdb/bridging",
-                            warns,
-                            candidates,
-                        )
-                    result = grpc_get_vlans(datadict, serial)
-                    return _attach_device_resolution(result, device_id, serial, warns)
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error("vlans_failed", log_exc=e, context="get_cvp_vlans")
+    return device_vlans(device_id)
 
 
 @mcp.tool()
@@ -937,30 +610,7 @@ def get_cvp_ip_interfaces(device_id: str) -> dict:
 
     ``device_id``: serial, hostname, FQDN, or system MAC (resolved to serial before Connector queries).
     """
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns, candidates = _resolve_device_serial(
-                        datadict, device_id, channel=channel
-                    )
-                    if not serial:
-                        return _device_not_found_envelope(
-                            device_id,
-                            "connector:device:Sysdb/ip",
-                            warns,
-                            candidates,
-                        )
-                    result = grpc_get_ip_interfaces(datadict, serial)
-                    return _attach_device_resolution(result, device_id, serial, warns)
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error(
-            "ip_interfaces_failed", log_exc=e, context="get_cvp_ip_interfaces"
-        )
+    return device_ip_interfaces(device_id)
 
 
 # ===================================================
@@ -1042,30 +692,7 @@ def get_cvp_bgp_status(device_id: str) -> dict:
 
     ``device_id``: serial, hostname, FQDN, or system MAC (resolved to serial before Connector queries).
     """
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns, candidates = _resolve_device_serial(
-                        datadict, device_id, channel=channel
-                    )
-                    if not serial:
-                        return _device_not_found_envelope(
-                            device_id,
-                            "connector:device:Sysdb/routing/bgp",
-                            warns,
-                            candidates,
-                        )
-                    result = grpc_get_bgp_status(datadict, serial)
-                    return _attach_device_resolution(result, device_id, serial, warns)
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error(
-            "bgp_status_failed", log_exc=e, context="get_cvp_bgp_status"
-        )
+    return routing_bgp(device_id)
 
 
 @mcp.tool()
@@ -1075,28 +702,7 @@ def get_cvp_routes(device_id: str, vrf: str = "default") -> dict:
 
     ``device_id``: serial, hostname, FQDN, or system MAC (resolved to serial before Connector queries).
     """
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns, candidates = _resolve_device_serial(
-                        datadict, device_id, channel=channel
-                    )
-                    if not serial:
-                        return _device_not_found_envelope(
-                            device_id,
-                            "connector:device:Sysdb/routing",
-                            warns,
-                            candidates,
-                        )
-                    result = grpc_get_routes(datadict, serial, vrf=vrf)
-                    return _attach_device_resolution(result, device_id, serial, warns)
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error("routes_failed", log_exc=e, context="get_cvp_routes")
+    return routing_routes(device_id, vrf)
 
 
 @mcp.tool()
@@ -1258,28 +864,7 @@ def get_cvp_features(device_id: str) -> dict:
 
     ``device_id``: serial, hostname, FQDN, or system MAC (resolved to serial before Connector queries).
     """
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns, candidates = _resolve_device_serial(
-                        datadict, device_id, channel=channel
-                    )
-                    if not serial:
-                        return _device_not_found_envelope(
-                            device_id,
-                            "connector:device:Sysdb/feature",
-                            warns,
-                            candidates,
-                        )
-                    result = grpc_get_features(datadict, serial)
-                    return _attach_device_resolution(result, device_id, serial, warns)
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error("features_failed", log_exc=e, context="get_cvp_features")
+    return device_features(device_id)
 
 
 @mcp.tool()
@@ -1288,28 +873,7 @@ def get_cvp_evpn(device_id: str) -> dict:
 
     ``device_id``: serial, hostname, FQDN, or system MAC (resolved to serial before Connector queries).
     """
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns, candidates = _resolve_device_serial(
-                        datadict, device_id, channel=channel
-                    )
-                    if not serial:
-                        return _device_not_found_envelope(
-                            device_id,
-                            "connector:device:Sysdb/evpn",
-                            warns,
-                            candidates,
-                        )
-                    result = grpc_get_evpn(datadict, serial)
-                    return _attach_device_resolution(result, device_id, serial, warns)
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error("evpn_failed", log_exc=e, context="get_cvp_evpn")
+    return overlay_evpn(device_id)
 
 
 @mcp.tool()
@@ -1318,28 +882,7 @@ def get_cvp_vxlan(device_id: str) -> dict:
 
     ``device_id``: serial, hostname, FQDN, or system MAC (resolved to serial before Connector queries).
     """
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns, candidates = _resolve_device_serial(
-                        datadict, device_id, channel=channel
-                    )
-                    if not serial:
-                        return _device_not_found_envelope(
-                            device_id,
-                            "connector:device:Sysdb/vxlan",
-                            warns,
-                            candidates,
-                        )
-                    result = grpc_get_vxlan(datadict, serial)
-                    return _attach_device_resolution(result, device_id, serial, warns)
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error("vxlan_failed", log_exc=e, context="get_cvp_vxlan")
+    return overlay_vxlan(device_id)
 
 
 @mcp.tool()
@@ -1348,30 +891,7 @@ def get_cvp_system_health(device_id: str) -> dict:
 
     ``device_id``: serial, hostname, FQDN, or system MAC (resolved to serial before Connector queries).
     """
-    datadict = get_env_vars()
-    try:
-        match CVP_TRANSPORT:
-            case "grpc":
-                connCreds = createConnection(datadict)
-                with grpc.secure_channel(datadict["cvp"], connCreds) as channel:
-                    serial, _info, warns, candidates = _resolve_device_serial(
-                        datadict, device_id, channel=channel
-                    )
-                    if not serial:
-                        return _device_not_found_envelope(
-                            device_id,
-                            "connector:device:Sysdb/sys+environment",
-                            warns,
-                            candidates,
-                        )
-                    result = grpc_get_system_health(datadict, serial)
-                    return _attach_device_resolution(result, device_id, serial, warns)
-            case "http":
-                return {"error": "grpc_only"}
-    except Exception as e:
-        return client_error(
-            "system_health_failed", log_exc=e, context="get_cvp_system_health"
-        )
+    return device_health(device_id)
 
 
 # ===================================================

@@ -34,13 +34,19 @@ repos:
 
   - repo: local
     hooks:
+      # ``uv run`` re-syncs the editable install on every invocation. Without
+      # require_serial, pre-commit runs several file batches concurrently and
+      # they race on the same dist-info (flaky "failed to remove directory"
+      # exit 2). One invocation per hook, all files at once.
       - id: ruff-check
         name: ruff check
         entry: uv run ruff check
         language: system
         types: [python]
+        require_serial: true
       - id: black
         name: black
         entry: uv run black
         language: system
+        require_serial: true
         types: [python]

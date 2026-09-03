@@ -257,13 +257,17 @@ def _parse_inputs(raw: Any) -> Any:
 
 
 def _load_root_inputs(
-    datadict: dict[str, Any], workspace_id: str
+    datadict: dict[str, Any],
+    workspace_id: str,
+    studio_id: str = ACCESS_INTERFACE_STUDIO_ID,
 ) -> tuple[dict[str, Any] | None, str, str | None, list[str]]:
-    """Fetch the root Inputs document for the access-interface studio.
+    """Fetch the root Inputs document for one studio (access interfaces by default).
 
     Prefers the target workspace overlay and falls back to mainline
     (``workspaceId=""``), matching "first write copies mainline, later writes
     read the overlay". Returns ``(document, source_workspace_id, error, warnings)``.
+    ``studio_id`` exists for the 2.3 MSS root write; the 2.0 description CAS
+    keeps the default.
     """
     token, base, missing = _credentials(datadict)
     if missing:
@@ -293,9 +297,9 @@ def _load_root_inputs(
         key = value.get("key")
         if not isinstance(key, dict):
             continue
-        studio_id = _as_str(key.get("studioId") or key.get("studio_id"))
+        row_studio = _as_str(key.get("studioId") or key.get("studio_id"))
         row_ws = _as_str(key.get("workspaceId") or key.get("workspace_id"))
-        if studio_id != ACCESS_INTERFACE_STUDIO_ID:
+        if row_studio != studio_id:
             continue
         if row_ws not in (workspace_id, ""):
             continue

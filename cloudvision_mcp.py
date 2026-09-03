@@ -58,6 +58,9 @@ from cvp_mcp.grpc.studio_crud import (
 from cvp_mcp.grpc.studio_inputs_generic import (
     set_cvp_studio_inputs as studio_inputs_set,
 )
+from cvp_mcp.grpc.studio_mss_inputs import (
+    set_cvp_mss_policy_inputs as studio_mss_set_policy_inputs,
+)
 from cvp_mcp.grpc.studio_tags import (
     assign_cvp_studio_tags as studio_tags_assign,
 )
@@ -1501,7 +1504,7 @@ def get_cvp_workspaces() -> dict:
 @mcp.tool()
 @tool_enabled("get_cvp_workspace")
 def get_cvp_workspace(workspace_id: str) -> dict:
-    """One workspace by id, including responses map for build/submit polling."""
+    """One workspace by id, including responses map for build polling."""
     datadict = get_env_vars()
     try:
         return studios_get_workspace(datadict, workspace_id)
@@ -1780,6 +1783,33 @@ if writes_enabled():
                 "delete_studio_failed",
                 log_exc=e,
                 context="delete_cvp_studio",
+            )
+
+    @mcp.tool()
+    @tool_enabled("set_cvp_mss_policy_inputs")
+    def set_cvp_mss_policy_inputs(
+        workspace_id: str,
+        expected_inputs_sha256: str,
+        operations: list[dict],
+        confirm: bool = False,
+        preview_token: str | None = None,
+    ) -> dict:
+        """Compare-and-set MSS Service groups/services/rules/policy order. Does not submit."""
+        datadict = get_env_vars()
+        try:
+            return studio_mss_set_policy_inputs(
+                datadict,
+                workspace_id,
+                expected_inputs_sha256,
+                operations,
+                confirm=confirm,
+                preview_token_value=preview_token,
+            )
+        except Exception as e:
+            return client_error(
+                "set_mss_policy_inputs_failed",
+                log_exc=e,
+                context="set_cvp_mss_policy_inputs",
             )
 
 

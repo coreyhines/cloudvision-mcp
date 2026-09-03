@@ -145,6 +145,22 @@ Responses for the newer tools use a common envelope: `device_id`, `collected_at`
 
 Connector-based tools are best-effort: EOS paths differ by release, so `coverage` may be `partial` and `warnings` may explain empty results.
 
+### Studios write tools
+
+Registered only when `CLOUDVISION_MCP_ALLOW_WRITES=1` is set before the process starts. Every one is a **dry-run** unless called with `confirm=True` and the `preview_token` from a matching dry-run; every one refuses the mainline workspace and only drafts `ws-mcp-*` workspaces. **None of them can submit a workspace, approve or execute a change control** — the operator reviews the built workspace in the CloudVision UI and submits there. Spec: [`docs/studios-phase2-spec.md`](docs/studios-phase2-spec.md) and [`docs/studios-phase2-final-spec.md`](docs/studios-phase2-final-spec.md).
+
+| Tool | Purpose |
+| --- | --- |
+| `create_cvp_workspace` / `delete_cvp_workspace` | Draft workspace lifecycle (delete only while `WORKSPACE_STATE_PENDING`) |
+| `build_cvp_workspace` | `REQUEST_START_BUILD`; poll with `get_cvp_workspace` / `get_cvp_workspace_build` |
+| `set_cvp_access_interface_description` | Compare-and-set one port description in `studio-campus-access-interfaces` |
+| `set_cvp_studio_inputs` | Generic path-scoped Inputs write, description-only leaf allowlist, never the root path |
+| `assign_cvp_studio_tags` | Replace a studio's tag query with `expected_current_query` CAS |
+| `create_cvp_studio` / `delete_cvp_studio` | Studio upsert / remove with EOS lint on templates |
+| `set_cvp_mss_policy_inputs` | Compare-and-set MSS Service (`studio-mss-service`) static groups, services, rules and policy rule order via a bounded operation vocabulary; CAS on `inputs_sha256` from `get_cvp_studio_inputs` |
+
+Claude Code in auto mode has a permission classifier that can deny MCP write calls without a prompt. Allowlist the write tools in `permissions.allow` (for example `mcp__cloudvision-mcp__create_cvp_workspace`, `…__delete_cvp_workspace`, `…__build_cvp_workspace`, `…__set_cvp_access_interface_description`, `…__set_cvp_studio_inputs`, `…__assign_cvp_studio_tags`, `…__create_cvp_studio`, `…__delete_cvp_studio`, `…__set_cvp_mss_policy_inputs`); the dry-run / `preview_token` gate is what protects the write, and none of these can submit.
+
 ### Endpoint locations
 
 CloudVision rejects bulk `GetAll` on EndpointLocation (gRPC UNIMPLEMENTED). The bulk and filtered tools above **do not** call `GetAll`; they seed search keys from LLDP on active EOS switches, then resolve each key via **`GetSome`** (falling back to batched **`GetOne`** when needed).

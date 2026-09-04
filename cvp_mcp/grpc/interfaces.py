@@ -11,12 +11,10 @@ from cloudvision.Connector.grpc_client import GRPCClient
 
 from cvp_mcp.env import normalize_api_token
 from cvp_mcp.grpc.connector import (
-    get_device_path_either,
-    serialize_cloudvision_data,
+    get_device_path_keyed,
 )
 from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.sysdb_parse import (
-    flatten_nested_device_map,
     merge_intfcfg_and_status,
     parse_switchport_vlan_rows,
     parse_vlan_database,
@@ -28,23 +26,6 @@ def _cvp_addr(datadict: dict[str, Any]) -> str:
     if cvp and ":" not in cvp:
         cvp = f"{cvp}:443"
     return cvp
-
-
-def _flatten_intf_map(raw: dict[str, Any]) -> dict[str, Any]:
-    """Unwrap slice->interface->blob into interface->blob."""
-    if not raw:
-        return {}
-    flat: dict[str, Any] = {}
-    for k, v in raw.items():
-        if not isinstance(v, dict):
-            continue
-        if all(isinstance(x, dict) for x in v.values()):
-            for intf_name, blob in v.items():
-                if isinstance(blob, dict):
-                    flat[str(intf_name)] = blob
-        else:
-            flat[str(k)] = v
-    return flat
 
 
 def _connector_device_config(
@@ -76,16 +57,10 @@ def _connector_device_config(
         Wildcard(),
     ]
     with GRPCClient(grpcAddr=_cvp_addr(datadict), tokenValue=token) as client:
-        cfg_raw = serialize_cloudvision_data(
-            get_device_path_either(client, device_id, path_base)
-        )
-        st_raw = serialize_cloudvision_data(
-            get_device_path_either(client, device_id, path_status)
-        )
-    cfg_raw = flatten_nested_device_map(cfg_raw)
-    st_raw = flatten_nested_device_map(st_raw)
-    cfg_map = _flatten_intf_map(cfg_raw)
-    st_map = _flatten_intf_map(st_raw)
+        # Keyed by notification path: a plain merge collapses all interfaces
+        # onto one, yielding attribute names where interface names belong.
+        cfg_map = get_device_path_keyed(client, device_id, path_base[1:])
+        st_map = get_device_path_keyed(client, device_id, path_status[1:])
     return {"intfConfig": cfg_map, "intfStatus": st_map}
 
 
@@ -117,18 +92,11 @@ def _connector_device_config_with_client(
         "intfStatus",
         Wildcard(),
     ]
-    cfg_raw = serialize_cloudvision_data(
-        get_device_path_either(client, device_id, path_base)
-    )
-    st_raw = serialize_cloudvision_data(
-        get_device_path_either(client, device_id, path_status)
-    )
-    cfg_raw = flatten_nested_device_map(cfg_raw)
-    st_raw = flatten_nested_device_map(st_raw)
-    return {
-        "intfConfig": _flatten_intf_map(cfg_raw),
-        "intfStatus": _flatten_intf_map(st_raw),
-    }
+    # Keyed by notification path: a plain merge collapses all interfaces onto
+    # one, yielding attribute names where interface names belong.
+    cfg_map = get_device_path_keyed(client, device_id, path_base[1:])
+    st_map = get_device_path_keyed(client, device_id, path_status[1:])
+    return {"intfConfig": cfg_map, "intfStatus": st_map}
 
 
 def grpc_get_interfaces(datadict: dict[str, Any], device_id: str) -> dict[str, Any]:
@@ -191,11 +159,7 @@ def grpc_get_vlans(datadict: dict[str, Any], device_id: str) -> dict[str, Any]:
                 "switchIntfConfig",
                 Wildcard(),
             ]
-            sw_raw = flatten_nested_device_map(
-                serialize_cloudvision_data(
-                    get_device_path_either(client, device_id, sw_path)
-                )
-            )
+            sw_raw = get_device_path_keyed(client, device_id, sw_path[1:])
             if not isinstance(sw_raw, dict):
                 sw_raw = {}
             member_rows = parse_switchport_vlan_rows(sw_raw)
@@ -208,11 +172,7 @@ def grpc_get_vlans(datadict: dict[str, Any], device_id: str) -> dict[str, Any]:
                 [device_id, "Sysdb", "bridging", "vlan", Wildcard()],
             ):
                 try:
-                    vraw = flatten_nested_device_map(
-                        serialize_cloudvision_data(
-                            get_device_path_either(client, device_id, vlan_path)
-                        )
-                    )
+                    vraw = get_device_path_keyed(client, device_id, vlan_path[1:])
                     if isinstance(vraw, dict) and vraw:
                         vrows = parse_vlan_database(vraw)
                         for v in vrows:
@@ -309,11 +269,7 @@ def grpc_get_ip_interfaces(datadict: dict[str, Any], device_id: str) -> dict[str
                 ],
             ):
                 try:
-                    raw = flatten_nested_device_map(
-                        serialize_cloudvision_data(
-                            get_device_path_either(client, device_id, ip_path)
-                        )
-                    )
+                    raw = get_device_path_keyed(client, device_id, ip_path[1:])
                     if isinstance(raw, dict) and raw:
                         found = _parse_ip_addrs_from_map(raw)
                         for f in found:

@@ -100,3 +100,26 @@ def get_device_path_either(client, device_id: str, pathElts: list):
         if result:
             return result
     return get_device_path(client, device_id, list(pathElts))
+
+
+def get_device_path_keyed(
+    client, device_id: str, pathElts: list, dtype: str = "device"
+):
+    """Get a path, keyed by each notification's last path element.
+
+    ``get`` merges every notification's ``updates`` into one dict, which drops
+    the path and so collapses sibling nodes onto each other: a query for
+    ``.../intfConfig/*`` returned one interface's 39 attribute names instead of
+    the 61 interfaces. Keying by the notification path keeps them apart.
+    """
+    result: dict = {}
+    query = [create_query([(pathElts, [])], device_id, dtype)]
+    for batch in client.get(query):
+        for notif in batch["notifications"]:
+            updates = serialize_cloudvision_data(notif["updates"])
+            path = notif.get("path_elements") or []
+            if path:
+                result[str(path[-1])] = updates
+            elif isinstance(updates, dict):
+                result.update(updates)
+    return result

@@ -84,3 +84,19 @@ def conn_get_info_bugs(datadict, bug_ids):
     # logging.debug(type(all_bugs))
     # logging.debug(f"All Bugs: {json.dumps(all_bugs)}")
     return all_bugs
+
+
+def get_device_path_either(client, device_id: str, pathElts: list):
+    """Query ``pathElts``, tolerating a caller that repeated the device serial.
+
+    ``create_query`` already sets ``dataset.name`` to ``device_id``, so a path
+    that repeats the serial as its first element returns zero keys on this
+    tenant. Try the de-prefixed form first and fall back to the path as given,
+    so callers built either way keep working.
+    """
+    stripped = list(pathElts[1:]) if pathElts and pathElts[0] == device_id else None
+    if stripped:
+        result = get_device_path(client, device_id, stripped)
+        if result:
+            return result
+    return get_device_path(client, device_id, list(pathElts))

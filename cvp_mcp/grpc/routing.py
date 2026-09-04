@@ -9,7 +9,10 @@ from cloudvision.Connector.codec import Wildcard
 from cloudvision.Connector.grpc_client import GRPCClient
 
 from cvp_mcp.env import normalize_api_token
-from cvp_mcp.grpc.connector import get_device_path, serialize_cloudvision_data
+from cvp_mcp.grpc.connector import (
+    get_device_path_either,
+    serialize_cloudvision_data,
+)
 from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.sysdb_parse import flatten_nested_device_map
 
@@ -24,7 +27,7 @@ def _cvp_addr(datadict: dict[str, Any]) -> str:
 def _get_path(datadict: dict[str, Any], device_id: str, path: list) -> dict[str, Any]:
     token = normalize_api_token(datadict.get("cvtoken"))
     with GRPCClient(grpcAddr=_cvp_addr(datadict), tokenValue=token) as client:
-        raw = get_device_path(client, device_id, path)
+        raw = get_device_path_either(client, device_id, path)
     raw = serialize_cloudvision_data(raw)
     return flatten_nested_device_map(raw) if isinstance(raw, dict) else {}
 

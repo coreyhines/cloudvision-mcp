@@ -75,3 +75,43 @@ def test_meta_exposes_probe_path_member():
     members = meta.members()
     assert "probe_path" in members
     assert set(members["probe_path"].required) == {"device_id", "path"}
+
+
+def test_probe_path_does_not_prepend_device_id_to_path():
+    """The Connector Query already scopes the dataset, so the serial must not repeat."""
+    datadict = {"cvp": "cv.example.com", "cvtoken": "tok"}
+    seen = {}
+
+    def fake_get(_client, dataset, path_elts):
+        seen["dataset"] = dataset
+        seen["path"] = list(path_elts)
+        return {"fan1": {}}
+
+    with patch.object(path_probe, "GRPCClient", MagicMock()):
+        with patch.object(path_probe, "get_device_path", side_effect=fake_get):
+            path_probe.probe_device_path(datadict, "SN1", "Sysdb/environment/*")
+
+    assert seen["dataset"] == "SN1"
+    assert seen["path"][0] == "Sysdb"
+    assert "SN1" not in [p for p in seen["path"] if isinstance(p, str)]
+
+
+def test_meta_probe_path_resolves_hostname_to_serial():
+    """A hostname must be resolved; the Connector dataset is the serial."""
+    seen = {}
+
+    def fake_probe(_datadict, device_id, path):
+        seen["device_id"] = device_id
+        seen["path"] = path
+        return {"device_id": device_id, "warnings": [], "object": {}}
+
+    with patch.object(meta, "env_datadict_from_os", return_value={}):
+        with patch.object(
+            meta,
+            "resolve_device_to_serial",
+            return_value=("HBG254804R6", {}, [], []),
+        ):
+            with patch.object(meta, "probe_device_path", side_effect=fake_probe):
+                meta.meta_probe_path("720xp-48", "Sysdb/environment/*")
+
+    assert seen["device_id"] == "HBG254804R6"

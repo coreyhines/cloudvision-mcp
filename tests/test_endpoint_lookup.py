@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, patch
 
 import grpc
 
-import cloudvision_mcp as mcp_mod
 from cvp_mcp.grpc import endpoint
+from cvp_mcp.members import endpoints as endpoint_members
 
 
 class _FakeRpcError(grpc.RpcError):
@@ -134,19 +134,22 @@ def test_endpoint_location_matches_filters():
 
 
 def test_get_cvp_all_endpoint_locations_pipeline(monkeypatch):
-    monkeypatch.setattr(mcp_mod, "CVP_TRANSPORT", "grpc")
     monkeypatch.setattr(
-        mcp_mod, "get_env_vars", lambda: {"cvp": "h:443", "cvtoken": "t"}
+        endpoint_members,
+        "env_datadict_from_os",
+        lambda: {"cvp": "h:443", "cvtoken": "t"},
     )
-    monkeypatch.setattr(mcp_mod, "createConnection", lambda d: MagicMock())
+    monkeypatch.setattr(endpoint_members, "createConnection", lambda d: MagicMock())
 
     fake_channel = MagicMock()
     fake_channel.__enter__ = lambda s: fake_channel
     fake_channel.__exit__ = lambda *a: False
 
-    with patch("cloudvision_mcp.grpc.secure_channel", return_value=fake_channel):
+    with patch(
+        "cvp_mcp.members.endpoints.grpc.secure_channel", return_value=fake_channel
+    ):
         with patch(
-            "cloudvision_mcp.seed_endpoint_search_keys",
+            "cvp_mcp.members.endpoints.seed_endpoint_search_keys",
             return_value={
                 "search_keys": ["10.0.2.2"],
                 "seed_stats": {
@@ -158,7 +161,7 @@ def test_get_cvp_all_endpoint_locations_pipeline(monkeypatch):
             },
         ):
             with patch(
-                "cloudvision_mcp.grpc_endpoints_for_search_keys",
+                "cvp_mcp.members.endpoints.grpc_endpoints_for_search_keys",
                 return_value={
                     "endpoints": [
                         {
@@ -181,10 +184,10 @@ def test_get_cvp_all_endpoint_locations_pipeline(monkeypatch):
                 },
             ):
                 with patch(
-                    "cloudvision_mcp.grpc_one_inventory_serial",
+                    "cvp_mcp.members.endpoints.grpc_one_inventory_serial",
                     return_value={"serial_number": "SN1", "hostname": "720xp-24"},
                 ):
-                    out = mcp_mod.get_cvp_all_endpoint_locations()
+                    out = endpoint_members.endpoint_list()
 
     assert out["endpoints"][0]["hostname"] == "pi5"
     assert out["seed_stats"]["unique_search_keys"] == 1
@@ -193,10 +196,13 @@ def test_get_cvp_all_endpoint_locations_pipeline(monkeypatch):
 
 
 def test_get_cvp_all_endpoint_locations_missing_credentials(monkeypatch):
-    monkeypatch.setattr(mcp_mod, "CVP_TRANSPORT", "grpc")
-    monkeypatch.setattr(mcp_mod, "get_env_vars", lambda: {"cvp": "", "cvtoken": ""})
+    monkeypatch.setattr(
+        endpoint_members,
+        "env_datadict_from_os",
+        lambda: {"cvp": "", "cvtoken": ""},
+    )
 
-    out = mcp_mod.get_cvp_all_endpoint_locations()
+    out = endpoint_members.endpoint_list()
 
     assert out["error"] == "missing_cloudvision_credentials"
     assert "missing_CVP" in out["warnings"]
@@ -204,33 +210,37 @@ def test_get_cvp_all_endpoint_locations_missing_credentials(monkeypatch):
 
 
 def test_get_cvp_all_endpoint_locations_seed_failure(monkeypatch):
-    monkeypatch.setattr(mcp_mod, "CVP_TRANSPORT", "grpc")
     monkeypatch.setattr(
-        mcp_mod, "get_env_vars", lambda: {"cvp": "h:443", "cvtoken": "t"}
+        endpoint_members,
+        "env_datadict_from_os",
+        lambda: {"cvp": "h:443", "cvtoken": "t"},
     )
-    monkeypatch.setattr(mcp_mod, "createConnection", lambda d: MagicMock())
+    monkeypatch.setattr(endpoint_members, "createConnection", lambda d: MagicMock())
 
     fake_channel = MagicMock()
     fake_channel.__enter__ = lambda s: fake_channel
     fake_channel.__exit__ = lambda *a: False
 
-    with patch("cloudvision_mcp.grpc.secure_channel", return_value=fake_channel):
+    with patch(
+        "cvp_mcp.members.endpoints.grpc.secure_channel", return_value=fake_channel
+    ):
         with patch(
-            "cloudvision_mcp.seed_endpoint_search_keys",
+            "cvp_mcp.members.endpoints.seed_endpoint_search_keys",
             side_effect=RuntimeError("inventory down"),
         ):
-            out = mcp_mod.get_cvp_all_endpoint_locations()
+            out = endpoint_members.endpoint_list()
 
     assert out["error"] == "seed_failed:inventory down"
     assert out["warnings"] == []
 
 
 def test_get_cvp_endpoint_locations_filtered_smoke(monkeypatch):
-    monkeypatch.setattr(mcp_mod, "CVP_TRANSPORT", "grpc")
     monkeypatch.setattr(
-        mcp_mod, "get_env_vars", lambda: {"cvp": "h:443", "cvtoken": "t"}
+        endpoint_members,
+        "env_datadict_from_os",
+        lambda: {"cvp": "h:443", "cvtoken": "t"},
     )
-    monkeypatch.setattr(mcp_mod, "createConnection", lambda d: MagicMock())
+    monkeypatch.setattr(endpoint_members, "createConnection", lambda d: MagicMock())
 
     fake_channel = MagicMock()
     fake_channel.__enter__ = lambda s: fake_channel
@@ -249,13 +259,15 @@ def test_get_cvp_endpoint_locations_filtered_smoke(monkeypatch):
         ],
     }
 
-    with patch("cloudvision_mcp.grpc.secure_channel", return_value=fake_channel):
+    with patch(
+        "cvp_mcp.members.endpoints.grpc.secure_channel", return_value=fake_channel
+    ):
         with patch(
-            "cloudvision_mcp._resolve_device_serial",
+            "cvp_mcp.members.endpoints.resolve_device_to_serial",
             return_value=("SN1", {}, [], []),
         ):
             with patch(
-                "cloudvision_mcp.seed_endpoint_search_keys",
+                "cvp_mcp.members.endpoints.seed_endpoint_search_keys",
                 return_value={
                     "search_keys": ["10.0.2.2"],
                     "seed_stats": {
@@ -267,7 +279,7 @@ def test_get_cvp_endpoint_locations_filtered_smoke(monkeypatch):
                 },
             ):
                 with patch(
-                    "cloudvision_mcp.grpc_endpoints_for_search_keys",
+                    "cvp_mcp.members.endpoints.grpc_endpoints_for_search_keys",
                     return_value={
                         "endpoints": [ep],
                         "hits": 1,
@@ -277,10 +289,10 @@ def test_get_cvp_endpoint_locations_filtered_smoke(monkeypatch):
                     },
                 ):
                     with patch(
-                        "cloudvision_mcp.grpc_one_inventory_serial",
+                        "cvp_mcp.members.endpoints.grpc_one_inventory_serial",
                         return_value={"serial_number": "SN1"},
                     ):
-                        out = mcp_mod.get_cvp_endpoint_locations_filtered(
+                        out = endpoint_members.endpoint_filter(
                             device_id="720xp-24", interface="Ethernet6"
                         )
 
@@ -289,12 +301,13 @@ def test_get_cvp_endpoint_locations_filtered_smoke(monkeypatch):
 
 
 def test_get_cvp_endpoint_locations_filtered_missing_credentials(monkeypatch):
-    monkeypatch.setattr(mcp_mod, "CVP_TRANSPORT", "grpc")
     monkeypatch.setattr(
-        mcp_mod, "get_env_vars", lambda: {"cvp": "h:443", "cvtoken": ""}
+        endpoint_members,
+        "env_datadict_from_os",
+        lambda: {"cvp": "h:443", "cvtoken": ""},
     )
 
-    out = mcp_mod.get_cvp_endpoint_locations_filtered(device_id="SN1")
+    out = endpoint_members.endpoint_filter(device_id="SN1")
 
     assert out["error"] == "missing_cloudvision_credentials"
     assert "missing_CVPTOKEN" in out["warnings"]

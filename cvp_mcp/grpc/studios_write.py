@@ -479,7 +479,7 @@ def create_cvp_workspace(
         "resource_time": None,
     }
 
-    if not confirm:
+    if confirm is not True:
         fields["preview_token"] = preview_token(tool, token_args)
         return _outcome(
             tool,
@@ -628,7 +628,7 @@ def delete_cvp_workspace(
         "resource_time": None,
     }
 
-    if not confirm:
+    if confirm is not True:
         fields["preview_token"] = preview_token(tool, token_args)
         return _outcome(
             tool,
@@ -823,7 +823,7 @@ def build_cvp_workspace(
         "resource_time": None,
     }
 
-    if not confirm:
+    if confirm is not True:
         fields["preview_token"] = preview_token(tool, token_args)
         return _outcome(
             tool,
@@ -1163,7 +1163,7 @@ def set_cvp_access_interface_description(
         "resource_time": None,
     }
 
-    if not confirm:
+    if confirm is not True:
         fields["preview_token"] = preview_token(tool, token_args)
         return _outcome(
             tool,

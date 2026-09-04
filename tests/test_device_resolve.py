@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import grpc
 
 from cvp_mcp.grpc import device_resolve
+from cvp_mcp.members.topology import topology_lldp
 
 
 class _FakeNotFound(grpc.RpcError):
@@ -217,11 +218,11 @@ def test_resolve_model_shorthand_single_match():
     assert candidates == []
 
 
-@patch("cloudvision_mcp._resolve_device_serial")
-@patch("cloudvision_mcp.grpc_get_lldp_neighbors")
-@patch("cloudvision_mcp.grpc.secure_channel")
-@patch("cloudvision_mcp.createConnection")
-@patch("cloudvision_mcp.get_env_vars")
+@patch("cvp_mcp.members.topology.resolve_device_to_serial")
+@patch("cvp_mcp.members.topology.grpc_get_lldp_neighbors")
+@patch("cvp_mcp.members.topology.grpc.secure_channel")
+@patch("cvp_mcp.members.topology.createConnection")
+@patch("cvp_mcp.members.topology.env_datadict_from_os")
 def test_lldp_tool_resolves_hostname_before_connector(
     mock_env: MagicMock,
     mock_conn: MagicMock,
@@ -229,8 +230,6 @@ def test_lldp_tool_resolves_hostname_before_connector(
     mock_lldp: MagicMock,
     mock_resolve: MagicMock,
 ) -> None:
-    from cloudvision_mcp import get_cvp_lldp_neighbors
-
     mock_env.return_value = {"cvp": "test.example:443", "cvtoken": "tok"}
     mock_conn.return_value = MagicMock()
     ctx = MagicMock()
@@ -245,7 +244,7 @@ def test_lldp_tool_resolves_hostname_before_connector(
         "object": {},
     }
 
-    result = get_cvp_lldp_neighbors("720xp-24")
+    result = topology_lldp("720xp-24")
 
     mock_lldp.assert_called_once()
     assert mock_lldp.call_args[0][1] == "JPE19151499"
@@ -254,18 +253,16 @@ def test_lldp_tool_resolves_hostname_before_connector(
     assert result["coverage"] == "full"
 
 
-@patch("cloudvision_mcp._resolve_device_serial")
-@patch("cloudvision_mcp.grpc.secure_channel")
-@patch("cloudvision_mcp.createConnection")
-@patch("cloudvision_mcp.get_env_vars")
+@patch("cvp_mcp.members.topology.resolve_device_to_serial")
+@patch("cvp_mcp.members.topology.grpc.secure_channel")
+@patch("cvp_mcp.members.topology.createConnection")
+@patch("cvp_mcp.members.topology.env_datadict_from_os")
 def test_lldp_tool_unknown_device(
     mock_env: MagicMock,
     mock_conn: MagicMock,
     mock_channel: MagicMock,
     mock_resolve: MagicMock,
 ) -> None:
-    from cloudvision_mcp import get_cvp_lldp_neighbors
-
     mock_env.return_value = {"cvp": "test.example:443", "cvtoken": "tok"}
     mock_conn.return_value = MagicMock()
     ctx = MagicMock()
@@ -278,7 +275,7 @@ def test_lldp_tool_unknown_device(
         [_PHYSICAL, _PHYSICAL_48],
     )
 
-    result = get_cvp_lldp_neighbors("720xp")
+    result = topology_lldp("720xp")
 
     assert "device_ambiguous" in result.get("warnings", [])
     assert result["coverage"] == "none"

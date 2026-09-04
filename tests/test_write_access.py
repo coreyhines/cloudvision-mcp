@@ -18,7 +18,7 @@ def test_no_submit_gate_exists():
 
 
 def test_writes_enabled_only_when_one(monkeypatch):
-    for value in (None, "", "0", "true", "yes", "11", "01", "1.0"):
+    for value in (None, "", "0", "true", "yes", "11", "01", "1.0", " 1 "):
         if value is None:
             monkeypatch.delenv(WRITES_ENV, raising=False)
         else:
@@ -26,9 +26,6 @@ def test_writes_enabled_only_when_one(monkeypatch):
         assert writes_enabled() is False, value
 
     monkeypatch.setenv(WRITES_ENV, "1")
-    assert writes_enabled() is True
-    # Surrounding whitespace is stripped before comparison, so " 1 " is on.
-    monkeypatch.setenv(WRITES_ENV, " 1 ")
     assert writes_enabled() is True
 
 

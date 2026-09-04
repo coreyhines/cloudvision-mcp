@@ -34,9 +34,9 @@ class _TokenBucket:
 
 # Per-tool buckets: (max calls, window seconds)
 _EXPENSIVE_TOOL_LIMITS: dict[str, tuple[int, float]] = {
-    "get_cvp_all_inventory": (6, 60.0),
-    "map_cvp_network_topology": (4, 60.0),
-    "search_cvp_events": (10, 60.0),
+    "inventory.list": (6, 60.0),
+    "topology.map": (4, 60.0),
+    "events.search": (10, 60.0),
 }
 
 _buckets: dict[str, _TokenBucket] = {
@@ -45,16 +45,35 @@ _buckets: dict[str, _TokenBucket] = {
 }
 
 
+def reset_rate_limit_buckets() -> None:
+    """Replace all buckets with fresh token buckets (for tests)."""
+    _buckets.clear()
+    _buckets.update(
+        {
+            name: _TokenBucket(rate, period)
+            for name, (rate, period) in _EXPENSIVE_TOOL_LIMITS.items()
+        }
+    )
+
+
+def check_rate_limit(rate_limit_key: str) -> dict[str, str] | None:
+    """Return a rate-limit error envelope when the bucket denies, else ``None``."""
+    bucket = _buckets.get(rate_limit_key)
+    if bucket is not None and not bucket.allow():
+        logging.warning("Rate limit exceeded for %s", rate_limit_key)
+        return {"error": "rate_limit_exceeded", "tool": rate_limit_key}
+    return None
+
+
 def rate_limited_tool(tool_name: str) -> Callable[[_F], _F]:
     """Decorator that rejects calls when the per-tool rate limit is exceeded."""
 
     def decorator(fn: _F) -> _F:
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            bucket = _buckets.get(tool_name)
-            if bucket is not None and not bucket.allow():
-                logging.warning("Rate limit exceeded for %s", tool_name)
-                return {"error": "rate_limit_exceeded", "tool": tool_name}
+            err = check_rate_limit(tool_name)
+            if err is not None:
+                return err
             return fn(*args, **kwargs)
 
         return wrapper  # type: ignore[return-value]

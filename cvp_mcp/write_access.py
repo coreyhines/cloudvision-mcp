@@ -19,13 +19,9 @@ WRITES_ENV = "CLOUDVISION_MCP_ALLOW_WRITES"
 # the human reviews and submits the workspace in the CVP UI.
 
 
-def _env_is_one(name: str) -> bool:
-    return os.environ.get(name, "").strip() == "1"
-
-
 def writes_enabled() -> bool:
     """Return True only when ``CLOUDVISION_MCP_ALLOW_WRITES`` is exactly ``"1"``."""
-    return _env_is_one(WRITES_ENV)
+    return os.environ.get(WRITES_ENV) == "1"
 
 
 def preview_token(tool_name: str, args: dict) -> str:

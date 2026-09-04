@@ -15,6 +15,17 @@ def disabled_tools() -> set[str]:
     return {t.strip() for t in raw.split(",") if t.strip()}
 
 
+def is_tool_disabled(tool_key: str) -> bool:
+    """True when ``tool_key`` or its group prefix is in ``CVP_MCP_DISABLED_TOOLS``."""
+    disabled = disabled_tools()
+    if tool_key in disabled:
+        return True
+    if "." in tool_key:
+        group = tool_key.split(".", 1)[0]
+        return group in disabled
+    return False
+
+
 def tool_enabled(tool_name: str) -> Callable[[_F], _F]:
     """Skip tool execution when listed in ``CVP_MCP_DISABLED_TOOLS``."""
 

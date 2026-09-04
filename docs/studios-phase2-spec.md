@@ -32,7 +32,7 @@ to the snake_case in the envelope.
 | Inputs resource key for this studio | **root**: `path: {}` / `path_values: []` — all ports in **one** document |
 | Access studio (this tenant) | `studio-campus-access-interfaces` |
 | 720xp-24 | serial `JPE19151499`, hostname `720xp-24` |
-| 720xp-48 | serial `HBG254804R6`, hostname `720xp-48` (live `search_cvp_inventory` 2026-08-22) |
+| 720xp-48 | serial `HBG254804R6`, hostname `720xp-48` (live `inventory.search` 2026-08-22) |
 | Write helper module | `cvp_mcp/grpc/studios_write.py` |
 | Gate module | `cvp_mcp/write_access.py` |
 
@@ -54,13 +54,13 @@ That job does **not** need: tag replace, studio create/delete, or submit.
 
 | Slice | Tools | Ship when |
 | --- | --- | --- |
-| **2.0** | `create_cvp_workspace`; `delete_cvp_workspace`; `set_cvp_access_interface_description`; `build_cvp_workspace` | Writes env `"1"`. Locator fixture: `tests/fixtures/inputs_ethernet6_720xp24_locator.json` |
-| **2.1** | `assign_cvp_studio_tags` (no unassign-all); generic `set_cvp_studio_inputs` | Shipped. Tags: expected-current required (`""` valid = unassigned) |
-| **2.2** | `create_cvp_studio`; `delete_cvp_studio` | Shipped. Templates must never contain interface shutdown; no ChangeControlConfig |
-| **2.3** | `set_cvp_mss_policy_inputs` | `docs/studios-phase2-final-spec.md` §D |
+| **2.0** | `studios_write.create_workspace`; `studios_write.delete_workspace`; `studios_write.set_description`; `studios_write.build` | Writes env `"1"`. Locator fixture: `tests/fixtures/inputs_ethernet6_720xp24_locator.json` |
+| **2.1** | `studios_write.assign_tags` (no unassign-all); generic `studios_write.set_inputs` | Shipped. Tags: expected-current required (`""` valid = unassigned) |
+| **2.2** | `studios_write.create_studio`; `studios_write.delete_studio` | Shipped. Templates must never contain interface shutdown; no ChangeControlConfig |
+| **2.3** | `studios_write.set_mss_inputs` | `docs/studios-phase2-final-spec.md` §D |
 | **Submit** | retired 2026-09-02 | never — the human submits the reviewed workspace in the CVP UI |
 
-`get_cvp_studio_assigned_tags` can ship with 2.0 as a **best-effort read** (`GET AssignedTags/all` is live; no-row is `query=""`) but is **not** required for description CAS. Generic `set_cvp_studio_inputs` is **not** 2.0.
+`studios.tags` can ship with 2.0 as a **best-effort read** (`GET AssignedTags/all` is live; no-row is `query=""`) but is **not** required for description CAS. Generic `studios_write.set_inputs` is **not** 2.0.
 
 ## Goals
 
@@ -77,23 +77,23 @@ That job does **not** need: tag replace, studio create/delete, or submit.
 - CC create / start / approve / execute (UI).
 - Configlet CRUD.
 - One-shot “do the whole flow” tools.
-- Polling inside write tools (Phase 1 `get_cvp_workspace` / `get_cvp_workspace_build`).
+- Polling inside write tools (Phase 1 `studios.get_workspace` / `studios.get_build`).
 - Running-config via Connector, eAPI, or SSH.
 
 ## Phase 1 tools reused
 
 | Tool | Role |
 | --- | --- |
-| `get_cvp_studios` / `get_cvp_studio` | Pick studio; refuse `immutable` / `from_package` |
-| `get_cvp_studio_inputs` | Current document + path discovery |
-| `search_cvp_studio_templates` | Which studio owns a string |
-| `get_cvp_workspaces` / `get_cvp_workspace` | Existence, `state`, `responses.values` |
-| `get_cvp_workspace_build` | `BUILD_STATE_*` |
-| `get_cvp_designed_config` | Before/after designed CLI |
+| `studios.list` / `studios.get` | Pick studio; refuse `immutable` / `from_package` |
+| `studios.inputs` | Current document + path discovery |
+| `studios.search_templates` | Which studio owns a string |
+| `studios.list_workspaces` / `studios.get_workspace` | Existence, `state`, `responses.values` |
+| `studios.get_build` | `BUILD_STATE_*` |
+| `compliance.designed_config` | Before/after designed CLI |
 
 ## 2.0 read tool
 
-### `get_cvp_studio_assigned_tags`
+### `studios.tags`
 
 | | |
 | --- | --- |
@@ -173,7 +173,7 @@ Dry-run order:
 Every preflight GET that a refuse/preview needs must return HTTP 200. Any other
 status → `preflight_failed`, no POST/DELETE. A warning is never enough to proceed.
 
-`get_cvp_designed_config` is **mainline**. It is a before-snapshot, not the
+`compliance.designed_config` is **mainline**. It is a before-snapshot, not the
 workspace review. Humans review the workspace diff in the CVP UI.
 
 DELETE uses `delete_resource_config(path, params)` — path matched exactly
@@ -189,14 +189,14 @@ Hard-code `request` per tool. Never take it from the model.
 ## Canonical workflow
 
 ```text
-2.0  create_cvp_workspace
-     set_cvp_access_interface_description   (description CAS; preserve siblings)
-     build_cvp_workspace       (REQUEST_START_BUILD)
-     poll get_cvp_workspace     until responses.values[<request_id>] or 30s
-     poll get_cvp_workspace_build until BUILD_STATE_SUCCESS|FAIL|CANCELED
+2.0  studios_write.create_workspace
+     studios_write.set_description   (description CAS; preserve siblings)
+     studios_write.build             (REQUEST_START_BUILD)
+     poll studios.get_workspace      until responses.values[<request_id>] or 30s
+     poll studios.get_build          until BUILD_STATE_SUCCESS|FAIL|CANCELED
 
-2.1  assign_cvp_studio_tags    (optional; expected_current_query required)
-2.3  set_cvp_mss_policy_inputs (MSS Service root; digest CAS)
+2.1  studios_write.assign_tags       (optional; expected_current_query required)
+2.3  studios_write.set_mss_inputs    (MSS Service root; digest CAS)
 
      human reviews the workspace diff, submits, approves/executes CC in CVP UI — never MCP
 ```
@@ -301,7 +301,7 @@ unknown as pending.
 Every write: `tool_envelope(..., obj=...)` with `object.dry_run: true` when
 `confirm=False`.
 
-### `create_cvp_workspace` (2.0)
+### `studios_write.create_workspace` (2.0)
 
 | | |
 | --- | --- |
@@ -312,7 +312,7 @@ Every write: `tool_envelope(..., obj=...)` with `object.dry_run: true` when
 | **Id** | Caller supplies `ws-mcp-<purpose>-<YYYYMMDD>-<uuid8>` |
 | **Returns** | `workspace_id`, `display_name`, `resource_time`, `dry_run` |
 
-### `delete_cvp_workspace` (2.0)
+### `studios_write.delete_workspace` (2.0)
 
 | | |
 | --- | --- |
@@ -320,7 +320,7 @@ Every write: `tool_envelope(..., obj=...)` with `object.dry_run: true` when
 | **Parameters** | `workspace_id: str`, `confirm: bool = False` |
 | **Preflight** | GET Workspace. Missing → no DELETE. `state` must be `WORKSPACE_STATE_PENDING`. Submitted/abandoned → refuse. |
 
-### `set_cvp_access_interface_description` (2.0)
+### `studios_write.set_description` (2.0)
 
 Purpose-built CAS. Not a generic Inputs POST. Studio is fixed:
 `studio-campus-access-interfaces`.
@@ -333,7 +333,7 @@ Purpose-built CAS. Not a generic Inputs POST. Studio is fixed:
 | **Refuse** | Empty/`builtin-` workspace; `immutable` / `from_package`; 0 or >1 locator matches (`inputs_path_not_found`); CAS mismatch; tree diff ≠ one description leaf; caller extra fields; EOS lint (`disruptive_content_forbidden`). |
 | **Returns** | `workspace_id`, `device_id`, `interface`, `locator`, before/after description, `posted_at_root: true` |
 
-### `set_cvp_studio_inputs` (2.1, not 2.0)
+### `studios_write.set_inputs` (2.1, not 2.0)
 
 Generic path POST. Same helper rules. Diff proposed `inputs` against current
 document; refuse `input_key_not_allowed` if any **changed leaf** is not in
@@ -343,11 +343,11 @@ allowed here — that is how a studio emits `shutdown` without the word appearin
 **No** `replace_all_inputs` until a later
 explicit revision. Empty `path_values` → `root_path_forbidden`. Resource
 `path.values` is not a JSON key path into `inputs`. Access Interfaces' only
-Resource row is `[]` and stays 2.0 `set_cvp_access_interface_description`. MSS Service
+Resource row is `[]` and stays 2.0 `studios_write.set_description`. MSS Service
 (`studio-mss-service`) is also a single root row; its edits are **2.3**
-`set_cvp_mss_policy_inputs` (`docs/studios-phase2-final-spec.md` §D), not this tool.
+`studios_write.set_mss_inputs` (`docs/studios-phase2-final-spec.md` §D), not this action.
 
-### `build_cvp_workspace` (2.0)
+### `studios_write.build` (2.0)
 
 | | |
 | --- | --- |
@@ -361,7 +361,7 @@ Resource row is `[]` and stays 2.0 `set_cvp_access_interface_description`. MSS S
 On this tenant `responses.values` is keyed by `request_id` ≈ `buildId`. Confirm
 `WorkspaceBuild.key.buildId`.
 
-### `assign_cvp_studio_tags` (2.1)
+### `studios_write.assign_tags` (2.1)
 
 | | |
 | --- | --- |
@@ -376,7 +376,7 @@ Retired 2026-09-02. Never registered; library removed. The MCP stops at build;
 the human reviews and submits the workspace in the CVP UI. See
 `docs/studios-phase2-final-spec.md` §A.
 
-### `create_cvp_studio` / `delete_cvp_studio` (2.2)
+### `studios_write.create_studio` / `studios_write.delete_studio` (2.2)
 
 Upsert StudioConfig / `remove: true`. Refuse `immutable` / `from_package`.
 MCP studio templates **must never** contain interface `shutdown` / `no shutdown`.
@@ -388,9 +388,9 @@ No `allow_disruptive` exception. Also refuse `no interface`, `reload`,
 
 | Step | Need | From |
 | --- | --- | --- |
-| Studio | id + flags | `get_cvp_studios` / `get_cvp_studio` |
-| Inputs | document + `path.values` | `get_cvp_studio_inputs` + path fixture |
-| Tags | query | `get_cvp_studio_assigned_tags` |
+| Studio | id + flags | `studios.list` / `studios.get` |
+| Inputs | document + `path.values` | `studios.inputs` + path fixture |
+| Tags | query | `studios.tags` |
 | Workspace | unique id | caller; GET uniqueness |
 | Build | `request_id` | UUIDv4 if omitted |
 
@@ -454,15 +454,15 @@ Tools:
 | Tool | Slice |
 | --- | --- |
 | Phase 1 eight reads | shipped |
-| `get_cvp_studio_assigned_tags` | 2.0 optional read (URL probed; no-row is `query=""`) |
-| `create_cvp_workspace` | 2.0 |
-| `delete_cvp_workspace` | 2.0 |
-| `set_cvp_access_interface_description` | 2.0 (path fixture required) |
-| `set_cvp_studio_inputs` | 2.1 generic; no root replace |
-| `build_cvp_workspace` | 2.0 |
-| `assign_cvp_studio_tags` | 2.1 |
+| `studios.tags` | 2.0 optional read (URL probed; no-row is `query=""`) |
+| `studios_write.create_workspace` | 2.0 |
+| `studios_write.delete_workspace` | 2.0 |
+| `studios_write.set_description` | 2.0 (path fixture required) |
+| `studios_write.set_inputs` | 2.1 generic; no root replace |
+| `studios_write.build` | 2.0 |
+| `studios_write.assign_tags` | 2.1 |
 | `submit_cvp_workspace` | retired 2026-09-02 (never registered; library removed) |
-| `create_cvp_studio` / `delete_cvp_studio` | 2.2 |
-| `set_cvp_mss_policy_inputs` | 2.3 (`docs/studios-phase2-final-spec.md`) |
+| `studios_write.create_studio` / `studios_write.delete_studio` | 2.2 |
+| `studios_write.set_mss_inputs` | 2.3 (`docs/studios-phase2-final-spec.md`) |
 
 No ChangeControlConfig. No configlets.

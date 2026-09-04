@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from cvp_mcp.members.topology import topology_lldp
+
 # ---------------------------------------------------------------------------
 # _is_lab_device helper
 # ---------------------------------------------------------------------------
@@ -132,18 +134,16 @@ def _make_channel_mock() -> MagicMock:
     return ctx
 
 
-@patch("cloudvision_mcp._resolve_device_serial")
-@patch("cloudvision_mcp.grpc.secure_channel")
-@patch("cloudvision_mcp.createConnection")
-@patch("cloudvision_mcp.get_env_vars")
+@patch("cvp_mcp.members.topology.resolve_device_to_serial")
+@patch("cvp_mcp.members.topology.grpc.secure_channel")
+@patch("cvp_mcp.members.topology.createConnection")
+@patch("cvp_mcp.members.topology.env_datadict_from_os")
 def test_lldp_blocks_virtual_eos_by_default(
     mock_env: MagicMock,
     mock_conn: MagicMock,
     mock_channel: MagicMock,
     mock_resolve: MagicMock,
 ) -> None:
-    from cloudvision_mcp import get_cvp_lldp_neighbors
-
     mock_env.return_value = {"cvp": "test.example:443", "cvtoken": "tok"}
     mock_conn.return_value = MagicMock()
     mock_channel.return_value = _make_channel_mock()
@@ -155,24 +155,22 @@ def test_lldp_blocks_virtual_eos_by_default(
     }
     mock_resolve.return_value = ("VEOS1", device_info, [], [])
 
-    result = get_cvp_lldp_neighbors("VEOS1")
+    result = topology_lldp("VEOS1")
 
     assert "device_excluded_lab_or_virtual" in result.get("warnings", [])
     assert result["coverage"] == "none"
 
 
-@patch("cloudvision_mcp._resolve_device_serial")
-@patch("cloudvision_mcp.grpc.secure_channel")
-@patch("cloudvision_mcp.createConnection")
-@patch("cloudvision_mcp.get_env_vars")
+@patch("cvp_mcp.members.topology.resolve_device_to_serial")
+@patch("cvp_mcp.members.topology.grpc.secure_channel")
+@patch("cvp_mcp.members.topology.createConnection")
+@patch("cvp_mcp.members.topology.env_datadict_from_os")
 def test_lldp_allows_virtual_eos_when_flag_set(
     mock_env: MagicMock,
     mock_conn: MagicMock,
     mock_channel: MagicMock,
     mock_resolve: MagicMock,
 ) -> None:
-    from cloudvision_mcp import get_cvp_lldp_neighbors
-
     mock_env.return_value = {"cvp": "test.example:443", "cvtoken": "tok"}
     mock_conn.return_value = MagicMock()
     mock_channel.return_value = _make_channel_mock()
@@ -184,26 +182,24 @@ def test_lldp_allows_virtual_eos_when_flag_set(
     }
     mock_resolve.return_value = ("VEOS1", device_info, [], [])
 
-    with patch("cloudvision_mcp.grpc_get_lldp_neighbors") as mock_lldp:
+    with patch("cvp_mcp.members.topology.grpc_get_lldp_neighbors") as mock_lldp:
         mock_lldp.return_value = {"coverage": "full", "items": [], "warnings": []}
-        result = get_cvp_lldp_neighbors("VEOS1", include_lab_devices=True)
+        result = topology_lldp("VEOS1", include_lab_devices=True)
 
     assert "device_excluded_lab_or_virtual" not in result.get("warnings", [])
     mock_lldp.assert_called_once()
 
 
-@patch("cloudvision_mcp._resolve_device_serial")
-@patch("cloudvision_mcp.grpc.secure_channel")
-@patch("cloudvision_mcp.createConnection")
-@patch("cloudvision_mcp.get_env_vars")
+@patch("cvp_mcp.members.topology.resolve_device_to_serial")
+@patch("cvp_mcp.members.topology.grpc.secure_channel")
+@patch("cvp_mcp.members.topology.createConnection")
+@patch("cvp_mcp.members.topology.env_datadict_from_os")
 def test_lldp_blocks_inactive_device(
     mock_env: MagicMock,
     mock_conn: MagicMock,
     mock_channel: MagicMock,
     mock_resolve: MagicMock,
 ) -> None:
-    from cloudvision_mcp import get_cvp_lldp_neighbors
-
     mock_env.return_value = {"cvp": "test.example:443", "cvtoken": "tok"}
     mock_conn.return_value = MagicMock()
     mock_channel.return_value = _make_channel_mock()
@@ -215,31 +211,29 @@ def test_lldp_blocks_inactive_device(
     }
     mock_resolve.return_value = ("PHYS1", device_info, [], [])
 
-    result = get_cvp_lldp_neighbors("PHYS1")
+    result = topology_lldp("PHYS1")
 
     assert "device_inactive_not_streaming" in result.get("warnings", [])
     assert result["coverage"] == "none"
 
 
-@patch("cloudvision_mcp._resolve_device_serial")
-@patch("cloudvision_mcp.grpc.secure_channel")
-@patch("cloudvision_mcp.createConnection")
-@patch("cloudvision_mcp.get_env_vars")
+@patch("cvp_mcp.members.topology.resolve_device_to_serial")
+@patch("cvp_mcp.members.topology.grpc.secure_channel")
+@patch("cvp_mcp.members.topology.createConnection")
+@patch("cvp_mcp.members.topology.env_datadict_from_os")
 def test_lldp_returns_not_found_when_resolution_fails(
     mock_env: MagicMock,
     mock_conn: MagicMock,
     mock_channel: MagicMock,
     mock_resolve: MagicMock,
 ) -> None:
-    from cloudvision_mcp import get_cvp_lldp_neighbors
-
     mock_env.return_value = {"cvp": "test.example:443", "cvtoken": "tok"}
     mock_conn.return_value = MagicMock()
     mock_channel.return_value = _make_channel_mock()
     mock_resolve.return_value = (None, None, [], [])
 
-    with patch("cloudvision_mcp.grpc_get_lldp_neighbors") as mock_lldp:
-        result = get_cvp_lldp_neighbors("UNKNOWN1")
+    with patch("cvp_mcp.members.topology.grpc_get_lldp_neighbors") as mock_lldp:
+        result = topology_lldp("UNKNOWN1")
 
     mock_lldp.assert_not_called()
     assert "device_not_found" in result.get("warnings", [])

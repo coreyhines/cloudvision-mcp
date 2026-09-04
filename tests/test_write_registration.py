@@ -12,17 +12,7 @@ import pytest
 
 from cvp_mcp.write_access import WRITES_ENV
 
-WRITE_TOOLS = {
-    "create_cvp_workspace",
-    "delete_cvp_workspace",
-    "build_cvp_workspace",
-    "set_cvp_access_interface_description",
-    "assign_cvp_studio_tags",
-    "set_cvp_studio_inputs",
-    "create_cvp_studio",
-    "delete_cvp_studio",
-    "set_cvp_mss_policy_inputs",
-}
+WRITE_TOOLS = {"studios_write"}
 
 
 def _tool_names(monkeypatch, env_value):

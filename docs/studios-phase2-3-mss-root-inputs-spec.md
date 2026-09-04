@@ -1,10 +1,10 @@
-# Spec: Phase 2.3 MSS Service root Inputs CAS (`set_cvp_mss_policy_inputs`)
+# Spec: Phase 2.3 MSS Service root Inputs CAS (`studios_write.set_mss_inputs`)
 
 > **Superseded 2026-09-02 by `docs/studios-phase2-final-spec.md`** (carried over with corrections; review that file, not this one).
 
 Status: **draft for review** (2026-09-02). Does not add submit. Does not change 2.0 description CAS or 2.1 generic Inputs.
 
-Requested as "2.2"; the parent's 2.2 slot (`create_cvp_studio` / `delete_cvp_studio`) is shipped, so this is 2.3.
+Requested as "2.2"; the parent's 2.2 slot (`studios_write.create_studio` / `studios_write.delete_studio`) is shipped, so this is 2.3.
 
 Parent: `docs/studios-phase2-spec.md`. Sibling: `docs/studios-phase2-followon-fix-spec.md` (2.1 fixes). Evidence: §9 below and `~/code/obsidian/Personal/Incidents/2026-09-02 Rogue DHCP from TRENDnet PDU stopped with MSS.md`.
 
@@ -15,18 +15,18 @@ Let an operator draft an **MSS Service** policy change (static group, service, r
 Today this is impossible by design and the failure is exact:
 
 - MSS Service (`studio-mss-service`) stores its whole input tree as **one** Inputs Resource row at `path.values []`.
-- 2.1 `set_cvp_studio_inputs` refuses `[]` (`root_path_forbidden`) and cannot resolve any nested key as a Resource path (`inputs_path_not_found`, `available_path_values: [[]]`). Spec §3 of 2.1: "Do not add a generic root POST. That would bypass 2.0 CAS."
+- 2.1 `studios_write.set_inputs` refuses `[]` (`root_path_forbidden`) and cannot resolve any nested key as a Resource path (`inputs_path_not_found`, `available_path_values: [[]]`). Spec §3 of 2.1: "Do not add a generic root POST. That would bypass 2.0 CAS."
 - Even at a valid path, 2.1 is description-only (`allowed_input_keys` default `["description"]`, not exposed by the tool wrapper) and refuses admin tokens. Adding a group or a `drop` rule changes leaves named `name`, `members`, `action`, `services`: `input_key_not_allowed`.
 
-The sanctioned pattern for a root row is 2.0 `set_cvp_access_interface_description`: read root, change a bounded set of leaves, verify the diff, CAS, POST root keyed to the draft. 2.3 is the same shape for MSS Service with a bounded **operation** vocabulary instead of a free document.
+The sanctioned pattern for a root row is 2.0 `studios_write.set_description`: read root, change a bounded set of leaves, verify the diff, CAS, POST root keyed to the draft. 2.3 is the same shape for MSS Service with a bounded **operation** vocabulary instead of a free document.
 
 ## Non-goals
 
 - Register `submit_cvp_workspace`. Still unregistered.
 - A generic root POST or `replace_all_inputs`. Still forbidden.
-- Loosen 2.1 `set_cvp_studio_inputs` (its allowlist, forbidden tokens, root refusal).
+- Loosen 2.1 `studios_write.set_inputs` (its allowlist, forbidden tokens, root refusal).
 - Touch MSS keys outside the four collections in §3: `securityDomains`, `monitorObjects`, `redirectObjects`, `acceptedGroups`, `ignoredGroups`, `acceptedSensors`, `sslProfileName`, any `hidden*Mapper`, `staticExceptionList`, `enableStaticExceptionList`.
-- Change the studio's tag query (that is 2.1 `assign_cvp_studio_tags`).
+- Change the studio's tag query (that is 2.1 `studios_write.assign_tags`).
 - Segment Security studio (`studio-segmentation`, MSS-G). Different schema; separate spec if wanted.
 - ChangeControlConfig, approve, execute.
 
@@ -34,7 +34,7 @@ The sanctioned pattern for a root row is 2.0 `set_cvp_access_interface_descripti
 
 | Concept | Canonical |
 | --- | --- |
-| Tool | `set_cvp_mss_policy_inputs` |
+| Action | `studios_write.set_mss_inputs` |
 | Studio (fixed) | `studio-mss-service` |
 | Module | `cvp_mcp/grpc/studio_mss_inputs.py` |
 | Tests | `tests/test_studio_mss_inputs.py` |
@@ -43,13 +43,13 @@ The sanctioned pattern for a root row is 2.0 `set_cvp_access_interface_descripti
 | Digest | `inputs_sha256`: SHA-256 hex of `json.dumps(document, sort_keys=True, separators=(",", ":"), default=str)` |
 | CAS parameter | `expected_inputs_sha256: str` (**required**; `""` refused) |
 | Envelope flag | `posted_at_root: true` |
-| Gate | writes env `"1"` + `tool_enabled("set_cvp_mss_policy_inputs")`; registered next to the other write tools in `cloudvision_mcp.py` |
+| Gate | writes env `"1"` + group/action disable checks; `studios_write` is registered only when writes are enabled |
 
-## 2. Read side addition (`get_cvp_studio_inputs`)
+## 2. Read side addition (`studios.inputs`)
 
 Add `inputs_sha256` to every item. Non-breaking. The operator (or agent) copies it into `expected_inputs_sha256`. Compute it over the parsed document, not the wire string, so key order on the wire does not matter.
 
-`get_cvp_studio_inputs(studio_id, workspace_id="")` already returns the root row for MSS Service; nothing else changes there.
+`studios.inputs` with `studio_id` and `workspace_id=""` already returns the root row for MSS Service; nothing else changes there.
 
 ## 3. Operation vocabulary
 
@@ -117,7 +117,7 @@ Preview and accepted share these `object` fields:
 | `posted_at_root` | `true` |
 | `request_body` | the body above (preview shows it; accepted echoes it) |
 | `resource_time` | from the POST response, `None` on preview |
-| `next_action` | preview: `Re-call with confirm=True and this preview_token.` accepted: `build_cvp_workspace` |
+| `next_action` | preview: `Re-call with confirm=True and this preview_token.` accepted: `studios_write.build` |
 
 Refusal codes (new ones in bold): `writes_disabled`, `invalid_workspace_id`, `builtin_workspace_forbidden`, `workspace_not_found`, `workspace_read_failed`, `workspace_not_pending`, `workspace_state_unknown`, `studio_immutable`, `studio_from_package`, `preflight_failed`, `inputs_path_unresolved`, **`expected_inputs_sha256_required`**, **`inputs_digest_mismatch`**, **`mss_operations_required`**, **`mss_operations_too_many`**, **`mss_operation_invalid`**, **`mss_collection_not_allowed`**, **`mss_entry_not_found`**, **`mss_reference_unresolved`**, **`tree_diff_outside_mss_scope`**, `disruptive_content_forbidden`, `preview_token_required`, `preview_token_mismatch`, `resource_write_failed`.
 
@@ -130,7 +130,7 @@ Rogue DHCP server: TRENDnet TPI-06 PDU at `10.0.3.4` (MAC `78:2d:7e:24:cd:6c`, 7
 Read first:
 
 ```
-get_cvp_studio_inputs(studio_id="studio-mss-service")  -> items[0].inputs_sha256 = "<digest>"
+studios(action="inputs", studio_id="studio-mss-service")  -> items[0].inputs_sha256 = "<digest>"
 ```
 
 Then:
@@ -152,7 +152,7 @@ Then:
 }
 ```
 
-Preview must show `changed_leaves` covering `$.staticGroups`, `$.services`, `$.rules`, `$.policies[0].policyRules` only, no `mss_rule_shadowed` warning (drops precede `monitor`), and the full `request_body`. Confirm posts once. Then `build_cvp_workspace`; the human reviews the generated `traffic-policy` in CVP and submits there.
+Preview must show `changed_leaves` covering `$.staticGroups`, `$.services`, `$.rules`, `$.policies[0].policyRules` only, no `mss_rule_shadowed` warning (drops precede `monitor`), and the full `request_body`. Confirm posts once. Then `studios_write.build`; the human reviews the generated `traffic-policy` in CVP and submits there.
 
 If the operator had listed `monitor` first, preview would carry `mss_rule_shadowed:POL1:monitor` and still allow confirm; shadowing is a policy choice, not a safety refusal.
 
@@ -188,41 +188,41 @@ Refusal from 2.1 generic Inputs, verbatim:
            "message": "Could not read the current Inputs document at path_values.",
            "details": {"studio_id": "studio-mss-service", "path_values": ["rules"],
                        "available_path_values": [[]],
-                       "hint": "Use set_cvp_access_interface_description for this studio’s only Resource row (path_values []). Generic Inputs cannot POST the root."}},
+                       "hint": "Use studios_write.set_description for this studio’s only Resource row (path_values []). Generic Inputs cannot POST the root."}},
  "workspace_id": "ws-mcp-mss-block-pdu4-dhcp"}
 ```
 
-Root row shape on this tenant (`get_cvp_studio_inputs`, `workspace_id=""`, `path_values: []`): top-level keys `acceptedGroups` (32 AGNI-CH groups), `acceptedSensors`, `hiddenDeviceMapper` (JPE19151499 and HBG254804R6 as TOR switches, Loopback1 172.16.0.1/.2), `hiddenIntersectedGroupsMapper`, `hiddenPolicyIdMapper` (POL1 → 256), `hiddenVrfMapper`, `ignoredGroups`, `monitorObjects` (ztx-7230, tunnel 172.16.0.4), `policies` (POL1: `["monitor"]`), `redirectObjects`, `rules` (`monitor`, `group-rule`), `securityDomains` (tag query `security-domain:ZTSEC`), `services` (ip-printing, http, https, ping-icmp, rtsp-554), `sslProfileName`, `staticGroups` (trogdor, pi5-pihole, laptops, fedora1-server).
+Root row shape on this tenant (`studios.inputs`, `workspace_id=""`, `path_values: []`): top-level keys `acceptedGroups` (32 AGNI-CH groups), `acceptedSensors`, `hiddenDeviceMapper` (JPE19151499 and HBG254804R6 as TOR switches, Loopback1 172.16.0.1/.2), `hiddenIntersectedGroupsMapper`, `hiddenPolicyIdMapper` (POL1 → 256), `hiddenVrfMapper`, `ignoredGroups`, `monitorObjects` (ztx-7230, tunnel 172.16.0.4), `policies` (POL1: `["monitor"]`), `redirectObjects`, `rules` (`monitor`, `group-rule`), `securityDomains` (tag query `security-domain:ZTSEC`), `services` (ip-printing, http, https, ping-icmp, rtsp-554), `sslProfileName`, `staticGroups` (trogdor, pi5-pihole, laptops, fedora1-server).
 
 Assigned tags for the studio: `T3:X3 AND Campus:campus-1709 OR monitor-device:true`.
 
 What the studio renders (720XP, from a public MSS write-up and consistent with the live effect): `traffic-policies` / `vrf ALL` / `traffic-policy input <name> physical`, field-sets per group and service. Enforcement is at physical ingress, so same-VLAN traffic is covered; the PDU's DHCP replies stopped at 13:53 CDT once the policy (entered by hand through a change control) was live.
 
-`create_cvp_workspace` worked through the MCP the same day (`ws-mcp-mss-block-pdu4-dhcp`, `outcome: accepted`); only the Inputs write was missing.
+`studios_write.create_workspace` worked through the MCP the same day (`ws-mcp-mss-block-pdu4-dhcp`, `outcome: accepted`); only the Inputs write was missing.
 
-Claude Code note (client side, not the MCP): in auto mode a permission classifier denied some write calls without showing a prompt. Allowlisting the non-submit write tools in `permissions.allow` avoids that: `mcp__cloudvision-mcp__create_cvp_workspace`, `delete_cvp_workspace`, `build_cvp_workspace`, `set_cvp_studio_inputs`, `set_cvp_access_interface_description`, `assign_cvp_studio_tags`, and this tool once it exists. Cursor has no such classifier.
+Claude Code note (client side, not the MCP): in auto mode a permission classifier denied some write calls without showing a prompt. Allowlisting `mcp__cloudvision-mcp__studios_write` in `permissions.allow` avoids that; read groups such as `mcp__cloudvision-mcp__studios` and `mcp__cloudvision-mcp__compliance` can be allowlisted separately. Cursor has no such classifier.
 
 ## 10. Files
 
 | File | Change |
 | --- | --- |
 | `cvp_mcp/grpc/studio_mss_inputs.py` | new: read root (generalise `_load_root_inputs` by studio id, or add a `studio_id` parameter to it), digest, op validation, apply, diff scope check, preview/confirm, POST |
-| `cvp_mcp/grpc/studios.py` | add `inputs_sha256` to `get_cvp_studio_inputs` items |
-| `cloudvision_mcp.py` | register `set_cvp_mss_policy_inputs` behind writes env + `tool_enabled`; docstring "Compare-and-set MSS Service groups/services/rules/policy order. Does not submit." |
+| `cvp_mcp/grpc/studios.py` | add `inputs_sha256` to `studios.inputs` items |
+| `cloudvision_mcp.py` | expose `studios_write.set_mss_inputs` behind the writes env gate |
 | `tests/test_studio_mss_inputs.py`, `tests/fixtures/inputs_mss_service_root_2026-09-02.json` | §8 |
-| `docs/studios-phase2-spec.md` | slice table: add **2.3** row; one sentence under `set_cvp_studio_inputs` pointing MSS root edits here |
+| `docs/studios-phase2-spec.md` | slice table: add **2.3** row; one sentence under `studios_write.set_inputs` pointing MSS root edits here |
 | `README.md` | tool list entry |
 
 Do not edit `studios_write.py` behaviour beyond adding an optional `studio_id` parameter to `_load_root_inputs` (default `ACCESS_INTERFACE_STUDIO_ID`, existing callers unchanged). Do not edit `studio_inputs_generic.py`.
 
 ## 11. Live verify (after code; writes on, submit off)
 
-1. `get_cvp_studio_inputs(studio-mss-service)` → item carries `inputs_sha256`.
-2. `create_cvp_workspace` `ws-mcp-test-mss-*`.
+1. `studios.inputs` for `studio-mss-service` → item carries `inputs_sha256`.
+2. `studios_write.create_workspace` with `ws-mcp-test-mss-*`.
 3. Preview §7 with a stale digest → `inputs_digest_mismatch`. With the right digest → preview, 8 ops, `request_body.key.path.values == []`.
 4. Confirm → `accepted`; re-read with the draft id → overlay row present with the new entries, mainline unchanged.
-5. `build_cvp_workspace` → `BUILD_STATE_SUCCESS`; inspect generated config in CVP.
-6. `delete_cvp_workspace`. Never submit from the MCP.
+5. `studios_write.build` → `BUILD_STATE_SUCCESS`; inspect generated config in CVP.
+6. `studios_write.delete_workspace`. Never submit from the MCP.
 
 ## Farm later
 

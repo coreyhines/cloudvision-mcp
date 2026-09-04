@@ -440,7 +440,7 @@ def create_cvp_studio(
         "resource_time": None,
     }
 
-    if not confirm:
+    if confirm is not True:
         fields["preview_token"] = preview_token(tool, token_args)
         return _outcome(
             tool,
@@ -572,7 +572,7 @@ def delete_cvp_studio(
         "resource_time": None,
     }
 
-    if not confirm:
+    if confirm is not True:
         fields["preview_token"] = preview_token(tool, token_args)
         return _outcome(
             tool,

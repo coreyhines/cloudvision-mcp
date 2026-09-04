@@ -26,7 +26,7 @@ reject of mainline `workspaceId=""` on InputsConfig: client refuses; no probe.
 ## Decision: the MCP never submits
 
 The human review point is the **workspace**, not the change control. The MCP
-stops at `build_cvp_workspace`. The operator opens the workspace in the CVP UI,
+stops at `studios_write.build`. The operator opens the workspace in the CVP UI,
 reads the diff, and submits there. Change Control approve/execute stays where it
 was: UI, human.
 
@@ -47,7 +47,7 @@ staleness known"):
 | --- | --- |
 | Request allowlist | `ALLOWED_REQUESTS = {REQUEST_START_BUILD}` — **`REQUEST_SUBMIT` removed** |
 | Submit env / staleness | **removed** (`SUBMIT_ENV`, `SUBMIT_STALENESS_FIELD`, `submit_enabled`, `_submit_allowed`) |
-| 2.3 tool | `set_cvp_mss_policy_inputs` |
+| 2.3 action | `studios_write.set_mss_inputs` |
 | MSS studio (fixed) | `studio-mss-service` |
 | 2.3 module | `cvp_mcp/grpc/studio_mss_inputs.py` |
 | Digest module | `cvp_mcp/grpc/inputs_digest.py` — `inputs_sha256(document) -> str` (no `cvp_mcp.grpc` imports; both `studios.py` and `studio_mss_inputs.py` import it, which avoids a `studios.py` → `studios_write.py` cycle) |
@@ -81,7 +81,7 @@ No other module imports from `workspace_submit`. `grep -rn "REQUEST_SUBMIT\|subm
 
 1. Status line: drop "2.1 submit remains gated"; add "Submit retired 2026-09-02 (`docs/studios-phase2-final-spec.md`)."
 2. Canonical table: delete rows `Submit env`, `Submit request enum`.
-3. Slices table: 2.1 row → `assign_cvp_studio_tags`; generic `set_cvp_studio_inputs` (shipped). Add row **2.3** | `set_cvp_mss_policy_inputs` | this spec. Add row **Submit** | retired | never.
+3. Slices table: 2.1 row → `studios_write.assign_tags`; generic `studios_write.set_inputs` (shipped). Add row **2.3** | `studios_write.set_mss_inputs` | this spec. Add row **Submit** | retired | never.
 4. Goals #3: "Submit is a second opt-in and never approves/executes a CC." → "The MCP never submits. The human reviews the workspace diff in the CVP UI and submits there."
 5. HTTP helper `request` allowlist bullet 2: `{REQUEST_START_BUILD}` only; `REQUEST_SUBMIT` is rejected like any other string.
 6. Process/env gates table: delete the `CLOUDVISION_MCP_ALLOW_SUBMIT` and `SUBMIT_STALENESS_FIELD` rows. Delete the "Helper: `REQUEST_SUBMIT` is allowed only when…" paragraph.
@@ -91,27 +91,27 @@ No other module imports from `workspace_submit`. `grep -rn "REQUEST_SUBMIT\|subm
 10. Caller inputs table: delete the `Submit` row.
 11. Testing bullets that mention submit (two) → one bullet: "`REQUEST_SUBMIT` on a WorkspaceConfig body → `request_not_allowed`, no request built."
 12. Open table: rows `Full Workspace.Request protobuf enum` and `Workspace last_modified_at` → **Closed 2026-09-02: submit retired.** Row `InputsConfig POST of a patched root tree` → still open, see final spec §B.
-13. Inventory: `submit_cvp_workspace` → retired; add `set_cvp_mss_policy_inputs | 2.3`.
+13. Inventory: `submit_cvp_workspace` → retired; add `studios_write.set_mss_inputs | 2.3`.
 14. `docs/studios-support-spec.md` Phase 2 paragraph: "Submit needs a second env gate." → "The MCP never submits; the human submits the reviewed workspace in the CVP UI."
 
 ## B. 2.0 live loop (standing since 2026-08-22)
 
-Never run on the tenant: `set_cvp_access_interface_description` POST, `build_cvp_workspace` POST, `delete_cvp_workspace` DELETE. Only `create_cvp_workspace` has succeeded live. This is the parent's first Open row and it blocks trusting the root-POST shape that 2.3 reuses.
+Never run on the tenant: `studios_write.set_description` POST, `studios_write.build` POST, `studios_write.delete_workspace` DELETE. Only `studios_write.create_workspace` has succeeded live. This is the parent's first Open row and it blocks trusting the root-POST shape that 2.3 reuses.
 
 Run (writes on, coordinator, not farmed), in this order, before 2.3 is enabled:
 
 1. The operator names one port whose description may change for the test
    (2.0 CAS has no no-op path, and the intended labels already match mainline).
-   Read its current description with `get_cvp_studio_inputs`. Record the port.
-2. `create_cvp_workspace ws-mcp-test-desc-<date>-<uuid8>` → `accepted`.
+   Read its current description with `studios.inputs`. Record the port.
+2. `studios_write.create_workspace` with `ws-mcp-test-desc-<date>-<uuid8>` → `accepted`.
 3. Description CAS preview with `expected_current_description=<current>` and
    `new_description="<current> (mcp-test)"` → confirm → `accepted`; re-read
    Inputs with the draft id → overlay row present with exactly that one changed
    leaf; mainline unchanged. The workspace is deleted in step 6, so no restore
    write is needed.
-4. `build_cvp_workspace` preview → confirm; poll `get_cvp_workspace` / `get_cvp_workspace_build` → `BUILD_STATE_SUCCESS`.
+4. `studios_write.build` preview → confirm; poll `studios.get_workspace` / `studios.get_build` → `BUILD_STATE_SUCCESS`.
 5. Open the workspace in the CVP UI and confirm the diff is one description line. **Do not submit.**
-6. `delete_cvp_workspace` → `accepted`.
+6. `studios_write.delete_workspace` → `accepted`.
 
 Record the outcome in operator notes outside this repo (tenant serials / IPs /
 hostnames must not land under `docs/research/`) and flip the parent's Open row
@@ -121,14 +121,14 @@ to closed.
 
 Same session as §B, writes on:
 
-1. `get_cvp_studio_assigned_tags(studio-campus-access-interfaces)` → `query=""`, `coverage="full"` (mainline, no row).
-2. `get_cvp_studio_assigned_tags(studio-mss-service)` → the live query `T3:X3 AND Campus:campus-1709 OR monitor-device:true`, `coverage="full"`.
-3. In the §B draft: `assign_cvp_studio_tags` **preview only** with `expected_current_query=""` on Access Interfaces and a throwaway `query="device:JPE19151499"` → `outcome: preview`, no POST. Do not confirm.
-4. `set_cvp_studio_inputs(studio-mss-service, <draft>, ["rules"], {...})` → `inputs_path_not_found`, `available_path_values: [[]]`, `details.hint` naming the description CAS. (Already observed 2026-09-02, MCP image 1.60 — re-run to record it under the final spec.)
-5. Overlay studio GET: `create_cvp_studio` a throwaway `studio-mcp-test-*` in the draft, then `set_cvp_studio_inputs` against it with a nested path → must fail on path lookup, **not** on a mainline 404 of the studio. Delete the studio in the same draft.
+1. `studios.tags` for `studio-campus-access-interfaces` → `query=""`, `coverage="full"` (mainline, no row).
+2. `studios.tags` for `studio-mss-service` → the live query `T3:X3 AND Campus:campus-1709 OR monitor-device:true`, `coverage="full"`.
+3. In the §B draft: `studios_write.assign_tags` **preview only** with `expected_current_query=""` on Access Interfaces and a throwaway `query="device:JPE19151499"` → `outcome: preview`, no POST. Do not confirm.
+4. `studios_write.set_inputs` for `studio-mss-service`, the draft, `["rules"]`, and the proposed inputs → `inputs_path_not_found`, `available_path_values: [[]]`, `details.hint` naming the description CAS. (Already observed 2026-09-02, MCP image 1.60 — re-run to record it under the final spec.)
+5. Overlay studio GET: use `studios_write.create_studio` for a throwaway `studio-mcp-test-*` in the draft, then `studios_write.set_inputs` against it with a nested path → must fail on path lookup, **not** on a mainline 404 of the studio. Delete the studio in the same draft.
 6. Delete the draft.
 
-## D. `set_cvp_mss_policy_inputs` (2.3)
+## D. `studios_write.set_mss_inputs` (2.3)
 
 ### Why
 
@@ -149,19 +149,19 @@ a **digest** CAS instead of a single-leaf CAS.
 ### Non-goals
 
 - A generic root POST or `replace_all_inputs`. Still forbidden.
-- Loosening 2.1 `set_cvp_studio_inputs` (allowlist, forbidden tokens, root refusal).
+- Loosening 2.1 `studios_write.set_inputs` (allowlist, forbidden tokens, root refusal).
 - Any MSS key outside the four collections in §D.3: `securityDomains`,
   `monitorObjects`, `redirectObjects`, `acceptedGroups`, `ignoredGroups`,
   `acceptedSensors`, `sslProfileName`, any `hidden*Mapper`,
   `staticExceptionList`, `enableStaticExceptionList`.
-- The studio's tag query (2.1 `assign_cvp_studio_tags`).
+- The studio's tag query (2.1 `studios_write.assign_tags`).
 - Segment Security studio (`studio-segmentation`, MSS-G). Different schema.
 - ChangeControlConfig, approve, execute, submit.
 
 ### D.0 Capture gate (blocks M)
 
 `tests/fixtures/inputs_mss_service_root_2026-09-02.json` does not exist in the
-repo. Capture it first: `get_cvp_studio_inputs("studio-mss-service")` on the
+repo. Capture it first: `studios.inputs` with `studio_id="studio-mss-service"` on the
 MCP host, save `items[0]` verbatim (key + `path_values` + parsed `inputs`).
 
 Capture the **post-change** mainline — the document as the CVP UI left it after
@@ -196,7 +196,7 @@ key; new service configurations **omit `icmpTypes`** (old ones have `"all"`);
 the DNS service is `dns-server-port` with three single-port configurations, not a
 comma list; `direction` is a JSON boolean; `packet` is `"any"`.
 
-### D.1 Read side (`get_cvp_studio_inputs`)
+### D.1 Read side (`studios.inputs`)
 
 Add `inputs_sha256` to every item, computed with `inputs_digest.inputs_sha256`
 over the parsed `inputs` value. `inputs_sha256(document)` is defined only for
@@ -289,7 +289,8 @@ brick every unrelated edit (the tool may be the way to remove it).
    via `_read_studio_anywhere` (overlay then mainline, 404-only fallthrough):
    not `immutable`, not `from_package`; `read_failed` or both-missing →
    `preflight_failed`. **Normative order and codes: copy the preflight block of
-   `studio_inputs_generic.set_cvp_studio_inputs`** (writes → id → structural →
+   `studio_inputs_generic` implementation of **`studios_write.set_inputs`**
+   (writes → id → structural →
    workspace GET → `workspace_not_pending` / `workspace_state_unknown` → studio
    overlay → flags). Do not re-derive it (F-I4).
 3. Root read: `_load_root_inputs(datadict, workspace_id, studio_id="studio-mss-service")`.
@@ -361,7 +362,7 @@ digest CAS also catches that).
 | `request_body` | the POST body (preview shows it; accepted echoes it) |
 | `resource_time` | from the POST response; `None` on preview |
 | `preview_token` | preview only |
-| `next_action` | preview: `Re-call with confirm=True and this preview_token.` accepted: `build_cvp_workspace, then review the workspace diff in the CVP UI.` |
+| `next_action` | preview: `Re-call with confirm=True and this preview_token.` accepted: `Call studios_write.build, then review the workspace diff in the CVP UI.` |
 
 Refusals reuse `studios_write._refused` unchanged (`next_action: None`; hints in
 `details.hint` / `error.message`). Codes (new in bold): `writes_disabled`,
@@ -392,7 +393,7 @@ single-port configurations. `test_worked_example_reproduces_post_change_fixture`
 proves those ops turn the pre-change document into the fixture, digest-equal.
 
 ```
-get_cvp_studio_inputs(studio_id="studio-mss-service")  -> items[0].inputs_sha256 = "<digest>"
+studios(action="inputs", studio_id="studio-mss-service")  -> items[0].inputs_sha256 = "<digest>"
 ```
 
 ```json
@@ -415,7 +416,7 @@ get_cvp_studio_inputs(studio_id="studio-mss-service")  -> items[0].inputs_sha256
 Expected preview: `changed_leaves: 4`, `changed_leaf_paths` exactly
 `["$.policies[0].policyRules", "$.rules", "$.services", "$.staticGroups"]`
 (appends are list-length changes), 8 ops applied, no warnings, full
-`request_body`. Confirm posts once. Then `build_cvp_workspace`; the human reviews
+`request_body`. Confirm posts once. Then `studios_write.build`; the human reviews
 the generated `traffic-policy` in the CVP workspace and submits there.
 
 If `monitor` were listed first, preview carries `mss_rule_shadowed:POL1:monitor`
@@ -477,12 +478,12 @@ Existing 2.0 / 2.1 / 2.2 tests unchanged except the submit deletions in §A.
 
 ### D.9 Live verify (after code; writes on)
 
-1. `get_cvp_studio_inputs(studio-mss-service)` → item carries `inputs_sha256`.
-2. `create_cvp_workspace ws-mcp-test-mss-<date>-<uuid8>`.
+1. `studios.inputs` for `studio-mss-service` → item carries `inputs_sha256`.
+2. `studios_write.create_workspace` with `ws-mcp-test-mss-<date>-<uuid8>`.
 3. D.7 preview with a stale digest → `inputs_digest_mismatch`. Right digest → preview, `changed_leaves: 4`, `request_body.key.path.values == []`.
 4. Confirm → `accepted`; re-read with the draft id → overlay row with the new entries; mainline unchanged (same digest as step 1).
-5. `build_cvp_workspace` → `BUILD_STATE_SUCCESS`; open the workspace in CVP and read the generated `traffic-policy`. Since the PDU policy already exists on mainline (entered by hand on 2026-09-02), the live D.7 run is expected to preview `inputs_unchanged` (ops re-upsert identical entries). To exercise a real diff, use a throwaway group `mcp-test-group` with one `/32` and a single `drop` rule not added to any policy; expect exactly `$.staticGroups` and `$.rules` changed and a build that succeeds. Do not submit.
-6. `delete_cvp_workspace`. Never submit from the MCP.
+5. `studios_write.build` → `BUILD_STATE_SUCCESS`; open the workspace in CVP and read the generated `traffic-policy`. Since the PDU policy already exists on mainline (entered by hand on 2026-09-02), the live D.7 run is expected to preview `inputs_unchanged` (ops re-upsert identical entries). To exercise a real diff, use a throwaway group `mcp-test-group` with one `/32` and a single `drop` rule not added to any policy; expect exactly `$.staticGroups` and `$.rules` changed and a build that succeeds. Do not submit.
+6. `studios_write.delete_workspace`. Never submit from the MCP.
 
 ## E. Client-side permission note (README)
 
@@ -490,11 +491,10 @@ Claude Code in auto mode has a permission classifier that can deny MCP write
 calls without a prompt. Add to README under the MCP client section:
 
 > Allowlist the non-submit write tools in `permissions.allow`:
-> `mcp__cloudvision-mcp__create_cvp_workspace`, `delete_cvp_workspace`,
-> `build_cvp_workspace`, `set_cvp_access_interface_description`,
-> `set_cvp_studio_inputs`, `assign_cvp_studio_tags`, `create_cvp_studio`,
-> `delete_cvp_studio`, `set_cvp_mss_policy_inputs`. Every one of these is
-> dry-run unless `confirm=True` with a matching `preview_token`; none can submit.
+> Allowlist `mcp__cloudvision-mcp__studios_write` (and read groups such as
+> `mcp__cloudvision-mcp__studios` and `mcp__cloudvision-mcp__compliance` as
+> needed). Every write action is dry-run unless `confirm=True` with a matching
+> `preview_token`; none can submit.
 
 README currently has no tool list; add one section for the write tools with the
 env gate and the dry-run rule.

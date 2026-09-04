@@ -53,3 +53,37 @@ def test_path_without_leading_serial_is_queried_once_as_given():
         connector.get_device_path_either(MagicMock(), "SN1", ["Sysdb", "environment"])
 
     assert calls == [["Sysdb", "environment"]]
+
+
+def _batch(*notifs):
+    return [{"notifications": list(notifs)}]
+
+
+def test_keyed_get_preserves_interface_identity_per_notification():
+    """Merging notifications loses the path; 61 interfaces collapsed into 39 attrs."""
+    client = MagicMock()
+    client.get.return_value = _batch(
+        {
+            "path_elements": ["Sysdb", "interface", "intfConfig", "Ethernet1"],
+            "updates": {"description": "ds1815 po1234", "mtu": 9214},
+        },
+        {
+            "path_elements": ["Sysdb", "interface", "intfConfig", "Ethernet2"],
+            "updates": {"description": "uplink", "mtu": 1500},
+        },
+    )
+
+    out = connector.get_device_path_keyed(client, "SN1", ["Sysdb", "interface"])
+
+    assert set(out) == {"Ethernet1", "Ethernet2"}
+    assert out["Ethernet1"]["description"] == "ds1815 po1234"
+    assert out["Ethernet2"]["mtu"] == 1500
+
+
+def test_keyed_get_falls_back_to_merge_when_notification_has_no_path():
+    client = MagicMock()
+    client.get.return_value = _batch({"path_elements": [], "updates": {"mtu": 1500}})
+
+    out = connector.get_device_path_keyed(client, "SN1", ["Sysdb"])
+
+    assert out == {"mtu": 1500}

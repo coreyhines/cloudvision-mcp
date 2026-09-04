@@ -162,7 +162,7 @@ def test_batch_a_group_actions_match_frozen_catalog():
         "events": {"list", "search"},
         "flow": {"get"},
         "probes": {"list", "get"},
-        "meta": {"probe_apis"},
+        "meta": {"probe_apis", "probe_path"},
         "compliance": {
             "bugs",
             "lifecycle",

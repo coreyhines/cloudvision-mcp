@@ -613,7 +613,8 @@ EOF
 
 **Files:** none new — verification only
 
-- [ ] **Step 1: Run acceptance checklist**
+- [x] **Step 1: Run acceptance checklist** (2026-09-03: 674 passed; ruff, black,
+  pre-commit clean)
 
 ```bash
 uv run pytest -q
@@ -622,15 +623,17 @@ uv run pre-commit run --all-files  # if configured; else black + ruff
 
 Manual asserts (script or pytest already covering):
 
-- [ ] `list_tools` names ∈ 12 or 13; no flat legacy names
-- [ ] 46 member actions reachable; every `help` complete
-- [ ] Writes env gate; no submit tool
-- [ ] Disable + rate-limit keys use `group` / `group.action`
-- [ ] `inventory.get` dict-valued
-- [ ] README allowlist examples use new names only
-- [ ] PR titled/bodied as **breaking** catalog rename
+- [x] `list_tools` names ∈ 12 or 13; no flat legacy names
+- [x] 46 member actions reachable; every `help` complete
+- [x] Writes env gate; no submit tool
+- [x] Disable + rate-limit keys use `group` / `group.action`
+- [x] `inventory.get` dict-valued
+- [x] README allowlist examples use new names only
+- [x] PR titled/bodied as **breaking** catalog rename
 
-- [ ] **Step 2: Commit any leftover fixes; stop for human approve before merge/deploy**
+- [x] **Step 2: Commit any leftover fixes; stop for human approve before merge/deploy**
+  (PR open; merge and deploy are the human's call — new image tag, restart,
+  clients reload MCP tools and update `permissions.allow`)
 
 ---
 

@@ -1,6 +1,8 @@
 # Spec: MCP tool surface consolidation (full catalog, hard cut)
 
-Status: **draft, adversarial-reviewed** (2026-09-02). Review record:
+Status: **implemented on `feat/mcp-tool-consolidation`** (2026-09-03;
+acceptance below verified by `tests/test_tool_surface.py`,
+`tests/test_tool_catalog.py`, `tests/test_tool_groups_dispatch.py`). Review record:
 `docs/mcp-tool-consolidation-adversarial-review.md` (C1–C3, I1–I8, M1–M5
 applied). Sibling: `docs/compliance-config-image-spec.md`. Pattern reference:
 opnsense-mcp `GroupedTool` + `tool_groups.py` (presentation-only grouping).
@@ -240,14 +242,14 @@ Do not farm until this spec is approved. **Merge only when acceptance passes**
 
 ## Acceptance
 
-- [ ] `list_tools` ∈ {12 names} or {13 names with `studios_write`}.
-- [ ] No flat legacy MCP names.
-- [ ] Every row in the member map reachable; `help` complete.
-- [ ] Writes env gate unchanged in spirit; import-time; no submit.
-- [ ] Disable + rate-limit keys use `group` / `group.action`.
-- [ ] `inventory.get` is dict-valued.
-- [ ] README/allowlist examples use new names only.
-- [ ] pytest + pre-commit green; count test green.
+- [x] `list_tools` ∈ {12 names} or {13 names with `studios_write`}.
+- [x] No flat legacy MCP names.
+- [x] Every row in the member map reachable; `help` complete.
+- [x] Writes env gate unchanged in spirit; import-time; no submit.
+- [x] Disable + rate-limit keys use `group` / `group.action`.
+- [x] `inventory.get` is dict-valued.
+- [x] README/allowlist examples use new names only.
+- [x] pytest + pre-commit green; count test green (674 passed, 2026-09-03).
 
 ## Closed product picks (were Open)
 

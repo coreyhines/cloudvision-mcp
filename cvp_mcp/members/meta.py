@@ -3,6 +3,7 @@
 from cvp_mcp.env import env_datadict_from_os
 from cvp_mcp.grouped_tool import MemberSpec
 from cvp_mcp.grpc.capability import probe_arista_v1_packages
+from cvp_mcp.grpc.device_resolve import resolve_device_to_serial
 from cvp_mcp.grpc.path_probe import probe_device_path
 
 
@@ -13,7 +14,12 @@ def meta_probe_apis() -> dict:
 
 def meta_probe_path(device_id: str, path: str) -> dict:
     """Report what a raw device streaming path returns."""
-    return probe_device_path(env_datadict_from_os(), device_id, path)
+    datadict = env_datadict_from_os()
+    serial, _info, warnings, _candidates = resolve_device_to_serial(datadict, device_id)
+    result = probe_device_path(datadict, serial or device_id, path)
+    if warnings and isinstance(result, dict):
+        result["warnings"] = list(result.get("warnings") or []) + list(warnings)
+    return result
 
 
 def members() -> dict[str, MemberSpec]:

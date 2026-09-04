@@ -10,7 +10,10 @@ from cloudvision.Connector.codec import Wildcard
 from cloudvision.Connector.grpc_client import GRPCClient
 
 from cvp_mcp.env import normalize_api_token
-from cvp_mcp.grpc.connector import get_device_path, serialize_cloudvision_data
+from cvp_mcp.grpc.connector import (
+    get_device_path_either,
+    serialize_cloudvision_data,
+)
 from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.sysdb_parse import (
     flatten_nested_device_map,
@@ -74,10 +77,10 @@ def _connector_device_config(
     ]
     with GRPCClient(grpcAddr=_cvp_addr(datadict), tokenValue=token) as client:
         cfg_raw = serialize_cloudvision_data(
-            get_device_path(client, device_id, path_base)
+            get_device_path_either(client, device_id, path_base)
         )
         st_raw = serialize_cloudvision_data(
-            get_device_path(client, device_id, path_status)
+            get_device_path_either(client, device_id, path_status)
         )
     cfg_raw = flatten_nested_device_map(cfg_raw)
     st_raw = flatten_nested_device_map(st_raw)
@@ -114,8 +117,12 @@ def _connector_device_config_with_client(
         "intfStatus",
         Wildcard(),
     ]
-    cfg_raw = serialize_cloudvision_data(get_device_path(client, device_id, path_base))
-    st_raw = serialize_cloudvision_data(get_device_path(client, device_id, path_status))
+    cfg_raw = serialize_cloudvision_data(
+        get_device_path_either(client, device_id, path_base)
+    )
+    st_raw = serialize_cloudvision_data(
+        get_device_path_either(client, device_id, path_status)
+    )
     cfg_raw = flatten_nested_device_map(cfg_raw)
     st_raw = flatten_nested_device_map(st_raw)
     return {
@@ -185,7 +192,9 @@ def grpc_get_vlans(datadict: dict[str, Any], device_id: str) -> dict[str, Any]:
                 Wildcard(),
             ]
             sw_raw = flatten_nested_device_map(
-                serialize_cloudvision_data(get_device_path(client, device_id, sw_path))
+                serialize_cloudvision_data(
+                    get_device_path_either(client, device_id, sw_path)
+                )
             )
             if not isinstance(sw_raw, dict):
                 sw_raw = {}
@@ -201,7 +210,7 @@ def grpc_get_vlans(datadict: dict[str, Any], device_id: str) -> dict[str, Any]:
                 try:
                     vraw = flatten_nested_device_map(
                         serialize_cloudvision_data(
-                            get_device_path(client, device_id, vlan_path)
+                            get_device_path_either(client, device_id, vlan_path)
                         )
                     )
                     if isinstance(vraw, dict) and vraw:
@@ -302,7 +311,7 @@ def grpc_get_ip_interfaces(datadict: dict[str, Any], device_id: str) -> dict[str
                 try:
                     raw = flatten_nested_device_map(
                         serialize_cloudvision_data(
-                            get_device_path(client, device_id, ip_path)
+                            get_device_path_either(client, device_id, ip_path)
                         )
                     )
                     if isinstance(raw, dict) and raw:

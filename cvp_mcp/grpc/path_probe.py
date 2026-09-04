@@ -69,7 +69,7 @@ def probe_device_path(datadict: dict[str, Any], device_id: str, path: str) -> di
     try:
         with GRPCClient(grpcAddr=_cvp_addr(datadict), tokenValue=token) as client:
             raw = serialize_cloudvision_data(
-                get_device_path(client, device_id, [device_id, *path_elts])
+                get_device_path(client, device_id, path_elts)
             )
     except Exception as exc:
         logging.error("probe_device_path: %s", exc)

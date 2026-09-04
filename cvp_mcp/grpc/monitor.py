@@ -29,33 +29,21 @@ def grpc_one_probe_status(channel, serial_number="", host="", vrf="", sourceIntf
     all_probes = []
     stub = services.ProbeStatsServiceStub(channel)
     get_all_req = services.ProbeStatsStreamRequest()
+    # Every supplied field goes on ONE ProbeStats message. The Resource API ORs
+    # repeated partial_eq_filter entries, so appending one entry per field would
+    # union the filters instead of intersecting them.
+    key_fields = {}
     if serial_number:
-        get_all_req.partial_eq_filter.append(
-            models.ProbeStats(
-                key=models.ProbeStatsKey(
-                    device_id=wrappers.StringValue(value=serial_number)
-                )
-            )
-        )
+        key_fields["device_id"] = wrappers.StringValue(value=serial_number)
     if host:
-        get_all_req.partial_eq_filter.append(
-            models.ProbeStats(
-                key=models.ProbeStatsKey(host=wrappers.StringValue(value=host))
-            )
-        )
+        key_fields["host"] = wrappers.StringValue(value=host)
     if vrf:
-        get_all_req.partial_eq_filter.append(
-            models.ProbeStats(
-                key=models.ProbeStatsKey(vrf=wrappers.StringValue(value=vrf))
-            )
-        )
+        key_fields["vrf"] = wrappers.StringValue(value=vrf)
     if sourceIntf:
+        key_fields["source_intf"] = wrappers.StringValue(value=sourceIntf)
+    if key_fields:
         get_all_req.partial_eq_filter.append(
-            models.ProbeStats(
-                key=models.ProbeStatsKey(
-                    source_intf=wrappers.StringValue(value=sourceIntf)
-                )
-            )
+            models.ProbeStats(key=models.ProbeStatsKey(**key_fields))
         )
     try:
         for _probe in stub.GetAll(get_all_req, timeout=RPC_TIMEOUT):

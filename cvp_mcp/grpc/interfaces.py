@@ -15,6 +15,7 @@ from cvp_mcp.grpc.connector import (
 )
 from cvp_mcp.grpc.envelope import tool_envelope
 from cvp_mcp.grpc.sysdb_parse import (
+    eos_name,
     merge_intfcfg_and_status,
     parse_switchport_vlan_rows,
     parse_vlan_database,
@@ -220,6 +221,50 @@ def grpc_get_vlans(datadict: dict[str, Any], device_id: str) -> dict[str, Any]:
     )
 
 
+def ip_interface_paths(device_id: str) -> tuple[list[Any], ...]:
+    """Candidate paths for L3 addressing.
+
+    Sysdb/ip/config has a single child, ipIntfConfig, keyed by interface.
+    The older addr/ and ifAddr/ paths do not exist on this platform.
+    """
+    return (
+        [device_id, "Sysdb", "ip", "config", "ipIntfConfig", Wildcard()],
+        [device_id, "Sysdb", "ip", "config", "addr", Wildcard()],
+        [device_id, "Sysdb", "ip", "config", "ifAddr", Wildcard()],
+    )
+
+
+def _address_family(addr: str) -> str:
+    if not addr:
+        return ""
+    if ":" in addr:
+        return "ipv6"
+    return "ipv4" if "." in addr else ""
+
+
+def _parse_ip_intf_config(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    """Rows from ipIntfConfig, which is already keyed by interface name."""
+    out: list[dict[str, Any]] = []
+    for iface, node in raw.items():
+        if not isinstance(node, dict):
+            continue
+        addr = node.get("addrWithMask")
+        addr = addr if isinstance(addr, str) else ""
+        virtual = node.get("virtualAddrWithMask")
+        out.append(
+            {
+                "interface": str(iface),
+                "address_family": _address_family(addr),
+                "address": addr,
+                "virtual_address": virtual if isinstance(virtual, str) else "",
+                "primary": bool(addr),
+                "origin": eos_name(node.get("addrSource")) or "",
+            }
+        )
+    out.sort(key=lambda r: r["interface"])
+    return out
+
+
 def _parse_ip_addrs_from_map(raw: dict[str, Any]) -> list[dict[str, Any]]:
     """Best-effort extract interface -> addresses from nested Sysdb ip maps."""
     out: list[dict[str, Any]] = []
@@ -272,28 +317,14 @@ def grpc_get_ip_interfaces(datadict: dict[str, Any], device_id: str) -> dict[str
     items: list[dict[str, Any]] = []
     try:
         with GRPCClient(grpcAddr=_cvp_addr(datadict), tokenValue=token) as client:
-            for ip_path in (
-                [
-                    device_id,
-                    "Sysdb",
-                    "ip",
-                    "config",
-                    "addr",
-                    Wildcard(),
-                ],
-                [
-                    device_id,
-                    "Sysdb",
-                    "ip",
-                    "config",
-                    "ifAddr",
-                    Wildcard(),
-                ],
-            ):
+            for ip_path in ip_interface_paths(device_id):
                 try:
                     raw = get_device_path_keyed(client, device_id, ip_path[1:])
                     if isinstance(raw, dict) and raw:
-                        found = _parse_ip_addrs_from_map(raw)
+                        if "ipIntfConfig" in ip_path:
+                            found = _parse_ip_intf_config(raw)
+                        else:
+                            found = _parse_ip_addrs_from_map(raw)
                         for f in found:
                             f["device_id"] = device_id
                             f["_path_hint"] = "/".join(render_path(ip_path))

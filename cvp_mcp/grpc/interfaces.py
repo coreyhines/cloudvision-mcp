@@ -234,6 +234,19 @@ def ip_interface_paths(device_id: str) -> tuple[list[Any], ...]:
     )
 
 
+# The config tree writes these when no static address is set. Reporting them
+# verbatim made a DHCP interface look like it held a default route.
+_UNSET_ADDRS = frozenset({"0.0.0.0/0", "::/0", "0.0.0.0", "::"})
+
+
+def _configured_addr(value: Any) -> str:
+    """Return a configured address, treating unset placeholders as absent."""
+    if not isinstance(value, str):
+        return ""
+    addr = value.strip()
+    return "" if addr in _UNSET_ADDRS else addr
+
+
 def _address_family(addr: str) -> str:
     if not addr:
         return ""
@@ -248,15 +261,13 @@ def _parse_ip_intf_config(raw: dict[str, Any]) -> list[dict[str, Any]]:
     for iface, node in raw.items():
         if not isinstance(node, dict):
             continue
-        addr = node.get("addrWithMask")
-        addr = addr if isinstance(addr, str) else ""
-        virtual = node.get("virtualAddrWithMask")
+        addr = _configured_addr(node.get("addrWithMask"))
         out.append(
             {
                 "interface": str(iface),
                 "address_family": _address_family(addr),
                 "address": addr,
-                "virtual_address": virtual if isinstance(virtual, str) else "",
+                "virtual_address": _configured_addr(node.get("virtualAddrWithMask")),
                 "primary": bool(addr),
                 "origin": eos_name(node.get("addrSource")) or "",
             }

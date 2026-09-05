@@ -15,20 +15,26 @@ _KEYED = {
     "Loopback1": {
         "name": "Loopback1",
         "addrWithMask": "172.16.0.2/32",
-        "addrSource": {"Name": "configured", "Value": 1},
+        "addrSource": {"Name": "manual", "Value": 1},
     },
     "Loopback100": {
         "name": "Loopback100",
         "addrWithMask": "81.81.81.81/32",
-        "addrSource": {"Name": "configured", "Value": 1},
+        "addrSource": {"Name": "manual", "Value": 1},
     },
     "Management1": {
         "name": "Management1",
-        "addrWithMask": "10.0.10.45/24",
+        "addrWithMask": "0.0.0.0/0",
         "addrSource": {"Name": "dhcp", "Value": 2},
     },
-    # Configured for DHCP with no lease yet: still an L3 interface.
-    "Vlan5": {"name": "Vlan5", "addrWithMask": ""},
+    # DHCP with nothing assigned: the config tree says 0.0.0.0/0, which is
+    # a placeholder meaning "unset", not an address the interface holds.
+    "Vlan5": {
+        "name": "Vlan5",
+        "addrWithMask": "0.0.0.0/0",
+        "virtualAddrWithMask": "0.0.0.0/0",
+        "addrSource": {"Name": "dhcp", "Value": 2},
+    },
 }
 
 
@@ -66,7 +72,7 @@ def test_infers_address_family():
 def test_reports_address_origin():
     by_intf = {r["interface"]: r for r in _run()["items"]}
     assert by_intf["Management1"]["origin"] == "dhcp"
-    assert by_intf["Loopback1"]["origin"] == "configured"
+    assert by_intf["Loopback1"]["origin"] == "manual"
 
 
 def test_keeps_l3_interface_with_no_address_yet():
@@ -80,3 +86,17 @@ def test_interface_names_are_not_nested_paths():
     """The old walker emitted prefixes like 'addr/1/2'; keys are interfaces."""
     for row in _run()["items"]:
         assert "/" not in row["interface"]
+
+
+def test_unset_placeholder_address_is_not_reported_as_an_address():
+    """0.0.0.0/0 in the config tree means "no static address", not an address.
+
+    Reporting it verbatim made Management1 look like it held 0.0.0.0/0, and
+    marked it primary. The interface is still listed; the address is empty.
+    """
+    by_intf = {r["interface"]: r for r in _run()["items"]}
+    assert by_intf["Management1"]["address"] == ""
+    assert by_intf["Management1"]["primary"] is False
+    assert by_intf["Management1"]["origin"] == "dhcp"
+    assert by_intf["Vlan5"]["virtual_address"] == ""
+    assert by_intf["Loopback1"]["primary"] is True

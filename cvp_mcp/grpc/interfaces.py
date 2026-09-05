@@ -38,6 +38,9 @@ def vlan_database_paths(device_id: str) -> tuple[list[Any], ...]:
     The ids live under ``vlan/status/vlanStatus``.
     """
     return (
+        # config first: it carries configuredName and adminState. The status
+        # tree has only a numeric name, which surfaced as name == vlan_id.
+        [device_id, "Sysdb", "bridging", "config", "vlanConfig", Wildcard()],
         [device_id, "Sysdb", "bridging", "vlan", "status", "vlanStatus", Wildcard()],
         [device_id, "Sysdb", "bridging", "status", "vlan", Wildcard()],
     )

@@ -113,9 +113,17 @@ def parse_vlan_database(vlan_map: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(raw, dict):
             continue
         name = ""
-        if isinstance(raw.get("name"), str):
-            name = raw["name"]
-        status = eos_name(raw.get("status") or raw.get("state"))
+        for key in ("configuredName", "name"):
+            candidate = raw.get(key)
+            if isinstance(candidate, str) and candidate:
+                name = candidate
+                break
+        # An unnamed VLAN reports its id as its name; that is not a name.
+        if name == str(vid):
+            name = ""
+        status = eos_name(
+            raw.get("status") or raw.get("state") or raw.get("adminState")
+        )
         rows.append(
             {
                 "vlan_id": vid,

@@ -87,3 +87,37 @@ def test_keyed_get_falls_back_to_merge_when_notification_has_no_path():
     out = connector.get_device_path_keyed(client, "SN1", ["Sysdb"])
 
     assert out == {"mtu": 1500}
+
+
+def test_keyed_get_unwraps_dict_valued_keys():
+    """VLAN ids arrive as FrozenDict {'value': 5}; the key must read as "5"."""
+    client = MagicMock()
+    client.get.return_value = _batch(
+        {
+            "path_elements": ["Sysdb", "bridging", "vlanStatus", {"value": 5}],
+            "updates": {"name": "wired-lab5"},
+        },
+        {
+            "path_elements": ["Sysdb", "bridging", "vlanStatus", {"value": 81}],
+            "updates": {"name": "wifi"},
+        },
+    )
+
+    out = connector.get_device_path_keyed(client, "SN1", ["Sysdb", "bridging"])
+
+    assert set(out) == {"5", "81"}
+    assert out["5"]["name"] == "wired-lab5"
+
+
+def test_keyed_get_leaves_plain_keys_alone():
+    client = MagicMock()
+    client.get.return_value = _batch(
+        {
+            "path_elements": ["Sysdb", "intfConfig", "Ethernet1"],
+            "updates": {"mtu": 1500},
+        }
+    )
+
+    out = connector.get_device_path_keyed(client, "SN1", ["Sysdb"])
+
+    assert set(out) == {"Ethernet1"}

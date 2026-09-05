@@ -11,6 +11,7 @@ from cloudvision.Connector.grpc_client import GRPCClient
 from cvp_mcp.env import normalize_api_token
 from cvp_mcp.grpc.connector import (
     get_device_path_either,
+    get_device_path_keyed,
     serialize_cloudvision_data,
 )
 from cvp_mcp.grpc.envelope import tool_envelope
@@ -24,12 +25,38 @@ def _cvp_addr(datadict: dict[str, Any]) -> str:
     return cvp
 
 
+def health_paths(device_id: str) -> tuple[tuple[str, list[Any]], ...]:
+    """Health subtrees at the depth where readings actually live.
+
+    Sysdb/environment/* stops on Path pointers, so the old query returned
+    pointers rather than values. Keyed results preserve identity, so one
+    trailing wildcard at the right depth collects every sensor in one query.
+    """
+    env = [device_id, "Sysdb", "environment", "archer"]
+    return (
+        ("system", [device_id, "Sysdb", "sys", "status", "system"]),
+        ("version", [device_id, "Sysdb", "sys", "version"]),
+        (
+            "power_supplies",
+            env + ["power", "status", "powerSupply", Wildcard()],
+        ),
+        (
+            "temperature",
+            env + ["temperature", "status", "system", Wildcard()],
+        ),
+        ("fans", env + ["cooling", "status", Wildcard()]),
+    )
+
+
 def _fetch(
     datadict: dict[str, Any], device_id: str, path: list, label: str
 ) -> tuple[str, dict[str, Any]]:
     token = normalize_api_token(datadict.get("cvtoken"))
     try:
         with GRPCClient(grpcAddr=_cvp_addr(datadict), tokenValue=token) as client:
+            if path and isinstance(path[-1], Wildcard):
+                # Keyed, or sibling sensors collapse onto one another.
+                return label, get_device_path_keyed(client, device_id, path[1:])
             raw = get_device_path_either(client, device_id, path)
         data = serialize_cloudvision_data(raw)
         data = flatten_nested_device_map(data) if isinstance(data, dict) else {}
@@ -147,12 +174,7 @@ def grpc_get_system_health(datadict: dict[str, Any], device_id: str) -> dict[str
         )
     warnings: list[str] = []
     parts: dict[str, Any] = {}
-    for label, path in (
-        ("version", [device_id, "Sysdb", "sys", "version"]),
-        ("status", [device_id, "Sysdb", "sys", "status"]),
-        ("environment", [device_id, "Sysdb", "environment", Wildcard()]),
-        ("platform", [device_id, "Sysdb", "platform", Wildcard()]),
-    ):
+    for label, path in health_paths(device_id):
         _, data = _fetch(datadict, device_id, path, label)
         parts[label] = data
     if all(

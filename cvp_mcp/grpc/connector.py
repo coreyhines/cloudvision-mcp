@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Mapping
 
 from cloudvision.Connector.grpc_client import GRPCClient, create_query
 
@@ -102,6 +103,20 @@ def get_device_path_either(client, device_id: str, pathElts: list):
     return get_device_path(client, device_id, list(pathElts))
 
 
+def _path_key(element) -> str:
+    """Render a path element as a dict key.
+
+    Keyed nodes are not always plain strings: VLAN ids arrive as
+    ``FrozenDict {'value': 5}``, which would otherwise stringify to
+    ``<FrozenDict {'value': 5}>`` and surface as a VLAN literally named that.
+    """
+    if isinstance(element, Mapping):
+        if len(element) == 1 and "value" in element:
+            return str(element["value"])
+        return str(dict(element))
+    return str(element)
+
+
 def get_device_path_keyed(
     client, device_id: str, pathElts: list, dtype: str = "device"
 ):
@@ -119,7 +134,7 @@ def get_device_path_keyed(
             updates = serialize_cloudvision_data(notif["updates"])
             path = notif.get("path_elements") or []
             if path:
-                result[str(path[-1])] = updates
+                result[_path_key(path[-1])] = updates
             elif isinstance(updates, dict):
                 result.update(updates)
     return result

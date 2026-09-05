@@ -21,6 +21,28 @@ from cvp_mcp.grpc.sysdb_parse import (
 )
 
 
+def render_path(path: list[Any]) -> list[str]:
+    """Render path elements for display, wildcards as ``*``.
+
+    ``str(Wildcard())`` leaks a repr like
+    ``<cloudvision.Connector.codec.custom_types.Wildcard object at 0x...>``.
+    """
+    return ["*" if isinstance(p, Wildcard) else str(p) for p in path]
+
+
+def vlan_database_paths(device_id: str) -> tuple[list[Any], ...]:
+    """Candidate paths for the VLAN database.
+
+    ``Sysdb/bridging/vlan`` has a single child, ``status``, so wildcarding
+    there produced one row with vlan_id "status" instead of the VLAN ids.
+    The ids live under ``vlan/status/vlanStatus``.
+    """
+    return (
+        [device_id, "Sysdb", "bridging", "vlan", "status", "vlanStatus", Wildcard()],
+        [device_id, "Sysdb", "bridging", "status", "vlan", Wildcard()],
+    )
+
+
 def _cvp_addr(datadict: dict[str, Any]) -> str:
     cvp = (datadict.get("cvp") or "").strip()
     if cvp and ":" not in cvp:
@@ -167,17 +189,14 @@ def grpc_get_vlans(datadict: dict[str, Any], device_id: str) -> dict[str, Any]:
                 m["device_id"] = device_id
             rows.extend(member_rows)
 
-            for vlan_path in (
-                [device_id, "Sysdb", "bridging", "status", "vlan", Wildcard()],
-                [device_id, "Sysdb", "bridging", "vlan", Wildcard()],
-            ):
+            for vlan_path in vlan_database_paths(device_id):
                 try:
                     vraw = get_device_path_keyed(client, device_id, vlan_path[1:])
                     if isinstance(vraw, dict) and vraw:
                         vrows = parse_vlan_database(vraw)
                         for v in vrows:
                             v["device_id"] = device_id
-                            v["_path_hint"] = "/".join(str(p) for p in vlan_path)
+                            v["_path_hint"] = "/".join(render_path(vlan_path))
                         rows.extend(vrows)
                         break
                 except Exception as e:
@@ -274,7 +293,7 @@ def grpc_get_ip_interfaces(datadict: dict[str, Any], device_id: str) -> dict[str
                         found = _parse_ip_addrs_from_map(raw)
                         for f in found:
                             f["device_id"] = device_id
-                            f["_path_hint"] = "/".join(str(p) for p in ip_path)
+                            f["_path_hint"] = "/".join(render_path(ip_path))
                         items.extend(found)
                         break
                 except Exception as e:

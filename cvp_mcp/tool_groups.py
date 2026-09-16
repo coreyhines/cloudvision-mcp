@@ -85,6 +85,7 @@ LEGACY_FLAT_TO_ACTION: dict[str, str] = {
     "delete_cvp_workspace": "studios_write.delete_workspace",
     "build_cvp_workspace": "studios_write.build",
     "set_cvp_access_interface_description": "studios_write.set_description",
+    "set_cvp_access_interface_port_profile": "studios_write.set_port_profile",
     "set_cvp_studio_inputs": "studios_write.set_inputs",
     "assign_cvp_studio_tags": "studios_write.assign_tags",
     "create_cvp_studio": "studios_write.create_studio",

@@ -35,6 +35,9 @@ from cvp_mcp.grpc.studios_write import (
 from cvp_mcp.grpc.studios_write import (
     set_cvp_access_interface_description as grpc_set_access_description,
 )
+from cvp_mcp.grpc.studios_write import (
+    set_cvp_access_interface_port_profile as grpc_set_access_interface_port_profile,
+)
 
 
 def _write_call(
@@ -146,6 +149,30 @@ def studios_write_set_inputs(
         workspace_id,
         path_values,
         inputs,
+        confirm=confirm,
+        preview_token_value=preview_token,
+    )
+
+
+def studios_write_set_port_profile(
+    workspace_id: str,
+    device_id: str,
+    interface: str,
+    expected_current_port_profile: str,
+    new_port_profile: str,
+    confirm: bool = False,
+    preview_token: str | None = None,
+) -> dict:
+    """Compare and set one access-interface port profile."""
+    return _write_call(
+        "set_access_interface_port_profile_failed",
+        "set_cvp_access_interface_port_profile",
+        grpc_set_access_interface_port_profile,
+        workspace_id,
+        device_id,
+        interface,
+        expected_current_port_profile,
+        new_port_profile,
         confirm=confirm,
         preview_token_value=preview_token,
     )
@@ -344,6 +371,49 @@ def members() -> dict[str, MemberSpec]:
                 **confirmation,
             },
             call=studios_write_set_inputs,
+        ),
+        "set_port_profile": MemberSpec(
+            action="set_port_profile",
+            description=(
+                "Compare and set one access-interface port profile. The profile "
+                "carries the port's VLAN, so this moves the port between VLANs."
+            ),
+            required=[
+                "workspace_id",
+                "device_id",
+                "interface",
+                "expected_current_port_profile",
+                "new_port_profile",
+            ],
+            properties={
+                **workspace_id,
+                "device_id": {
+                    "type": "string",
+                    "description": (
+                        "Device id used verbatim in the interface:<iface>@<device_id> "
+                        "tag locator; no hostname, FQDN, or MAC resolution is performed."
+                    ),
+                },
+                "interface": {
+                    "type": "string",
+                    "description": "Interface name used in the target tag locator.",
+                },
+                "expected_current_port_profile": {
+                    "type": "string",
+                    "description": (
+                        "Port profile currently on the interface, for compare-and-set."
+                    ),
+                },
+                "new_port_profile": {
+                    "type": "string",
+                    "description": (
+                        "Replacement port profile; must already exist in the studio's "
+                        "portProfiles list."
+                    ),
+                },
+                **confirmation,
+            },
+            call=studios_write_set_port_profile,
         ),
         "assign_tags": MemberSpec(
             action="assign_tags",

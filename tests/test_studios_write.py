@@ -498,6 +498,88 @@ def _set_description(
     return env, urlopen, body
 
 
+def _set_port_profile(inputs, expected="vl 2", new="vl 3", confirm=False, token=None):
+    with _mocked(workspace=_workspace_value(), inputs=inputs) as mocks:
+        env = studios_write.set_cvp_access_interface_port_profile(
+            DATADICT,
+            WORKSPACE,
+            DEVICE,
+            INTERFACE,
+            expected,
+            new,
+            confirm=confirm,
+            preview_token_value=token,
+        )
+        urlopen = mocks["urlopen"]
+        body = _posted_body(urlopen) if urlopen.call_count else None
+    return env, urlopen, body
+
+
+# --- port profile CAS -------------------------------------------------------
+
+
+def test_port_profile_preview_reports_single_leaf_and_no_post():
+    env, urlopen, _ = _set_port_profile([_inputs_row("", _inputs_document())])
+    obj = _obj(env)
+    assert obj["outcome"] == "preview"
+    assert obj["operation"] == "set_port_profile"
+    assert obj["locator"] == LOCATOR
+    assert obj["before_port_profile"] == "vl 2"
+    assert obj["after_port_profile"] == "vl 3"
+    assert obj["changed_leaves"] == 1
+    assert obj["posted_at_root"] is True
+    assert obj["preview_token"] == preview_token(
+        "set_cvp_access_interface_port_profile",
+        {
+            "workspace_id": WORKSPACE,
+            "device_id": DEVICE,
+            "interface": INTERFACE,
+            "expected_current_port_profile": "vl 2",
+            "new_port_profile": "vl 3",
+        },
+    )
+    urlopen.assert_not_called()
+
+
+def test_port_profile_confirm_moves_only_that_leaf():
+    """The VLAN moves and every sibling leaf is copied through untouched."""
+    document = _inputs_document()
+    rows = [_inputs_row("", document)]
+    env, _, _ = _set_port_profile(rows)
+    token = _obj(env)["preview_token"]
+    env, urlopen, body = _set_port_profile(rows, confirm=True, token=token)
+
+    assert _obj(env)["outcome"] == "accepted"
+    assert urlopen.call_count == 1
+    assert body["key"]["path"] == {"values": []}
+    row = json.loads(body["inputs"])["campus"]["connectedEndpoints"][0]
+    assert row["inputs"]["adapterDetails"]["portProfile"] == "vl 3"
+    assert row["inputs"]["adapterDetails"]["description"] == "pi5 - dns"
+    assert row["inputs"]["adapterDetails"]["enabled"] == "Yes"
+
+
+def test_port_profile_cas_mismatch_refuses_without_post():
+    env, urlopen, _ = _set_port_profile(
+        [_inputs_row("", _inputs_document())], expected="vl 9"
+    )
+    assert _code(env) == "current_port_profile_mismatch"
+    details = _obj(env)["error"]["details"]
+    assert details["current_port_profile"] == "vl 2"
+    assert details["expected_current_port_profile"] == "vl 9"
+    urlopen.assert_not_called()
+
+
+def test_port_profile_token_is_not_interchangeable_with_description():
+    """A description token must not authorize a port-profile write."""
+    rows = [_inputs_row("", _inputs_document())]
+    desc_env, _, _ = _set_description(rows)
+    env, urlopen, _ = _set_port_profile(
+        rows, confirm=True, token=_obj(desc_env)["preview_token"]
+    )
+    assert _obj(env)["outcome"] == "refused"
+    urlopen.assert_not_called()
+
+
 def test_description_preview_reports_single_leaf_and_no_post():
     document = _inputs_document()
     env, urlopen, _ = _set_description([_inputs_row("", document)])

@@ -877,29 +877,62 @@ def build_cvp_workspace(
     )
 
 
-# --- description CAS --------------------------------------------------------
+# --- adapterDetails leaf CAS ------------------------------------------------
+
+# One entry per writable ``adapterDetails`` leaf. Every leaf-specific name --
+# argument stem, tool name, error codes, envelope fields -- lives here, so
+# adding a leaf never means editing the shared body below.
+_DESCRIPTION_LEAF: dict[str, str] = {
+    "leaf": "description",
+    "arg": "description",
+    "tool": "set_cvp_access_interface_description",
+    "operation": "set_description",
+    "mismatch_code": "current_description_mismatch",
+    "diff_code": "tree_diff_not_description_only",
+    "label": "description",
+}
+
+# Assigning a campus port profile is how an access port's VLAN moves in this
+# studio, so it gets its own action rather than going through generic Inputs
+# writes. The one-leaf diff proof below still bounds it: a caller can change
+# this port's profile and nothing else in the tree.
+_PORT_PROFILE_LEAF: dict[str, str] = {
+    "leaf": "portProfile",
+    "arg": "port_profile",
+    "tool": "set_cvp_access_interface_port_profile",
+    "operation": "set_port_profile",
+    "mismatch_code": "current_port_profile_mismatch",
+    "diff_code": "tree_diff_not_port_profile_only",
+    "label": "port profile",
+}
 
 
-def set_cvp_access_interface_description(
+def _set_adapter_detail_leaf(
     datadict: dict[str, Any],
     workspace_id: str,
     device_id: str,
     interface: str,
-    expected_current_description: str,
-    new_description: str,
+    expected_current_value: str,
+    new_value: str,
+    spec: dict[str, str],
     confirm: bool = False,
     *,
     preview_token_value: str | None = None,
 ) -> dict[str, Any]:
-    """Compare-and-set one ``adapterDetails.description`` in the access studio.
+    """Compare-and-set one ``adapterDetails`` leaf in the access studio.
 
     Follows the five-step write shape: GET the root Inputs document, locate the
     unique row whose ``tags.query`` is ``interface:<interface>@<device_id>``,
-    CAS the description, patch a deep copy, prove the structural diff is exactly
-    that one leaf, then POST the whole tree back at ``path.values: []`` (this
-    studio has no per-port Inputs key).
+    CAS the leaf named by ``spec``, patch a deep copy, prove the structural diff
+    is exactly that one leaf, then POST the whole tree back at ``path.values:
+    []`` (this studio has no per-port Inputs key).
+
+    Parameterizing the leaf does not widen what a caller may change: the write
+    is still refused unless the diff is exactly the one leaf ``spec`` names.
     """
-    tool = "set_cvp_access_interface_description"
+    tool = spec["tool"]
+    leaf = spec["leaf"]
+    label = spec["label"]
     if not writes_enabled():
         return _refused(
             tool,
@@ -957,7 +990,8 @@ def set_cvp_access_interface_description(
             tool,
             _INPUTS_SOURCE,
             "workspace_not_pending",
-            "Description writes are only allowed on pending draft workspaces.",
+            f"{label.capitalize()} writes are only allowed on pending draft "
+            "workspaces.",
             details={"state": state},
             workspace_id=workspace,
             warnings=ws_warnings,
@@ -987,16 +1021,14 @@ def set_cvp_access_interface_description(
             workspace_id=workspace,
         )
 
-    expected = (
-        "" if expected_current_description is None else expected_current_description
-    )
-    replacement = "" if new_description is None else new_description
+    expected = "" if expected_current_value is None else expected_current_value
+    replacement = "" if new_value is None else new_value
     if not isinstance(expected, str) or not isinstance(replacement, str):
         return _refused(
             tool,
             _INPUTS_SOURCE,
-            "current_description_mismatch",
-            "Descriptions must be strings.",
+            spec["mismatch_code"],
+            f"{label.capitalize()} values must be strings.",
             workspace_id=workspace,
         )
 
@@ -1006,7 +1038,7 @@ def set_cvp_access_interface_description(
             tool,
             _INPUTS_SOURCE,
             "disruptive_content_forbidden",
-            "The new description contains EOS-disruptive text.",
+            f"The new {label} contains EOS-disruptive text.",
             details={"matched": lint_hits},
             workspace_id=workspace,
         )
@@ -1050,14 +1082,14 @@ def set_cvp_access_interface_description(
             warnings=warnings,
         )
 
-    raw_current = details.get("description")
+    raw_current = details.get(leaf)
     current = "" if raw_current is None else raw_current
     if not isinstance(current, str):
         return _refused(
             tool,
             _INPUTS_SOURCE,
-            "current_description_mismatch",
-            "Current description is not a string.",
+            spec["mismatch_code"],
+            f"Current {label} is not a string.",
             details={"locator": locator},
             workspace_id=workspace,
             warnings=warnings,
@@ -1066,18 +1098,18 @@ def set_cvp_access_interface_description(
         return _refused(
             tool,
             _INPUTS_SOURCE,
-            "current_description_mismatch",
-            "Current description does not match expected_current_description.",
+            spec["mismatch_code"],
+            f"Current {label} does not match expected_current_{spec['arg']}.",
             details={
                 "locator": locator,
-                "current_description": current,
-                "expected_current_description": expected,
+                f"current_{spec['arg']}": current,
+                f"expected_current_{spec['arg']}": expected,
             },
             workspace_id=workspace,
             warnings=warnings,
         )
 
-    leaf_path = f"{details_path}.description"
+    leaf_path = f"{details_path}.{leaf}"
     patched = copy.deepcopy(document)
     patched_matches = _find_locator_rows(patched, locator)
     patched_details = None
@@ -1094,7 +1126,7 @@ def set_cvp_access_interface_description(
             workspace_id=workspace,
             warnings=warnings,
         )
-    patched_details["description"] = replacement
+    patched_details[leaf] = replacement
 
     # Serialize both sides (sorted keys) and diff the reparsed objects: this
     # catches shared references and any non-round-tripping value, not just the
@@ -1106,8 +1138,8 @@ def set_cvp_access_interface_description(
         return _refused(
             tool,
             _INPUTS_SOURCE,
-            "tree_diff_not_description_only",
-            "The patched tree differs from the current tree in more than the description leaf.",
+            spec["diff_code"],
+            f"The patched tree differs from the current tree in more than the {label} leaf.",
             details={
                 "locator": locator,
                 "expected_leaf": leaf_path,
@@ -1144,18 +1176,18 @@ def set_cvp_access_interface_description(
         "workspace_id": workspace,
         "device_id": device,
         "interface": port,
-        "expected_current_description": expected,
-        "new_description": replacement,
+        f"expected_current_{spec['arg']}": expected,
+        f"new_{spec['arg']}": replacement,
     }
     fields: dict[str, Any] = {
-        "operation": "set_description",
+        "operation": spec["operation"],
         "studio_id": ACCESS_INTERFACE_STUDIO_ID,
         "device_id": device,
         "interface": port,
         "locator": locator,
         "inputs_source_workspace_id": source_workspace,
-        "before_description": current,
-        "after_description": replacement,
+        f"before_{spec['arg']}": current,
+        f"after_{spec['arg']}": replacement,
         "changed_leaves": 1,
         "changed_leaf_path": leaf_path,
         "posted_at_root": True,
@@ -1214,4 +1246,59 @@ def set_cvp_access_interface_description(
         fields=fields,
         next_action="build_cvp_workspace",
         warnings=warnings,
+    )
+
+
+def set_cvp_access_interface_description(
+    datadict: dict[str, Any],
+    workspace_id: str,
+    device_id: str,
+    interface: str,
+    expected_current_description: str,
+    new_description: str,
+    confirm: bool = False,
+    *,
+    preview_token_value: str | None = None,
+) -> dict[str, Any]:
+    """Compare-and-set one ``adapterDetails.description`` in the access studio."""
+    return _set_adapter_detail_leaf(
+        datadict,
+        workspace_id,
+        device_id,
+        interface,
+        expected_current_description,
+        new_description,
+        _DESCRIPTION_LEAF,
+        confirm,
+        preview_token_value=preview_token_value,
+    )
+
+
+def set_cvp_access_interface_port_profile(
+    datadict: dict[str, Any],
+    workspace_id: str,
+    device_id: str,
+    interface: str,
+    expected_current_port_profile: str,
+    new_port_profile: str,
+    confirm: bool = False,
+    *,
+    preview_token_value: str | None = None,
+) -> dict[str, Any]:
+    """Compare-and-set one ``adapterDetails.portProfile`` in the access studio.
+
+    The profile carries the port's VLAN, so this is the supported way to move an
+    access port between VLANs. The caller must pass the profile currently on the
+    port, and the write still has to diff to exactly that one leaf.
+    """
+    return _set_adapter_detail_leaf(
+        datadict,
+        workspace_id,
+        device_id,
+        interface,
+        expected_current_port_profile,
+        new_port_profile,
+        _PORT_PROFILE_LEAF,
+        confirm,
+        preview_token_value=preview_token_value,
     )

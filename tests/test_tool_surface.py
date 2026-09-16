@@ -77,9 +77,9 @@ def test_every_read_group_help_lists_all_members(monkeypatch):
     _assert_group_help(module, build_groups())
 
 
-def test_write_group_help_lists_all_nine_members(monkeypatch):
+def test_write_group_help_lists_all_ten_members(monkeypatch):
     module = _reload(monkeypatch, "1")
     write_group = build_write_group()
 
-    assert len(write_group.members) == 9
+    assert len(write_group.members) == 10
     _assert_group_help(module, [*build_groups(), write_group])

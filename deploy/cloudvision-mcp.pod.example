@@ -15,6 +15,14 @@ PodName=cloudvision-mcp-pod
 # IP6=2601:441:8400:b7e1::18
 # DNS=10.0.2.2
 
+# Quadlet defaults a pod to --exit-policy stop, which stops the whole pod when
+# its last container exits. Member containers are BindsTo= the pod unit, so
+# `systemctl restart cloudvision-mcp-app` would stop the pod and then fail with
+# "Bound to unit cloudvision-mcp-pod.service, but unit isn't active", taking the
+# whole deployment down until the pod was started by hand. Keeping the pod alive
+# lets one container be restarted on its own.
+ExitPolicy=continue
+
 [Service]
 Restart=on-failure
 

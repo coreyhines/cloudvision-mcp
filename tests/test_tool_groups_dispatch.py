@@ -256,6 +256,7 @@ def test_studios_write_group_catalog_and_confirm_refusal(monkeypatch):
         "delete_workspace",
         "build",
         "set_description",
+        "set_port_profile",
         "set_inputs",
         "assign_tags",
         "create_studio",

@@ -430,6 +430,13 @@ write_pod_quadlet() {
         printf '%s\n' "DNS=${dns}"
       fi
     done
+    # Quadlet defaults a pod to --exit-policy stop, which stops the whole pod
+    # when its last container exits. Member containers are BindsTo= the pod
+    # unit, so restarting one of them stops the pod and then fails with "Bound
+    # to unit ... but unit isn't active", taking the deployment down until the
+    # pod is started by hand. Keep the pod alive so one container can be
+    # restarted on its own.
+    printf '%s\n' 'ExitPolicy=continue'
     printf '%s\n' ''
     printf '%s\n' '[Service]'
     printf '%s\n' 'Restart=on-failure'

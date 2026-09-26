@@ -20,6 +20,10 @@ dev = [
     "pre-commit>=4.0",
 ]
 
+# Transitive floor: CVE-2026-63374 fixed in anyio>=4.14.2
+[tool.uv]
+constraint-dependencies = ["anyio>=4.14.2"]
+
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"

@@ -1,6 +1,11 @@
 FROM docker.io/python:3.13
 
-RUN pip3 install uv && useradd -m -u 10001 cvpmcp
+# Patch OS packages (e.g. libunbound8 CRITICAL CVEs) before app install.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install uv \
+    && useradd -m -u 10001 cvpmcp
 
 WORKDIR /workspace
 

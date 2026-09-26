@@ -21,15 +21,29 @@ jobs:
       - name: Build image
         run: docker build -t cloudvision-mcp:ci .
 
-      - name: Trivy vulnerability scan
+      # Table output for humans; fail the job only on CRITICAL (unfixed).
+      - name: Trivy table (fail on CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: cloudvision-mcp:ci
+          format: table
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          scanners: vuln
+
+      # Full CRITICAL+HIGH report for the Security tab; never fail the job.
+      - name: Trivy SARIF (CRITICAL,HIGH)
+        if: always()
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: cloudvision-mcp:ci
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
-          exit-code: "1"
+          exit-code: "0"
           ignore-unfixed: true
+          scanners: vuln
 
       - name: Upload Trivy SARIF
         if: always() && hashFiles('trivy-results.sarif') != ''

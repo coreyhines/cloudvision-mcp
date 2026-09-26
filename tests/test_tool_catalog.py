@@ -32,13 +32,13 @@ def test_always_on_groups():
 
 
 def test_legacy_flat_to_action_bijection():
-    assert len(LEGACY_FLAT_TO_ACTION) == 45
-    assert len(set(LEGACY_FLAT_TO_ACTION.values())) == 45
+    assert len(LEGACY_FLAT_TO_ACTION) == 46
+    assert len(set(LEGACY_FLAT_TO_ACTION.values())) == 46
     assert not any(name.startswith("__") for name in LEGACY_FLAT_TO_ACTION)
 
 
 def test_member_actions_includes_status_and_legacy_values():
-    assert len(MEMBER_ACTIONS) == 47
+    assert len(MEMBER_ACTIONS) == 48
     assert "compliance.config_status" in MEMBER_ACTIONS
     assert "compliance.image_status" in MEMBER_ACTIONS
     assert set(LEGACY_FLAT_TO_ACTION.values()) <= MEMBER_ACTIONS
@@ -46,7 +46,7 @@ def test_member_actions_includes_status_and_legacy_values():
 
 def test_member_bijection():
     assert set(iter_member_actions()) == MEMBER_ACTIONS
-    assert len(MEMBER_ACTIONS) == 47
+    assert len(MEMBER_ACTIONS) == 48
 
 
 def test_docstring_count_locked():

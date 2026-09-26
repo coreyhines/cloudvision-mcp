@@ -16,3 +16,5 @@ headroom_memory.db
 
 # SDD scratch (per-plan ledgers/briefs/diffs)
 .superpowers/
+
+.DS_Store

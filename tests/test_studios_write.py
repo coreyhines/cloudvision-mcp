@@ -951,3 +951,105 @@ def test_load_root_inputs_missing_studio_is_unresolved():
         )
     assert document is None
     assert err == "inputs_path_unresolved"
+
+
+# --- trunk VLAN list CAS ----------------------------------------------------
+
+
+def _trunk_document(vlans="3,10"):
+    """A trunk row like 720xp-24 Ethernet26 (strongpod), plus a sibling."""
+    document = _inputs_document()
+    row = document["campus"]["connectedEndpoints"][0]["inputs"]["adapterDetails"]
+    row["mode"] = "trunk"
+    row["portProfile"] = "trunk"
+    row["vlans"] = {"nativeVlan": 3, "vlans": vlans}
+    return document
+
+
+def _set_trunk_vlans(inputs, expected="3,10", new="3,5,10", confirm=False, token=None):
+    with _mocked(workspace=_workspace_value(), inputs=inputs) as mocks:
+        env = studios_write.set_cvp_access_interface_trunk_vlans(
+            DATADICT,
+            WORKSPACE,
+            DEVICE,
+            INTERFACE,
+            expected,
+            new,
+            confirm=confirm,
+            preview_token_value=token,
+        )
+        urlopen = mocks["urlopen"]
+        body = _posted_body(urlopen) if urlopen.call_count else None
+    return env, urlopen, body
+
+
+def test_trunk_vlans_preview_reports_the_nested_leaf_and_no_post():
+    env, urlopen, _ = _set_trunk_vlans([_inputs_row("", _trunk_document())])
+    obj = _obj(env)
+    assert obj["outcome"] == "preview"
+    assert obj["operation"] == "set_trunk_vlans"
+    assert obj["before_trunk_vlans"] == "3,10"
+    assert obj["after_trunk_vlans"] == "3,5,10"
+    assert obj["changed_leaves"] == 1
+    assert obj["changed_leaf_path"].endswith("adapterDetails.vlans.vlans")
+    urlopen.assert_not_called()
+
+
+def test_trunk_vlans_confirm_changes_only_the_allowed_list():
+    """nativeVlan, mode, profile and every other row are copied through."""
+    rows = [_inputs_row("", _trunk_document())]
+    env, _, _ = _set_trunk_vlans(rows)
+    token = _obj(env)["preview_token"]
+    env, urlopen, body = _set_trunk_vlans(rows, confirm=True, token=token)
+
+    assert _obj(env)["outcome"] == "accepted"
+    assert urlopen.call_count == 1
+    assert body["key"]["path"] == {"values": []}
+    rows_out = json.loads(body["inputs"])["campus"]["connectedEndpoints"]
+    details = rows_out[0]["inputs"]["adapterDetails"]
+    assert details["vlans"] == {"nativeVlan": 3, "vlans": "3,5,10"}
+    assert details["mode"] == "trunk"
+    assert details["portProfile"] == "trunk"
+    assert rows_out[1] == _trunk_document()["campus"]["connectedEndpoints"][1]
+
+
+def test_trunk_vlans_cas_mismatch_refuses_without_post():
+    env, urlopen, _ = _set_trunk_vlans(
+        [_inputs_row("", _trunk_document())], expected="3,10,20"
+    )
+    assert _code(env) == "current_trunk_vlans_mismatch"
+    assert _obj(env)["error"]["details"]["current_trunk_vlans"] == "3,10"
+    urlopen.assert_not_called()
+
+
+def test_trunk_vlans_refuses_an_access_port():
+    """Access ports move VLAN by port profile; this action is trunk-only."""
+    env, urlopen, _ = _set_trunk_vlans(
+        [_inputs_row("", _inputs_document())], expected=""
+    )
+    assert _code(env) == "not_a_trunk_port"
+    urlopen.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "bad", ["", "3,,10", "0", "4095", "3-", "10-3", "all", "3;10", "3, 5"]
+)
+def test_trunk_vlans_refuses_malformed_lists(bad):
+    env, urlopen, _ = _set_trunk_vlans([_inputs_row("", _trunk_document())], new=bad)
+    assert _code(env) == "invalid_vlan_list"
+    urlopen.assert_not_called()
+
+
+def test_trunk_vlans_accepts_ranges():
+    env, _, _ = _set_trunk_vlans([_inputs_row("", _trunk_document())], new="3,5-7,10")
+    assert _obj(env)["outcome"] == "preview"
+
+
+def test_trunk_vlans_token_is_not_interchangeable_with_port_profile():
+    rows = [_inputs_row("", _trunk_document())]
+    pp_env, _, _ = _set_port_profile(rows, expected="trunk", new="vl 3")
+    env, urlopen, _ = _set_trunk_vlans(
+        rows, confirm=True, token=_obj(pp_env)["preview_token"]
+    )
+    assert _obj(env)["outcome"] == "refused"
+    urlopen.assert_not_called()

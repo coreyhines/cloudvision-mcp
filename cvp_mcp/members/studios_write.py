@@ -38,6 +38,9 @@ from cvp_mcp.grpc.studios_write import (
 from cvp_mcp.grpc.studios_write import (
     set_cvp_access_interface_port_profile as grpc_set_access_interface_port_profile,
 )
+from cvp_mcp.grpc.studios_write import (
+    set_cvp_access_interface_trunk_vlans as grpc_set_access_interface_trunk_vlans,
+)
 
 
 def _write_call(
@@ -173,6 +176,30 @@ def studios_write_set_port_profile(
         interface,
         expected_current_port_profile,
         new_port_profile,
+        confirm=confirm,
+        preview_token_value=preview_token,
+    )
+
+
+def studios_write_set_trunk_vlans(
+    workspace_id: str,
+    device_id: str,
+    interface: str,
+    expected_current_trunk_vlans: str,
+    new_trunk_vlans: str,
+    confirm: bool = False,
+    preview_token: str | None = None,
+) -> dict:
+    """Compare and set one trunk port's allowed-VLAN list."""
+    return _write_call(
+        "set_access_interface_trunk_vlans_failed",
+        "set_cvp_access_interface_trunk_vlans",
+        grpc_set_access_interface_trunk_vlans,
+        workspace_id,
+        device_id,
+        interface,
+        expected_current_trunk_vlans,
+        new_trunk_vlans,
         confirm=confirm,
         preview_token_value=preview_token,
     )
@@ -414,6 +441,50 @@ def members() -> dict[str, MemberSpec]:
                 **confirmation,
             },
             call=studios_write_set_port_profile,
+        ),
+        "set_trunk_vlans": MemberSpec(
+            action="set_trunk_vlans",
+            description=(
+                "Compare and set a trunk port's allowed VLANs in the access "
+                "studio. Trunk ports only; nativeVlan is left as is."
+            ),
+            required=[
+                "workspace_id",
+                "device_id",
+                "interface",
+                "expected_current_trunk_vlans",
+                "new_trunk_vlans",
+            ],
+            properties={
+                **workspace_id,
+                "device_id": {
+                    "type": "string",
+                    "description": (
+                        "Device id used verbatim in the interface:<iface>@<device_id> "
+                        "tag locator; no hostname, FQDN, or MAC resolution is performed."
+                    ),
+                },
+                "interface": {
+                    "type": "string",
+                    "description": "Interface name used in the target tag locator.",
+                },
+                "expected_current_trunk_vlans": {
+                    "type": "string",
+                    "description": (
+                        "Allowed-VLAN list currently on the trunk, e.g. '3,10', "
+                        "for compare-and-set."
+                    ),
+                },
+                "new_trunk_vlans": {
+                    "type": "string",
+                    "description": (
+                        "Replacement allowed-VLAN list: comma-separated IDs or "
+                        "ranges, 1-4094, no spaces, e.g. '3,5,10' or '3,5-7'."
+                    ),
+                },
+                **confirmation,
+            },
+            call=studios_write_set_trunk_vlans,
         ),
         "assign_tags": MemberSpec(
             action="assign_tags",

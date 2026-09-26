@@ -257,6 +257,7 @@ def test_studios_write_group_catalog_and_confirm_refusal(monkeypatch):
         "build",
         "set_description",
         "set_port_profile",
+        "set_trunk_vlans",
         "set_inputs",
         "assign_tags",
         "create_studio",

@@ -907,6 +907,39 @@ _PORT_PROFILE_LEAF: dict[str, str] = {
 }
 
 
+# A trunk port's allowed-VLAN list is ``adapterDetails.vlans.vlans`` -- one
+# level deeper than the other leaves, next to ``nativeVlan``. ``container``
+# names that parent; the one-leaf diff proof still bounds the write to the
+# list alone, so nativeVlan, mode and profile are copied through untouched.
+_TRUNK_VLANS_LEAF: dict[str, str] = {
+    "leaf": "vlans",
+    "container": "vlans",
+    "arg": "trunk_vlans",
+    "tool": "set_cvp_access_interface_trunk_vlans",
+    "operation": "set_trunk_vlans",
+    "mismatch_code": "current_trunk_vlans_mismatch",
+    "diff_code": "tree_diff_not_trunk_vlans_only",
+    "label": "trunk VLAN list",
+}
+
+_VLAN_ITEM_RE = re.compile(r"^(\d{1,4})(?:-(\d{1,4}))?$")
+
+
+def _valid_vlan_list(value: str) -> bool:
+    """EOS allowed-VLAN syntax without spaces: ``3,5-7,10``, IDs 1-4094."""
+    if not value:
+        return False
+    for item in value.split(","):
+        m = _VLAN_ITEM_RE.match(item)
+        if not m:
+            return False
+        low = int(m.group(1))
+        high = int(m.group(2)) if m.group(2) else low
+        if not (1 <= low <= high <= 4094):
+            return False
+    return True
+
+
 def _set_adapter_detail_leaf(
     datadict: dict[str, Any],
     workspace_id: str,
@@ -1082,7 +1115,32 @@ def _set_adapter_detail_leaf(
             warnings=warnings,
         )
 
-    raw_current = details.get(leaf)
+    container = spec.get("container")
+    target = details
+    if container:
+        if details.get("mode") != "trunk":
+            return _refused(
+                tool,
+                _INPUTS_SOURCE,
+                "not_a_trunk_port",
+                f"{locator} is not a trunk port; its VLAN is set by port profile.",
+                details={"locator": locator, "mode": details.get("mode")},
+                workspace_id=workspace,
+                warnings=warnings,
+            )
+        target = details.get(container)
+        if not isinstance(target, dict):
+            return _refused(
+                tool,
+                _INPUTS_SOURCE,
+                "inputs_path_unresolved",
+                f"Matched adapterDetails has no {container} object.",
+                details={"locator": locator, "row_path": row_path},
+                workspace_id=workspace,
+                warnings=warnings,
+            )
+
+    raw_current = target.get(leaf)
     current = "" if raw_current is None else raw_current
     if not isinstance(current, str):
         return _refused(
@@ -1109,7 +1167,9 @@ def _set_adapter_detail_leaf(
             warnings=warnings,
         )
 
-    leaf_path = f"{details_path}.{leaf}"
+    leaf_path = (
+        f"{details_path}.{container}.{leaf}" if container else f"{details_path}.{leaf}"
+    )
     patched = copy.deepcopy(document)
     patched_matches = _find_locator_rows(patched, locator)
     patched_details = None
@@ -1126,7 +1186,10 @@ def _set_adapter_detail_leaf(
             workspace_id=workspace,
             warnings=warnings,
         )
-    patched_details[leaf] = replacement
+    if container:
+        patched_details[container][leaf] = replacement
+    else:
+        patched_details[leaf] = replacement
 
     # Serialize both sides (sorted keys) and diff the reparsed objects: this
     # catches shared references and any non-round-tripping value, not just the
@@ -1299,6 +1362,46 @@ def set_cvp_access_interface_port_profile(
         expected_current_port_profile,
         new_port_profile,
         _PORT_PROFILE_LEAF,
+        confirm,
+        preview_token_value=preview_token_value,
+    )
+
+
+def set_cvp_access_interface_trunk_vlans(
+    datadict: dict[str, Any],
+    workspace_id: str,
+    device_id: str,
+    interface: str,
+    expected_current_trunk_vlans: str,
+    new_trunk_vlans: str,
+    confirm: bool = False,
+    *,
+    preview_token_value: str | None = None,
+) -> dict[str, Any]:
+    """Compare-and-set a trunk port's allowed VLANs (``adapterDetails.vlans.vlans``).
+
+    Trunk ports only; an access port moves VLAN by port profile. The new list
+    must be EOS allowed-VLAN syntax (``3,5-7,10``), and the write still has to
+    diff to exactly that one leaf, so ``nativeVlan`` cannot change with it.
+    """
+    replacement = "" if new_trunk_vlans is None else new_trunk_vlans
+    if not isinstance(replacement, str) or not _valid_vlan_list(replacement):
+        return _refused(
+            _TRUNK_VLANS_LEAF["tool"],
+            _INPUTS_SOURCE,
+            "invalid_vlan_list",
+            "new_trunk_vlans must be comma-separated VLAN IDs or ranges, 1-4094, no spaces.",
+            details={"new_trunk_vlans": replacement},
+            workspace_id=(workspace_id or "").strip() or None,
+        )
+    return _set_adapter_detail_leaf(
+        datadict,
+        workspace_id,
+        device_id,
+        interface,
+        expected_current_trunk_vlans,
+        replacement,
+        _TRUNK_VLANS_LEAF,
         confirm,
         preview_token_value=preview_token_value,
     )

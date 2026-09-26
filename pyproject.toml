@@ -4,8 +4,9 @@ version = "0.1.0"
 description = "CloudVision MCP Server"
 requires-python = ">=3.11"
 dependencies = [
-    # <1.34: 1.34+ needs cryptography>=50 and breaks arista.*.services imports.
-    "cloudvision>=1.0,<1.34",
+    # 1.34.0 ships configstatus without services/ (breaks Resource API stubs).
+    # 1.33.0 still has services and requires cryptography>=50.
+    "cloudvision>=1.33,<1.34",
     "aiohttp>=3.9",
     "grpcio>=1.60",
     "protobuf>=4.25",
@@ -22,11 +23,12 @@ dev = [
 ]
 
 # Security floors for transitive deps (see Dependabot alerts).
-# cryptography stays at 48.0.1 until cloudvision>=1.34 is import-compatible.
+# cryptography>=50 comes via cloudvision 1.33 (avoid 1.34.0; missing services).
 [tool.uv]
 constraint-dependencies = [
     "anyio>=4.14.2",
     "aiohttp>=3.14.3",
+    "cryptography>=50.0.0,<51",
     "h2>=4.4.1",
     "hpack>=4.2.0",
     "msgpack>=1.2.2",

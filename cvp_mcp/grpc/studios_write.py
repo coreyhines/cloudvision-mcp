@@ -356,6 +356,54 @@ def _resolve_adapter_details(
     return None, row_path
 
 
+def _profile_index(document: Any) -> dict[str, dict[str, Any]]:
+    """Every port profile in the Inputs tree, by name (first definition wins)."""
+    index: dict[str, dict[str, Any]] = {}
+
+    def walk(obj: Any) -> None:
+        if isinstance(obj, dict):
+            profiles = obj.get("portProfiles")
+            if isinstance(profiles, list):
+                for profile in profiles:
+                    if isinstance(profile, dict) and isinstance(
+                        profile.get("name"), str
+                    ):
+                        index.setdefault(profile["name"], profile)
+            for value in obj.values():
+                walk(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                walk(item)
+
+    walk(document)
+    return index
+
+
+def _effective_mode(
+    details: dict[str, Any], document: Any
+) -> tuple[str | None, str | None]:
+    """The port's switchport mode and where it came from.
+
+    A port that leaves ``mode`` unset takes it from its ``portProfile``, and a
+    profile that leaves it unset takes it from its ``parentProfile``. The chain
+    is walked with a seen-set, so a loop resolves to no mode rather than hanging.
+    """
+    if details.get("mode"):
+        return details["mode"], "port"
+    profiles = _profile_index(document)
+    name = details.get("portProfile")
+    seen: set[str] = set()
+    while isinstance(name, str) and name and name not in seen:
+        seen.add(name)
+        profile = profiles.get(name)
+        if not isinstance(profile, dict):
+            break
+        if profile.get("mode"):
+            return profile["mode"], f"profile:{name}"
+        name = profile.get("parentProfile")
+    return None, None
+
+
 def _changed_leaf_paths(
     before: Any, after: Any, path: str = "$", out: list[str] | None = None
 ) -> list[str]:
@@ -1118,13 +1166,15 @@ def _set_adapter_detail_leaf(
     container = spec.get("container")
     target = details
     if container:
-        if details.get("mode") != "trunk":
+        # The mode may live on the port or, more often, on its port profile.
+        mode, mode_source = _effective_mode(details, document)
+        if mode != "trunk":
             return _refused(
                 tool,
                 _INPUTS_SOURCE,
                 "not_a_trunk_port",
                 f"{locator} is not a trunk port; its VLAN is set by port profile.",
-                details={"locator": locator, "mode": details.get("mode")},
+                details={"locator": locator, "mode": mode, "mode_source": mode_source},
                 workspace_id=workspace,
                 warnings=warnings,
             )

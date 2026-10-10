@@ -1053,3 +1053,82 @@ def test_trunk_vlans_token_is_not_interchangeable_with_port_profile():
     )
     assert _obj(env)["outcome"] == "refused"
     urlopen.assert_not_called()
+
+
+# --- trunk mode inherited from the port profile ------------------------------
+
+
+def _profile_trunk_document(vlans="2,3", profiles=None, profile="trunk"):
+    """A row like 720xp-48 Ethernet51 (the NAS): no mode on the port; the
+    `trunk` profile carries it, through its parent chain if need be."""
+    document = _inputs_document()
+    row = document["campus"]["connectedEndpoints"][0]["inputs"]["adapterDetails"]
+    row["portProfile"] = profile
+    row["vlans"] = {"vlans": vlans}
+    document["campus"]["portProfiles"] = (
+        profiles
+        if profiles is not None
+        else [
+            {"name": "sampled ipfix", "mode": None, "parentProfile": None},
+            {"name": "trunk", "mode": "trunk", "parentProfile": "sampled ipfix"},
+            {"name": "vl 2", "mode": "access", "parentProfile": "sampled ipfix"},
+        ]
+    )
+    return document
+
+
+def test_trunk_vlans_takes_the_mode_from_the_port_profile():
+    rows = [_inputs_row("", _profile_trunk_document())]
+    env, urlopen, _ = _set_trunk_vlans(rows, expected="2,3", new="2,3,10")
+    obj = _obj(env)
+    assert obj["outcome"] == "preview"
+    assert obj["after_trunk_vlans"] == "2,3,10"
+    assert obj["changed_leaves"] == 1
+    urlopen.assert_not_called()
+
+    env, urlopen, body = _set_trunk_vlans(
+        rows, expected="2,3", new="2,3,10", confirm=True, token=obj["preview_token"]
+    )
+    assert _obj(env)["outcome"] == "accepted"
+    details = json.loads(body["inputs"])["campus"]["connectedEndpoints"][0]["inputs"][
+        "adapterDetails"
+    ]
+    assert details["vlans"] == {"vlans": "2,3,10"}
+    assert "mode" not in details  # the profile still owns the mode
+
+
+def test_trunk_vlans_follows_the_parent_profile_chain():
+    profiles = [
+        {"name": "base trunk", "mode": "trunk", "parentProfile": None},
+        {"name": "nas trunk", "mode": None, "parentProfile": "base trunk"},
+    ]
+    rows = [
+        _inputs_row("", _profile_trunk_document(profiles=profiles, profile="nas trunk"))
+    ]
+    env, _, _ = _set_trunk_vlans(rows, expected="2,3", new="2,3,10")
+    assert _obj(env)["outcome"] == "preview"
+
+
+def test_trunk_vlans_refuses_when_the_profile_is_access():
+    rows = [_inputs_row("", _profile_trunk_document(profile="vl 2"))]
+    env, urlopen, _ = _set_trunk_vlans(rows, expected="2,3", new="2,3,10")
+    assert _code(env) == "not_a_trunk_port"
+    assert _obj(env)["error"]["details"]["mode_source"] == "profile:vl 2"
+    urlopen.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "profiles",
+    [
+        [],  # profile not defined anywhere
+        [  # a parent loop never settles on a mode
+            {"name": "trunk", "mode": None, "parentProfile": "loop"},
+            {"name": "loop", "mode": None, "parentProfile": "trunk"},
+        ],
+    ],
+)
+def test_trunk_vlans_refuses_when_no_mode_resolves(profiles):
+    rows = [_inputs_row("", _profile_trunk_document(profiles=profiles))]
+    env, urlopen, _ = _set_trunk_vlans(rows, expected="2,3", new="2,3,10")
+    assert _code(env) == "not_a_trunk_port"
+    urlopen.assert_not_called()

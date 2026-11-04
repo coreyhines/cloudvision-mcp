@@ -98,6 +98,8 @@ _STATUS_ACTIONS: frozenset[str] = frozenset(
     {
         "compliance.config_status",
         "compliance.image_status",
+        # Added without a legacy flat name: Port-Channel -> member ports.
+        "device.lag_members",
     }
 )
 

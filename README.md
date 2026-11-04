@@ -131,7 +131,7 @@ group's parameters and defaults.
 | --- | --- |
 | `inventory` | `get`, `list`, `search` |
 | `endpoints` | `get`, `list`, `filter` |
-| `device` | `config`, `interfaces`, `vlans`, `ip_interfaces`, `features`, `health` |
+| `device` | `config`, `interfaces`, `vlans`, `ip_interfaces`, `features`, `health`, `lag_members` |
 | `overlay` | `evpn`, `vxlan` |
 | `routing` | `bgp`, `routes` |
 | `topology` | `lldp`, `map` |
@@ -153,6 +153,7 @@ group's parameters and defaults.
 | `events.list` / `events.search` | Structured events or client-side substring search | `resource_api:event.v1` |
 | `routing.bgp` / `routing.routes` | BGP snapshot or RIB-like entries | `connector:device:Sysdb/routing` |
 | `device.features` / `overlay.evpn` / `overlay.vxlan` / `device.health` | Feature, overlay, and system state | Connector Sysdb |
+| `device.lag_members` | Port-Channel -> member ports (configured + live LACP members), so a MAC learned on `Port-ChannelN` resolves to a physical port without reading the running config | `connector:device:Sysdb/lag` |
 | `endpoints.get` | Single endpoint lookup by IP, MAC, or hostname | `resource_api:endpointlocation.v1` |
 | `endpoints.list` / `endpoints.filter` | LLDP-seeded bulk endpoint lookup, optionally filtered | inventory + LLDP + EndpointLocation |
 | `compliance.designed_config` | Designed CLI and studio provenance | `service_api:compliancecheck.getconfig` |

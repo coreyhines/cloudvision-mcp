@@ -38,7 +38,7 @@ def test_legacy_flat_to_action_bijection():
 
 
 def test_member_actions_includes_status_and_legacy_values():
-    assert len(MEMBER_ACTIONS) == 48
+    assert len(MEMBER_ACTIONS) == 49
     assert "compliance.config_status" in MEMBER_ACTIONS
     assert "compliance.image_status" in MEMBER_ACTIONS
     assert set(LEGACY_FLAT_TO_ACTION.values()) <= MEMBER_ACTIONS
@@ -46,7 +46,7 @@ def test_member_actions_includes_status_and_legacy_values():
 
 def test_member_bijection():
     assert set(iter_member_actions()) == MEMBER_ACTIONS
-    assert len(MEMBER_ACTIONS) == 48
+    assert len(MEMBER_ACTIONS) == 49
 
 
 def test_docstring_count_locked():

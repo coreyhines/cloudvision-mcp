@@ -16,6 +16,7 @@ from cvp_mcp.grpc.interfaces import (
     grpc_get_ip_interfaces,
     grpc_get_vlans,
 )
+from cvp_mcp.grpc.lag import grpc_get_lag_members
 from cvp_mcp.grpc.overlay import grpc_get_features, grpc_get_system_health
 from cvp_mcp.grpc.utils import createConnection
 from cvp_mcp.members._device import (
@@ -124,6 +125,19 @@ def device_health(device_id: str) -> dict:
     )
 
 
+def device_lag_members(device_id: str, port_channel: str | None = None) -> dict:
+    """Return Port-Channel -> member port mapping (configured and live)."""
+    return _resolved_device_query(
+        device_id,
+        data_source="connector:device:Sysdb/lag",
+        failure_code="lag_members_failed",
+        context="get_cvp_lag_members",
+        query=lambda datadict, serial: grpc_get_lag_members(
+            datadict, serial, port_channel
+        ),
+    )
+
+
 def _device_id_property() -> dict[str, dict[str, str]]:
     return {
         "device_id": {
@@ -184,5 +198,21 @@ def members() -> dict[str, MemberSpec]:
             required=["device_id"],
             properties=_device_id_property(),
             call=device_health,
+        ),
+        "lag_members": MemberSpec(
+            action="lag_members",
+            description=(
+                "Get Port-Channel member ports (configured and live). Use after "
+                "endpoints.get reports a MAC on a Port-Channel to find the physical port."
+            ),
+            required=["device_id"],
+            properties={
+                **_device_id_property(),
+                "port_channel": {
+                    "type": "string",
+                    "description": "Optional Port-Channel to return (e.g. Port-Channel8, Po8, 8).",
+                },
+            },
+            call=device_lag_members,
         ),
     }

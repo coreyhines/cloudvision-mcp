@@ -155,6 +155,7 @@ def test_batch_a_group_actions_match_frozen_catalog():
             "ip_interfaces",
             "features",
             "health",
+            "lag_members",
         },
         "overlay": {"evpn", "vxlan"},
         "routing": {"bgp", "routes"},

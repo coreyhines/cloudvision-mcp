@@ -55,6 +55,10 @@ fi
 ENV_HOST_PATH="${INSTALL_ROOT}/environment"
 CADDYFILE_HOST="${INSTALL_ROOT}/Caddyfile"
 
+# No --force here: a Caddyfile that another deployer owns is not ours to
+# switch to basic auth.
+require_own_install "${CADDYFILE_HOST}" "rotate-basic-auth.sh" 0
+
 if [[ ! -f "${ENV_HOST_PATH}" ]]; then
   echo "Missing ${ENV_HOST_PATH} — run deploy/install.sh first." >&2
   exit 1

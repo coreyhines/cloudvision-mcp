@@ -503,6 +503,8 @@ def members() -> dict[str, MemberSpec]:
                 **confirmation,
             },
             call=studios_write_assign_tags,
+            # "" is a valid CAS token when the studio has no assigned query.
+            empty_ok=frozenset({"expected_current_query"}),
         ),
         "create_studio": MemberSpec(
             action="create_studio",

@@ -13,12 +13,20 @@ from cvp_mcp.tool_access import disabled_tools, is_tool_disabled
 HELP_ACTION = "help"
 
 
-def _is_absent(value: Any) -> bool:
-    """Treat None, empty, and whitespace-only strings as missing."""
+def _is_absent(value: Any, *, allow_empty: bool = False) -> bool:
+    """Treat None, empty, and whitespace-only strings as missing.
+
+    When ``allow_empty`` is true, the exact empty string is present (CAS
+    tokens such as assign_tags ``expected_current_query``). Whitespace-only
+    strings stay absent.
+    """
     if value is None:
         return True
-    if isinstance(value, str) and not value.strip():
-        return True
+    if isinstance(value, str):
+        if value == "" and allow_empty:
+            return False
+        if not value.strip():
+            return True
     return False
 
 
@@ -32,6 +40,7 @@ class MemberSpec:
     properties: dict[str, dict[str, Any]]
     call: Callable[..., Any]
     rate_limit_key: str | None = None
+    empty_ok: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass
@@ -143,7 +152,7 @@ class GroupedTool:
         for key, value in renamed.items():
             if key not in member.properties:
                 continue
-            if _is_absent(value):
+            if _is_absent(value, allow_empty=key in member.empty_ok):
                 continue
             cleaned[key] = value
         return cleaned
@@ -163,7 +172,10 @@ class GroupedTool:
         missing: list[str] = []
         for field_name in member.required:
             advertised = aliases.get(field_name, field_name)
-            if _is_absent(cleaned.get(field_name)):
+            if _is_absent(
+                cleaned.get(field_name),
+                allow_empty=field_name in member.empty_ok,
+            ):
                 missing.append(advertised)
         return missing
 

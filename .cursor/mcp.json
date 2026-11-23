@@ -1,0 +1,44 @@
+{
+  "mcpServers": {
+    "cloudvision-mcp": {
+      "command": "/Users/corey/code/agent-fence/gateway/clients/cursor-gateway-mcp.sh",
+      "args": [
+        "cloudvision"
+      ]
+    },
+    "agni": {
+      "command": "/Users/corey/code/agent-fence/gateway/clients/cursor-gateway-mcp.sh",
+      "args": [
+        "agni"
+      ]
+    },
+    "agni-local": {
+      "command": "/Users/corey/code/agni-mcp/bin/cursor-stdio-mcp.sh",
+      "args": [],
+      "env": {
+        "AGNI_LOCAL_MCP_CURSOR_RELOAD": "2026-11-17T12:00"
+      }
+    },
+    "anta": {
+      "command": "/Users/corey/code/agent-fence/gateway/clients/cursor-gateway-mcp.sh",
+      "args": [
+        "anta"
+      ]
+    },
+    "eos": {
+      "command": "/Users/corey/code/agent-fence/gateway/clients/cursor-gateway-mcp.sh",
+      "args": [
+        "eos"
+      ]
+    },
+    "eos-ops": {
+      "command": "/Users/corey/code/agent-fence/gateway/clients/cursor-gateway-mcp.sh",
+      "args": [
+        "eos-ops"
+      ],
+      "env": {
+        "EOS_OPS_MCP_CURSOR_RELOAD": "2026-11-16T22:16"
+      }
+    }
+  }
+}

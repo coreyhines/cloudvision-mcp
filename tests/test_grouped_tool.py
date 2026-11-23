@@ -81,6 +81,34 @@ def test_empty_string_required_is_missing():
     assert out["error"] == "action_args_invalid"
 
 
+def test_empty_ok_required_keeps_exact_empty_string():
+    g = GroupedTool(
+        name="studios_write",
+        description="Writes",
+        members={
+            "assign_tags": MemberSpec(
+                action="assign_tags",
+                description="Assign",
+                required=["query", "expected_current_query"],
+                properties={
+                    "query": {"type": "string"},
+                    "expected_current_query": {"type": "string"},
+                },
+                call=_echo,
+                empty_ok=frozenset({"expected_current_query"}),
+            ),
+        },
+    )
+    out = g.execute(
+        {
+            "action": "assign_tags",
+            "query": "device:710p",
+            "expected_current_query": "",
+        }
+    )
+    assert out == {"echo": {"query": "device:710p", "expected_current_query": ""}}
+
+
 def test_disable_whole_group(monkeypatch):
     monkeypatch.setenv("CVP_MCP_DISABLED_TOOLS", "inventory")
     out = _group().execute({"action": "get", "device_id": "x"})

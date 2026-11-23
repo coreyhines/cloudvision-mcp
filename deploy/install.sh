@@ -24,11 +24,12 @@ IMAGE_TAG="${EXPLICIT_IMAGE_TAG}"
 QUADLET_SUBDIR="${CLOUDVISION_MCP_QUADLET_SUBDIR:-cloudvision-mcp}"
 RUNTIME="${CLOUDVISION_MCP_RUNTIME:-podman}"
 SKIP_IMAGE="${CLOUDVISION_MCP_SKIP_IMAGE:-0}"
+FORCE="${CLOUDVISION_MCP_FORCE:-0}"
 SRC_DIR=""
 DEPLOY_DIR=""
 
 usage() {
-  echo "Usage: $0 [--runtime podman|docker] [--skip-image]" >&2
+  echo "Usage: $0 [--runtime podman|docker] [--skip-image] [--force]" >&2
   echo "  Builds the container image and pushes to CLOUDVISION_MCP_IMAGE_REPO:TAG." >&2
   echo "  Env: CLOUDVISION_MCP_INSTALL_ROOT (default /opt/containerdata/cloudvision-mcp)" >&2
   echo "       CLOUDVISION_MCP_IMAGE_REPO (required non-interactive; prompted on TTY)" >&2
@@ -36,6 +37,8 @@ usage() {
   echo "       CLOUDVISION_MCP_PUSH_LATEST=1 (also tag/push :latest; default on)" >&2
   echo "       CLOUDVISION_MCP_SKIP_IMAGE=1 or --skip-image to skip build/push" >&2
   echo "       CLOUDVISION_MCP_QUADLET_SUBDIR (under /etc/containers/systemd/)" >&2
+  echo "       CLOUDVISION_MCP_FORCE=1 or --force to take over an install whose" >&2
+  echo "         Caddyfile another deployer wrote (it is refused by default)" >&2
   echo "  To change Basic Auth password: deploy/rotate-basic-auth.sh (no image rebuild)." >&2
   echo "  Run 'podman login <registry>' before install if the registry requires auth." >&2
   echo "  Under sudo, prefer env vars for non-interactive install (see script header)." >&2
@@ -53,6 +56,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-image)
       SKIP_IMAGE=1
+      shift
+      ;;
+    --force)
+      FORCE=1
       shift
       ;;
     -h | --help)
@@ -91,6 +98,10 @@ prompt_install_root
 CADDYFILE_HOST="${INSTALL_ROOT}/Caddyfile"
 ENV_HOST_PATH="${INSTALL_ROOT}/environment"
 SRC_DIR="${INSTALL_ROOT}/src"
+
+# Refuse before anything is written: a Caddyfile that these scripts did not
+# write means another deployer owns this Caddyfile and the quadlets.
+require_own_install "${CADDYFILE_HOST}" "install.sh" "${FORCE}"
 
 echo "cloudvision-mcp install: INSTALL_ROOT=${INSTALL_ROOT} RUNTIME=${RUNTIME}" >&2
 

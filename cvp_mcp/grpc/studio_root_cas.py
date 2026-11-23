@@ -278,7 +278,11 @@ def run_root_inputs_cas(
             _INPUTS_SOURCE,
             apply_error["code"],
             apply_error["message"],
-            details={"studio_id": studio_id, **(apply_error.get("details") or {})},
+            details={
+                "studio_id": studio_id,
+                "inputs_source_workspace_id": source_workspace,
+                **(apply_error.get("details") or {}),
+            },
             workspace_id=workspace,
             warnings=warnings,
         )

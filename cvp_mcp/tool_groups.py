@@ -92,6 +92,7 @@ LEGACY_FLAT_TO_ACTION: dict[str, str] = {
     "create_cvp_studio": "studios_write.create_studio",
     "delete_cvp_studio": "studios_write.delete_studio",
     "set_cvp_mss_policy_inputs": "studios_write.set_mss_inputs",
+    "set_cvp_telemetry_inputs": "studios_write.set_telemetry_inputs",
 }
 
 _STATUS_ACTIONS: frozenset[str] = frozenset(

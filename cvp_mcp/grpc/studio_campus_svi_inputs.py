@@ -20,35 +20,35 @@ import json
 import re
 from typing import Any
 
-from cvp_mcp.grpc.inputs_digest import canonical_json, inputs_sha256
-from cvp_mcp.grpc.resource_write import post_resource_config
-from cvp_mcp.grpc.studio_crud import _read_studio_anywhere
+from cvp_mcp.grpc.inputs_digest import canonical_json
+from cvp_mcp.grpc.studio_root_cas import RootCasConfig, run_root_inputs_cas
 from cvp_mcp.grpc.studios_write import (
     _INPUTS_SOURCE,
-    INPUTS_CONFIG_PATH,
-    WORKSPACE_STATE_PENDING,
-    _as_str,
     _changed_leaf_paths,
-    _credentials,
     _disruptive_hits,
-    _load_root_inputs,
-    _outcome,
-    _read_workspace,
     _refused,
-    _resource_time,
 )
-from cvp_mcp.write_access import (
-    check_preview_token,
-    preview_token,
-    validate_workspace_id,
-    writes_enabled,
-)
+from cvp_mcp.write_access import validate_workspace_id, writes_enabled
 
 TOOL_NAME = "set_cvp_campus_svi_inputs"
 CAMPUS_STUDIO_ID = "studio-avd-campus-fabric"
 
 DEFAULT_CAMPUS_TAG = "Campus:campus-1709"
 DEFAULT_POD_TAG = "Campus-Pod:1"
+
+_CAS_CONFIG = RootCasConfig(
+    tool_name=TOOL_NAME,
+    studio_id=CAMPUS_STUDIO_ID,
+    operation="set_campus_svi_inputs",
+    writable_top_level_keys=("campusServices",),
+    scope_error_code="tree_diff_outside_campus_svi_scope",
+    scope_error_message="The applied operations changed leaves outside campusServices SVI lists.",
+    load_error_message="Could not read the Campus Fabric root Inputs document.",
+    digest_mismatch_message=(
+        "The current Campus Fabric document does not match expected_inputs_sha256; "
+        "re-read and retry."
+    ),
+)
 
 MAX_OPERATIONS = 10
 _MAX_REPORTED = 10
@@ -485,259 +485,48 @@ def set_cvp_campus_svi_inputs(
             workspace_id=workspace,
         )
 
-    _, _, missing = _credentials(datadict)
-    if missing:
-        return _refused(
-            tool,
-            _INPUTS_SOURCE,
-            "preflight_failed",
-            "CloudVision credentials are incomplete; no preflight GET was made.",
-            details={"reason": missing},
-            workspace_id=workspace,
-        )
+    def apply(
+        document: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None]:
+        shape_error = _validate_document_shape(document, campus, pod)
+        if shape_error:
+            return document, {}, shape_error
 
-    summary, ws_status, ws_warnings = _read_workspace(datadict, workspace)
-    if ws_status == "not_found":
-        return _refused(
-            tool,
-            _INPUTS_SOURCE,
-            "workspace_not_found",
-            "Workspace does not exist; create a draft first.",
-            workspace_id=workspace,
-            warnings=ws_warnings,
+        after, entry_summary, apply_error = _apply_operations(
+            document, ops, campus, pod
         )
-    if ws_status == "read_failed":
-        return _refused(
-            tool,
-            _INPUTS_SOURCE,
-            "workspace_read_failed",
-            "Workspace GET failed; refusing to write Inputs.",
-            workspace_id=workspace,
-            warnings=ws_warnings,
-        )
-    state = _as_str((summary or {}).get("state")).strip()
-    if state != WORKSPACE_STATE_PENDING:
-        return _refused(
-            tool,
-            _INPUTS_SOURCE,
-            "workspace_not_pending" if state else "workspace_state_unknown",
-            "Inputs writes require a pending draft workspace with a known state.",
-            details={"state": state},
-            workspace_id=workspace,
-            warnings=ws_warnings,
-        )
+        if apply_error:
+            return after, entry_summary, apply_error
 
-    studio_obj, _, studio_status, studio_warnings = _read_studio_anywhere(
-        datadict, CAMPUS_STUDIO_ID, workspace
-    )
-    if studio_status is not None or not isinstance(studio_obj, dict):
-        return _refused(
-            tool,
-            _INPUTS_SOURCE,
-            "preflight_failed",
-            (
-                "Studio not found in the draft or mainline; refusing Inputs write."
-                if studio_status == "not_found"
-                else "Studio GET failed; refusing Inputs write."
-            ),
-            details={
-                "studio_id": CAMPUS_STUDIO_ID,
-                "studio_status": studio_status or "malformed",
-            },
-            workspace_id=workspace,
-            warnings=studio_warnings,
-        )
-    if studio_obj.get("immutable") is True or studio_obj.get("from_package") is True:
-        return _refused(
-            tool,
-            _INPUTS_SOURCE,
-            (
-                "studio_from_package"
-                if studio_obj.get("from_package") is True
-                else "studio_immutable"
-            ),
-            "Refusing Inputs write on an immutable or packaged studio.",
-            details={"studio_id": CAMPUS_STUDIO_ID},
-            workspace_id=workspace,
-        )
+        # The original Campus guard is narrower than the shared top-level
+        # guard: only leaves inside an SVI list may change.
+        before_canonical = json.loads(canonical_json(document))
+        after_canonical = json.loads(canonical_json(after))
+        changed = _changed_leaf_paths(before_canonical, after_canonical)
+        outside = _scope_violations(changed)
+        if outside:
+            return (
+                after,
+                entry_summary,
+                {
+                    "code": _CAS_CONFIG.scope_error_code,
+                    "message": _CAS_CONFIG.scope_error_message,
+                    "details": {
+                        "outside": outside[:_MAX_REPORTED],
+                        "changed_count": len(changed),
+                    },
+                },
+            )
+        return after, entry_summary, None
 
-    document, source_workspace, load_error, load_warnings = _load_root_inputs(
-        datadict, workspace, studio_id=CAMPUS_STUDIO_ID
-    )
-    warnings = [*ws_warnings, *studio_warnings, *load_warnings]
-    if load_error or not isinstance(document, dict):
-        return _refused(
-            tool,
-            _INPUTS_SOURCE,
-            load_error or "inputs_path_unresolved",
-            "Could not read the Campus Fabric root Inputs document.",
-            details={
-                "studio_id": CAMPUS_STUDIO_ID,
-                "inputs_source_workspace_id": source_workspace,
-                "reason": (
-                    "root document is not a JSON object"
-                    if load_error is None
-                    else "root row missing, unparsable, or the stream was incomplete"
-                ),
-            },
-            workspace_id=workspace,
-            warnings=warnings,
-        )
-
-    shape_error = _validate_document_shape(document, campus, pod)
-    if shape_error:
-        return _refused(
-            tool,
-            _INPUTS_SOURCE,
-            shape_error["code"],
-            shape_error["message"],
-            details={
-                "studio_id": CAMPUS_STUDIO_ID,
-                "inputs_source_workspace_id": source_workspace,
-                **shape_error["details"],
-            },
-            workspace_id=workspace,
-            warnings=warnings,
-        )
-
-    before_sha256 = inputs_sha256(document)
-    if before_sha256 != expected_inputs_sha256:
-        return _refused(
-            tool,
-            _INPUTS_SOURCE,
-            "inputs_digest_mismatch",
-            "The current Campus Fabric document does not match expected_inputs_sha256; re-read and retry.",
-            details={
-                "studio_id": CAMPUS_STUDIO_ID,
-                "current_inputs_sha256": before_sha256,
-                "expected_inputs_sha256": expected_inputs_sha256,
-                "inputs_source_workspace_id": source_workspace,
-            },
-            workspace_id=workspace,
-            warnings=warnings,
-        )
-
-    after, entry_summary, apply_error = _apply_operations(document, ops, campus, pod)
-    if apply_error:
-        return _refused(
-            tool,
-            _INPUTS_SOURCE,
-            apply_error["code"],
-            apply_error["message"],
-            details={"studio_id": CAMPUS_STUDIO_ID, **apply_error["details"]},
-            workspace_id=workspace,
-            warnings=warnings,
-        )
-
-    before_canonical = json.loads(canonical_json(document))
-    after_canonical = json.loads(canonical_json(after))
-    changed = _changed_leaf_paths(before_canonical, after_canonical)
-    outside = _scope_violations(changed)
-    if outside:
-        return _refused(
-            tool,
-            _INPUTS_SOURCE,
-            "tree_diff_outside_campus_svi_scope",
-            "The applied operations changed leaves outside campusServices SVI lists.",
-            details={
-                "studio_id": CAMPUS_STUDIO_ID,
-                "outside": outside[:_MAX_REPORTED],
-                "changed_count": len(changed),
-            },
-            workspace_id=workspace,
-            warnings=warnings,
-        )
-    if not changed:
-        warnings = [*warnings, "inputs_unchanged"]
-
-    after_sha256 = inputs_sha256(after)
-    body = {
-        "key": {
-            "studioId": CAMPUS_STUDIO_ID,
-            "workspaceId": workspace,
-            "path": {"values": []},
-        },
-        "inputs": json.dumps(after),
-    }
-    token_args = {
-        "studio_id": CAMPUS_STUDIO_ID,
-        "workspace_id": workspace,
-        "expected_inputs_sha256": expected_inputs_sha256,
-        "operations": ops,
-        "campus_tag": campus,
-        "pod_tag": pod,
-        "after_sha256": after_sha256,
-    }
-    fields: dict[str, Any] = {
-        "operation": "set_campus_svi_inputs",
-        "studio_id": CAMPUS_STUDIO_ID,
-        "campus_tag": campus,
-        "pod_tag": pod,
-        "inputs_source_workspace_id": source_workspace,
-        "before_sha256": before_sha256,
-        "after_sha256": after_sha256,
-        "operations_applied": len(ops),
-        "operations": ops,
-        "entries_added": entry_summary["added"],
-        "entries_replaced": entry_summary["replaced"],
-        "entries_removed": entry_summary["removed"],
-        "changed_leaves": len(changed),
-        "changed_leaf_paths": changed[:_MAX_REPORTED],
-        "posted_at_root": True,
-        "disruptive": False,
-        "request_body": body,
-        "resource_time": None,
-    }
-
-    if confirm is not True:
-        fields["preview_token"] = preview_token(tool, token_args)
-        return _outcome(
-            tool,
-            _INPUTS_SOURCE,
-            outcome="preview",
-            workspace_id=workspace,
-            fields=fields,
-            next_action="Re-call with confirm=True and this preview_token.",
-            warnings=warnings,
-        )
-
-    token_error = check_preview_token(tool, token_args, preview_token_value)
-    if token_error:
-        return _refused(
-            tool,
-            _INPUTS_SOURCE,
-            token_error,
-            "confirm=True requires the preview_token from a matching dry run.",
-            workspace_id=workspace,
-            warnings=warnings,
-        )
-
-    cvtoken, base, _ = _credentials(datadict)
-    response, err = post_resource_config(
-        base,
-        INPUTS_CONFIG_PATH,
-        body,
-        cvtoken,
-        cafile=datadict.get("cert"),
-        cvp_endpoint=str(datadict.get("cvp") or ""),
-    )
-    if err:
-        return _refused(
-            tool,
-            _INPUTS_SOURCE,
-            "resource_write_failed",
-            "InputsConfig POST failed.",
-            details={"reason": err},
-            workspace_id=workspace,
-            warnings=warnings,
-        )
-    fields["resource_time"] = _resource_time(response)
-    return _outcome(
-        tool,
-        _INPUTS_SOURCE,
-        outcome="accepted",
-        workspace_id=workspace,
-        fields=fields,
-        next_action="build_cvp_workspace, then review the workspace diff in the CVP UI.",
-        warnings=warnings,
+    return run_root_inputs_cas(
+        datadict,
+        workspace,
+        expected_inputs_sha256,
+        config=_CAS_CONFIG,
+        operations=ops,
+        apply=apply,
+        confirm=confirm,
+        preview_token_value=preview_token_value,
+        extra_fields={"campus_tag": campus, "pod_tag": pod},
     )

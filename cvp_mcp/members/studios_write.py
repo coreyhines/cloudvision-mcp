@@ -23,6 +23,9 @@ from cvp_mcp.grpc.studio_mss_inputs import (
 from cvp_mcp.grpc.studio_tags import (
     assign_cvp_studio_tags as grpc_assign_studio_tags,
 )
+from cvp_mcp.grpc.studio_telemetry_inputs import (
+    set_cvp_telemetry_inputs as grpc_set_telemetry_inputs,
+)
 from cvp_mcp.grpc.studios_write import (
     build_cvp_workspace as grpc_build_workspace,
 )
@@ -281,6 +284,26 @@ def studios_write_set_mss_inputs(
         "set_mss_policy_inputs_failed",
         "set_cvp_mss_policy_inputs",
         grpc_set_mss_policy_inputs,
+        workspace_id,
+        expected_inputs_sha256,
+        operations,
+        confirm=confirm,
+        preview_token_value=preview_token,
+    )
+
+
+def studios_write_set_telemetry_inputs(
+    workspace_id: str,
+    expected_inputs_sha256: str,
+    operations: list[dict],
+    confirm: bool = False,
+    preview_token: str | None = None,
+) -> dict:
+    """Compare and set Streaming Telemetry Agent onboarding inputs."""
+    return _write_call(
+        "set_telemetry_inputs_failed",
+        "set_cvp_telemetry_inputs",
+        grpc_set_telemetry_inputs,
         workspace_id,
         expected_inputs_sha256,
         operations,
@@ -551,5 +574,34 @@ def members() -> dict[str, MemberSpec]:
                 **confirmation,
             },
             call=studios_write_set_mss_inputs,
+        ),
+        "set_telemetry_inputs": MemberSpec(
+            action="set_telemetry_inputs",
+            description=(
+                "Compare and set Streaming Telemetry Agent onboarding profiles "
+                "and profile assignments."
+            ),
+            required=["workspace_id", "expected_inputs_sha256", "operations"],
+            properties={
+                **workspace_id,
+                "expected_inputs_sha256": {
+                    "type": "string",
+                    "description": (
+                        "64-hex inputs_sha256 from studios.inputs for "
+                        "studio-telemetry-config."
+                    ),
+                },
+                "operations": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": (
+                        "Telemetry edits: upsert_onboarding_profile, "
+                        "remove_onboarding_profile, set_profile_assignment, "
+                        "patch_onboarding_profile."
+                    ),
+                },
+                **confirmation,
+            },
+            call=studios_write_set_telemetry_inputs,
         ),
     }

@@ -1,0 +1,295 @@
+{
+  "wall_ts": "2026-11-23T20:58:17.005491+00:00",
+  "capacity_probe": "burnbar_primary",
+  "burnbar": {
+    "ok": true,
+    "providers": [
+      {
+        "provider": "cursor",
+        "ok": true,
+        "level": "GREEN",
+        "percent": 35.93416666666667,
+        "hint": null,
+        "meters": [
+          {
+            "label": "Total",
+            "percent": 36.03,
+            "used": 3603,
+            "total": 10000,
+            "resets_at": "2026-12-15T21:55:40.000Z"
+          },
+          {
+            "label": "Auto + Composer",
+            "percent": 35.93,
+            "used": 3593,
+            "total": 10000,
+            "resets_at": "2026-12-15T21:55:40.000Z"
+          },
+          {
+            "label": "API",
+            "percent": 37.07,
+            "used": 3707,
+            "total": 10000,
+            "resets_at": "2026-12-15T21:55:40.000Z"
+          }
+        ],
+        "models": [],
+        "freshness": {
+          "state": "live"
+        },
+        "needs_sign_in": false,
+        "observed_at": "2026-11-23T20:58:16.561618Z",
+        "trust": {
+          "kind": "measured",
+          "observed_at": "2026-11-23T20:58:16.561618Z"
+        }
+      },
+      {
+        "provider": "anthropic",
+        "ok": true,
+        "level": "GREEN",
+        "percent": 5.0,
+        "hint": null,
+        "meters": [
+          {
+            "label": "Current session",
+            "percent": 5.0,
+            "used": 5,
+            "total": 100,
+            "resets_at": "2026-11-24T01:20:00+00:00"
+          },
+          {
+            "label": "Weekly limits",
+            "percent": 7.000000000000001,
+            "used": 7,
+            "total": 100,
+            "resets_at": "2026-11-28T21:00:00+00:00"
+          }
+        ],
+        "models": [],
+        "freshness": {
+          "state": "live"
+        },
+        "needs_sign_in": false,
+        "observed_at": "2026-11-23T20:58:08.753202Z",
+        "trust": {
+          "kind": "measured",
+          "observed_at": "2026-11-23T20:58:08.753202Z"
+        }
+      },
+      {
+        "provider": "chatgpt-plus",
+        "ok": true,
+        "level": "GREEN",
+        "percent": 0.0,
+        "hint": "ChatGPT Plus: 5-hour limit resets in 5h 0m, weekly limit resets in 39h 32m",
+        "meters": [
+          {
+            "label": "5-hour limit",
+            "percent": 0.0,
+            "used": 0,
+            "total": 100,
+            "resets_at": "2026-11-24T01:58:16+00:00"
+          },
+          {
+            "label": "Weekly limit",
+            "percent": 7.000000000000001,
+            "used": 7,
+            "total": 100,
+            "resets_at": "2026-11-25T12:30:22+00:00"
+          }
+        ],
+        "models": [],
+        "freshness": {
+          "state": "live"
+        },
+        "needs_sign_in": false,
+        "observed_at": "2026-11-23T20:58:16.564005Z",
+        "trust": {
+          "kind": "measured",
+          "observed_at": "2026-11-23T20:58:16.564005Z"
+        }
+      },
+      {
+        "provider": "mtplx",
+        "ok": true,
+        "level": "GREEN",
+        "percent": 0.0,
+        "hint": "mtplx-qwen38-27b-optimized-quality \u00b7 idle \u00b7 mtp D3 \u00b7 low headroom",
+        "meters": [
+          {
+            "label": "Requests",
+            "percent": 0.0,
+            "used": 0,
+            "total": 1,
+            "resets_at": null
+          },
+          {
+            "label": "Session bank",
+            "percent": 0.0,
+            "used": 0,
+            "total": 51539607552,
+            "resets_at": null
+          },
+          {
+            "label": "SSD cache",
+            "percent": 85.73723761178553,
+            "used": 46029828949,
+            "total": 53687091200,
+            "resets_at": null
+          }
+        ],
+        "models": [
+          {
+            "name": "mtplx-qwen38-27b-optimized-quality",
+            "loaded": true,
+            "context_length": 262144
+          }
+        ],
+        "freshness": {
+          "state": "live"
+        },
+        "needs_sign_in": false,
+        "observed_at": "2026-11-23T20:58:16.950407Z",
+        "trust": {
+          "kind": "measured",
+          "observed_at": "2026-11-23T20:58:16.950407Z"
+        },
+        "local_usage": {
+          "source": "mtplx-request-log",
+          "since": "2026-09-18T21:52:01Z",
+          "last_request_at": "2026-11-22T23:51:33Z",
+          "today": {
+            "requests": 0,
+            "input_tokens": 0,
+            "cached_input_tokens": 0,
+            "output_tokens": 0
+          },
+          "last_7d": {
+            "requests": 14,
+            "input_tokens": 182528,
+            "cached_input_tokens": 63032,
+            "output_tokens": 8834
+          },
+          "last_30d": {
+            "requests": 14,
+            "input_tokens": 182528,
+            "cached_input_tokens": 63032,
+            "output_tokens": 8834
+          },
+          "all_time": {
+            "requests": 987,
+            "input_tokens": 1598393,
+            "cached_input_tokens": 29646903,
+            "output_tokens": 876454
+          },
+          "speed": {
+            "last_decode_tok_s": 26.525787320968732,
+            "last_prefill_tok_s": 467.9317727401709,
+            "avg_decode_tok_s": 28.47826611819604,
+            "avg_over_requests": 30
+          }
+        },
+        "live": {
+          "active": false,
+          "sampled_at": "2026-11-23T20:58:16.995005Z"
+        }
+      },
+      {
+        "provider": "ollama-local",
+        "ok": true,
+        "level": "GREEN",
+        "percent": 0.0,
+        "hint": "2 models available, none loaded",
+        "meters": [],
+        "models": [
+          {
+            "name": "inkling-2-mini:26b-a5b-nvfp4",
+            "loaded": false,
+            "size_bytes": 20188097680
+          },
+          {
+            "name": "glm-5.3:cloud",
+            "loaded": false,
+            "size_bytes": 293,
+            "quantization": "FP8",
+            "remote": true
+          },
+          {
+            "name": "qwen3.6:35b-a3b-mxfp8",
+            "loaded": false,
+            "size_bytes": 38046206284,
+            "quantization": "mxfp8"
+          },
+          {
+            "name": "kimi-k3:cloud",
+            "loaded": false,
+            "size_bytes": 308,
+            "quantization": "MXFP4",
+            "remote": true
+          }
+        ],
+        "freshness": {
+          "state": "live"
+        },
+        "needs_sign_in": false,
+        "observed_at": "2026-11-23T20:58:16.988101Z",
+        "trust": {
+          "kind": "measured",
+          "observed_at": "2026-11-23T20:58:16.988101Z"
+        }
+      }
+    ],
+    "source": "burnbar_cli"
+  },
+  "claude": {
+    "ok": true,
+    "session_pct": 5.0,
+    "week_pct": 7.000000000000001,
+    "sonnet_week_pct": 7.000000000000001,
+    "opus_week_pct": 7.000000000000001,
+    "resets_at": {
+      "session": "2026-11-24T01:20:00+00:00",
+      "week": "2026-11-28T21:00:00+00:00"
+    },
+    "freshness": {
+      "state": "live"
+    },
+    "source": "burnbar"
+  },
+  "cursor": {
+    "ok": true,
+    "source": "burnbar",
+    "total_percent_used": 36.03,
+    "auto_composer_percent_used": 35.93,
+    "api_percent_used": 37.07,
+    "messages": {},
+    "freshness": {
+      "state": "live"
+    },
+    "resets_at": "2026-12-15T21:55:40.000Z"
+  },
+  "ollama_cloud": {
+    "ok": false,
+    "error": "no_cloud_cookie",
+    "hint": "Set OLLAMA_CLOUD_COOKIE from browser cookies at ollama.com/settings"
+  },
+  "codex": {
+    "ok": true,
+    "source": "burnbar",
+    "pool": "chatgpt_plus_codex",
+    "session_pct": 0.0,
+    "week_pct": 7.000000000000001,
+    "overall_pct": 0.0,
+    "hint": "ChatGPT Plus: 5-hour limit resets in 5h 0m, weekly limit resets in 39h 32m",
+    "resets_at": {
+      "session": "2026-11-24T01:58:20+00:00",
+      "week": "2026-11-25T12:30:22+00:00"
+    },
+    "freshness": {
+      "state": "live"
+    }
+  },
+  "label": "before",
+  "feature": "studio-root-cas"
+}

@@ -1,0 +1,113 @@
+{
+  "_source": "studio-telemetry-config mainline root (path.values []), captured 2026-11-23 via studios.inputs; inputs_sha256 525a902dacfeab057676b0ee97f39c7f80f50249cb652ef8547ea94618171032. No secrets: auth tokens are null.",
+  "inputs": {
+    "cluster_profiles": [],
+    "customFlags": [
+      {
+        "inputs": {
+          "custom_flags_group": {
+            "cvconfig": true,
+            "cvgnmi": true,
+            "ecodhcpaddr": "127.0.0.1:67"
+          }
+        },
+        "tags": {"query": "Campus:campus-1709"}
+      }
+    ],
+    "device_configuration_resolver": [],
+    "disableAAAResolver": [
+      {
+        "inputs": {"disableAAA": true},
+        "tags": {"query": "Campus:campus-1709"}
+      }
+    ],
+    "multi_cluster": false,
+    "onboardingProfiles": [
+      {
+        "cluster_profiles": [
+          {
+            "cvopt_cvaddr_group": {"addr1": "apiserver.cv-staging.corp.arista.io"},
+            "cvopt_cvaddr_v6_group": {},
+            "cvopt_name": "cvaas",
+            "ingestPort": 443
+          }
+        ],
+        "customFlags": {},
+        "dev_collection": [
+          {
+            "cluster_profile_name": "cvaas",
+            "cvopt_auth_token": null,
+            "cvopt_auth_type": "token-secure",
+            "cvopt_proxy": null,
+            "cvopt_sourceintf": null,
+            "cvopt_vrf": null
+          }
+        ],
+        "disableAAAResolver": {"disableAAA": true},
+        "multi_cluster": true,
+        "profileName": "campus-1709",
+        "select_active_cluster": {},
+        "sourceInterfaceAndVrf": {}
+      }
+    ],
+    "profileAssignment": [
+      {
+        "inputs": {
+          "profile_assignment_group": {
+            "default_config": true,
+            "onboardingProfile": "campus-1709"
+          }
+        },
+        "tags": {"query": "Campus:campus-1709"}
+      },
+      {
+        "inputs": {
+          "profile_assignment_group": {
+            "default_config": true,
+            "onboardingProfile": null
+          }
+        },
+        "tags": {"query": "Campus:BLZ"}
+      }
+    ],
+    "sourceVrfAssignment": [
+      {
+        "inputs": {
+          "vrf_and_source_interface_group": {
+            "source_interface": "Management0",
+            "source_vrf": "MGMT"
+          }
+        },
+        "tags": {"query": "Campus:BLZ"}
+      },
+      {
+        "inputs": {
+          "vrf_and_source_interface_group": {
+            "source_interface": null,
+            "source_vrf": "default"
+          }
+        },
+        "tags": {"query": "Class:novrf"}
+      },
+      {
+        "inputs": {
+          "vrf_and_source_interface_group": {
+            "source_interface": null,
+            "source_vrf": "mgmt"
+          }
+        },
+        "tags": {"query": "Class:mgmt-vrf"}
+      },
+      {
+        "inputs": {
+          "vrf_and_source_interface_group": {
+            "source_interface": null,
+            "source_vrf": "mgmt"
+          }
+        },
+        "tags": {"query": "device:WTW23350044"}
+      }
+    ],
+    "vrfAssignment": []
+  }
+}

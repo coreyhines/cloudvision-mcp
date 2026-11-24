@@ -263,6 +263,7 @@ def test_studios_write_group_catalog_and_confirm_refusal(monkeypatch):
         "create_studio",
         "delete_studio",
         "set_mss_inputs",
+        "set_telemetry_inputs",
     }
     assert "never submits" in group.description
     assert "never approves/executes change controls" in group.description

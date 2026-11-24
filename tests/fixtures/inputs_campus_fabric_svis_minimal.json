@@ -1,0 +1,64 @@
+{
+  "inputs": {
+    "advancedFabricSettings": {},
+    "campus": [],
+    "campusServices": [
+      {
+        "inputs": {
+          "campusServicesGroup": {
+            "campusPodsServices": [
+              {
+                "inputs": {
+                  "services": {
+                    "campusType": "L2",
+                    "svis": [
+                      {
+                        "devices": [
+                          {
+                            "enabled": null,
+                            "ipVirtualRouterSubnet": null,
+                            "tagQuery": {
+                              "tags": {
+                                "query": "Access-Pod:1"
+                              }
+                            }
+                          }
+                        ],
+                        "dhcpHelpers": [],
+                        "enabled": "Yes",
+                        "eosCli": null,
+                        "id": 2,
+                        "ipVirtualRouterSubnet": "10.0.2.0/24",
+                        "multicast": {},
+                        "name": "wired-lan",
+                        "nodes": [],
+                        "routed": true,
+                        "vrf": "default"
+                      }
+                    ]
+                  }
+                },
+                "tags": {
+                  "query": "Campus-Pod:1"
+                }
+              }
+            ],
+            "vrfs": [
+              {
+                "name": "default"
+              }
+            ]
+          }
+        },
+        "tags": {
+          "query": "Campus:campus-1709"
+        }
+      }
+    ],
+    "campusServicesSettings": {
+      "cvFeatureSettings": {
+        "dhcpSnoopingForClientId": true
+      }
+    }
+  }
+}

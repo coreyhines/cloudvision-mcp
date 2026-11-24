@@ -955,7 +955,7 @@ def test_post_failure_is_resource_write_failed():
     with (
         _mocked() as mocks,
         patch(
-            "cvp_mcp.grpc.studio_mss_inputs.post_resource_config",
+            "cvp_mcp.grpc.studio_root_cas.post_resource_config",
             return_value=(None, "http_error:500"),
         ),
     ):

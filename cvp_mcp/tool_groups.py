@@ -1,4 +1,4 @@
-"""Grouped MCP tool catalog — 46 operations behind 12 names (13 with writes).
+"""Grouped MCP tool catalog — 47 operations behind 12 names (13 with writes).
 
 Frozen member map and group names for the consolidated tool surface.
 ``build_groups()`` returns registered ``GroupedTool`` instances (empty until
@@ -26,7 +26,7 @@ from cvp_mcp.members import (
     topology,
 )
 
-DOCSTRING_SURFACE = "46 operations behind 12 names (13 with writes)"
+DOCSTRING_SURFACE = "47 operations behind 12 names (13 with writes)"
 
 ALWAYS_ON_GROUPS: frozenset[str] = frozenset(
     {
